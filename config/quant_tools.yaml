@@ -1,0 +1,78 @@
+# Single source of truth for alpha_engine MCP tools exposed to deer-flow agents.
+# Validated against alpha_engine/src/alpha_engine/mcp_server.py @mcp.tool() defs
+# by scripts/validate_quant_tools.py — keep in sync.
+#
+# Fields:
+#   id:          exact MCP tool name (must match mcp_server.py)
+#   description: one-line, agent-facing
+#   agents:      which deer-flow desk agents should have it in their toolbox
+#   mutate:      true if the tool writes data (refresh) — restricted to
+#                quant-analyst only
+
+version: 1
+source_repo: /home/fire/Documents/alpha_engine
+tools:
+  - id: engine_status
+    description: Coverage + freshness digest of the local store; call first.
+    agents: [quant-analyst, technical-analyst, risk-manager]
+    mutate: false
+  - id: get_factor_history
+    description: Unified factor returns (ff_*, aqr_*, jkp_*, gq_*) by id + range.
+    agents: [quant-analyst, risk-manager]
+    mutate: false
+  - id: list_instruments
+    description: Search the S&P500 universe (ticker/name/sector).
+    agents: [quant-analyst, technical-analyst, risk-manager]
+    mutate: false
+  - id: get_price_history
+    description: Daily OHLCV + adj_close for one symbol.
+    agents: [quant-analyst, technical-analyst]
+    mutate: false
+  - id: get_latest_quotes
+    description: Latest close/adj close/volume for a comma-separated list of symbols.
+    agents: [quant-analyst, technical-analyst, risk-manager]
+    mutate: false
+  - id: cross_section_returns
+    description: Cross-section returns for the WHOLE universe (any horizon, optional date/universe filter) with Gini concentration stat. Use for market-breadth/concentration questions instead of looping get_price_history.
+    agents: [quant-analyst, risk-manager]
+    mutate: false
+  - id: run_momentum_backtest
+    description: Cross-sectional momentum backtest (lookback x top_n).
+    agents: [quant-analyst]
+    mutate: false
+  - id: run_factor_analysis
+    description: Factor tearsheet — IC stats + quantile baskets (builtin or DSL).
+    agents: [quant-analyst]
+    mutate: false
+  - id: ml_signal_scores
+    description: Walk-forward ML signal scores for a feature expression.
+    agents: [quant-analyst]
+    mutate: false
+  - id: run_param_sweep
+    description: Momentum (lookback x top_n) grid sweep; CUDA when available.
+    agents: [quant-analyst]
+    mutate: false
+  - id: optimize_portfolio
+    description: Portfolio optimization (max_sharpe | hrp | equal_weight | black_litterman).
+    agents: [quant-analyst, risk-manager]
+    mutate: false
+  - id: attribute_portfolio
+    description: Factor attribution of a fixed-weight portfolio.
+    agents: [quant-analyst, risk-manager]
+    mutate: false
+  - id: portfolio_risk_decomposition
+    description: Factor risk decomposition (vol, factor vs idio, concentrations).
+    agents: [risk-manager, quant-analyst]
+    mutate: false
+  - id: alpha_engine_brinson_attribution
+    description: Brinson attribution vs benchmark (prefixed MCP name of brinson_attribution).
+    agents: [quant-analyst, risk-manager]
+    mutate: false
+  - id: render_report
+    description: Interactive HTML research report/tearsheet from a report dict.
+    agents: [quant-analyst]
+    mutate: false
+  - id: refresh_data
+    description: Refresh universe + price data (optionally symbol subset).
+    agents: [quant-analyst]
+    mutate: true

@@ -127,6 +127,19 @@ class LlmCallConfig(BaseModel):
             "Ignored when the provider sends Retry-After (honored verbatim)."
         ),
     )
+    fallback_model: str | None = Field(
+        default=None,
+        description=(
+            "Name of a `models:` entry to swap in when the primary model's "
+            "provider fails terminally for a provider-side reason: quota "
+            "exhausted, busy/transient errors after the retry budget is "
+            "spent, or burst-rate shed. The fallback model gets one fresh "
+            "attempt window per LLM call. Auth/generic failures never fall "
+            "back - they indicate configuration or request bugs that silent "
+            "rerouting would mask. Unset preserves the legacy behavior of "
+            "surfacing the provider-unavailable error message."
+        ),
+    )
 
 
 class LoggingEnhanceConfig(BaseModel):

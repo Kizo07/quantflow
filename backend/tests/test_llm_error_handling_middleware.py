@@ -91,6 +91,7 @@ _LLM_CALL_ATTR_MAP: dict[str, str] = {
     "retry_base_delay_ms": "retry_base_delay_ms",
     "retry_cap_delay_ms": "retry_cap_delay_ms",
     "burst_retry_base_delay_ms": "burst_retry_base_delay_ms",
+    "fallback_model": "fallback_model",
 }
 
 
@@ -2089,3 +2090,263 @@ def test_concurrent_burst_failures_get_distinct_jittered_delays() -> None:
         _random.setstate(saved_state)
     assert all(5000 <= d <= 8000 for d in delays)
     assert len(set(delays)) > 1  # de-synchronized, not a single 5000ms tick
+
+
+# ---------------------------------------------------------------------------
+# Provider fallback model (llm_call.fallback_model)
+# ---------------------------------------------------------------------------
+#
+# When the primary provider fails terminally (quota exhausted, busy after
+# retries, burst-rate shed), the middleware swaps ``request.model`` for the
+# configured fallback model and gives it one fresh attempt window, instead of
+# surfacing an "provider unavailable" error message. auth/generic failures do
+# NOT fall back: they indicate configuration or request bugs that silently
+# rerouting to another provider would mask.
+
+
+def _make_request(model: Any = "primary-model") -> Any:
+    """A real ModelRequest (supports .override(model=...))."""
+    from langchain.agents.middleware.types import ModelRequest
+
+    return ModelRequest(model=model, messages=[])
+
+
+def _build_middleware_with_fallback(
+    fallback_name: str = "fallback-model",
+    **attrs: Any,
+) -> LLMErrorHandlingMiddleware:
+    """Middleware whose fallback model resolves through the REAL factory.
+
+    The fallback entry uses langchain-core's FakeListChatModel via the
+    ``module:Class`` use-path (ModelConfig allows extras, so ``responses``
+    reaches the model as a kwarg) - no factory monkeypatching needed.
+    """
+    from deerflow.config.model_config import ModelConfig
+
+    llm_call_fields = {_LLM_CALL_ATTR_MAP[key]: value for key, value in attrs.items() if key in _LLM_CALL_ATTR_MAP}
+    llm_call_fields["fallback_model"] = fallback_name
+    app_config = AppConfig(
+        sandbox=SandboxConfig(use="test"),
+        llm_call=LlmCallConfig(**llm_call_fields),
+        models=[
+            ModelConfig(
+                name=fallback_name,
+                use="langchain_core.language_models.fake_chat_models:FakeListChatModel",
+                model=fallback_name,
+                responses=["fallback-ok"],
+            )
+        ],
+    )
+    middleware = LLMErrorHandlingMiddleware(app_config=app_config)
+    for key, value in attrs.items():
+        if key not in _LLM_CALL_ATTR_MAP:
+            setattr(middleware, key, value)
+    return middleware
+
+
+def test_async_model_call_falls_back_on_quota_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Primary quota failure swaps in the fallback model; its success wins."""
+    middleware = _build_middleware_with_fallback(retry_max_attempts=3)
+    seen_models: list[Any] = []
+    events: list[dict] = []
+
+    def fake_writer():
+        return events.append
+
+    async def fake_emit_custom_event(payload, *, writer):
+        writer(payload)
+
+    async def handler(request) -> AIMessage:
+        seen_models.append(request.model)
+        if len(seen_models) == 1:
+            raise FakeError("insufficient_quota: account balance is empty", status_code=429, code="insufficient_quota")
+        return AIMessage(content="from-fallback")
+
+    monkeypatch.setattr("langgraph.config.get_stream_writer", fake_writer)
+    monkeypatch.setattr(
+        "deerflow.agents.middlewares.llm_error_handling_middleware.aemit_custom_event",
+        fake_emit_custom_event,
+    )
+
+    result = asyncio.run(middleware.awrap_model_call(_make_request(), handler))
+
+    assert isinstance(result, AIMessage)
+    assert result.content == "from-fallback"
+    assert len(seen_models) == 2
+    assert seen_models[0] == "primary-model"  # untouched original request
+    assert seen_models[1] is not seen_models[0]  # swapped model object
+    fallback_events = [e for e in events if e.get("type") == "llm_fallback"]
+    assert len(fallback_events) == 1
+    assert fallback_events[0]["to_model"] == "fallback-model"
+    assert fallback_events[0]["reason"] == "quota"
+
+
+def test_sync_model_call_falls_back_on_quota_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sync wrapper has the same fallback behavior."""
+    middleware = _build_middleware_with_fallback(retry_max_attempts=3)
+    seen_models: list[Any] = []
+    events: list[dict] = []
+
+    def fake_writer():
+        return events.append
+
+    def fake_emit_custom_event(payload, *, writer):
+        writer(payload)
+
+    def handler(request) -> AIMessage:
+        seen_models.append(request.model)
+        if len(seen_models) == 1:
+            raise FakeError("insufficient_quota: account balance is empty", status_code=429, code="insufficient_quota")
+        return AIMessage(content="from-fallback-sync")
+
+    monkeypatch.setattr("langgraph.config.get_stream_writer", fake_writer)
+    monkeypatch.setattr(
+        "deerflow.agents.middlewares.llm_error_handling_middleware.emit_custom_event",
+        fake_emit_custom_event,
+    )
+
+    result = middleware.wrap_model_call(_make_request(), handler)
+
+    assert isinstance(result, AIMessage)
+    assert result.content == "from-fallback-sync"
+    assert len(seen_models) == 2
+    assert [e.get("type") for e in events] == ["llm_fallback"]
+
+
+def test_fallback_triggers_after_transient_retries_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Busy errors exhaust their retry budget first, THEN fall back (the shape
+    of the real z.ai quota-cap outage, which surfaced as a busy error)."""
+    middleware = _build_middleware_with_fallback(
+        retry_max_attempts=2,
+        retry_base_delay_ms=1,
+        retry_cap_delay_ms=1,
+    )
+    attempts = 0
+    seen_models: list[Any] = []
+
+    async def fake_sleep(delay: float) -> None:
+        pass
+
+    async def handler(request) -> AIMessage:
+        nonlocal attempts
+        attempts += 1
+        seen_models.append(request.model)
+        if len(seen_models) < 3:
+            raise FakeError("服务繁忙，请稍后重试 (2064)")
+        return AIMessage(content="recovered")
+
+    monkeypatch.setattr("asyncio.sleep", fake_sleep)
+
+    result = asyncio.run(middleware.awrap_model_call(_make_request(), handler))
+
+    assert result.content == "recovered"
+    # 2 busy attempts on the primary (budget=2), then the fallback succeeds.
+    assert attempts == 3
+    assert seen_models[0] == seen_models[1] == "primary-model"
+    assert seen_models[2] is not seen_models[0]
+
+
+def test_no_fallback_for_auth_errors() -> None:
+    """Auth failures are configuration bugs: never silently reroute them."""
+    middleware = _build_middleware_with_fallback(retry_max_attempts=3)
+    seen_models: list[Any] = []
+
+    async def handler(request) -> AIMessage:
+        seen_models.append(request.model)
+        raise FakeError("authentication failed: invalid api key", status_code=401)
+
+    result = asyncio.run(middleware.awrap_model_call(_make_request(), handler))
+
+    assert len(seen_models) == 1  # no swap happened
+    assert result.additional_kwargs.get("error_reason") == "auth"
+
+
+def test_no_fallback_when_not_configured() -> None:
+    """Default config (no fallback_model) keeps the legacy error message."""
+    middleware = _build_middleware(retry_max_attempts=3)
+    seen_models: list[Any] = []
+
+    async def handler(request) -> AIMessage:
+        seen_models.append(request.model)
+        raise FakeError("insufficient_quota", status_code=429, code="insufficient_quota")
+
+    result = asyncio.run(middleware.awrap_model_call(_make_request(), handler))
+
+    assert len(seen_models) == 1
+    assert "out of quota" in str(result.content)
+    assert result.additional_kwargs["error_reason"] == "quota"
+
+
+def test_fallback_degrades_when_model_unknown() -> None:
+    """A misconfigured fallback name must not crash: fall through to the
+    original error message path."""
+    middleware = _build_middleware(retry_max_attempts=3)
+    middleware.fallback_model = "does-not-exist"
+    seen_models: list[Any] = []
+
+    async def handler(request) -> AIMessage:
+        seen_models.append(request.model)
+        raise FakeError("insufficient_quota", status_code=429, code="insufficient_quota")
+
+    result = asyncio.run(middleware.awrap_model_call(_make_request(), handler))
+
+    assert len(seen_models) == 1
+    assert "out of quota" in str(result.content)
+
+
+def test_fallback_attempted_only_once() -> None:
+    """If the fallback provider also fails terminally, the loop must not
+    bounce between the two models forever."""
+    middleware = _build_middleware_with_fallback(retry_max_attempts=2)
+    calls = 0
+
+    async def handler(request) -> AIMessage:
+        nonlocal calls
+        calls += 1
+        raise FakeError("insufficient_quota: everything is empty", status_code=429, code="insufficient_quota")
+
+    result = asyncio.run(middleware.awrap_model_call(_make_request(), handler))
+
+    # 1 primary attempt + 1 fallback attempt (quota is non-retriable, so no
+    # retry loops), and NO second fallback round.
+    assert calls == 2
+    assert result.additional_kwargs["deerflow_error_fallback"] is True
+
+
+def test_fallback_model_gets_fresh_retry_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fallback attempt window is fresh: a transient failure on the
+    fallback provider retries within its own budget."""
+    middleware = _build_middleware_with_fallback(
+        retry_max_attempts=2,
+        retry_base_delay_ms=1,
+        retry_cap_delay_ms=1,
+    )
+    seen_models: list[Any] = []
+
+    async def fake_sleep(delay: float) -> None:
+        pass
+
+    async def handler(request) -> AIMessage:
+        seen_models.append(request.model)
+        if len(seen_models) == 1:
+            raise FakeError("insufficient_quota", status_code=429, code="insufficient_quota")
+        if len(seen_models) == 2:
+            raise FakeError("服务繁忙，请稍后重试")  # transient on fallback
+        return AIMessage(content="ok-after-fallback-retry")
+
+    monkeypatch.setattr("asyncio.sleep", fake_sleep)
+
+    result = asyncio.run(middleware.awrap_model_call(_make_request(), handler))
+
+    assert result.content == "ok-after-fallback-retry"
+    assert len(seen_models) == 3
+    assert seen_models[1] is seen_models[2]  # both on the fallback model
+
+
+def test_llm_call_config_fallback_model_defaults_to_none() -> None:
+    assert LlmCallConfig().fallback_model is None
+    assert LlmCallConfig(fallback_model="deepseek-v4-pro").fallback_model == "deepseek-v4-pro"
+    middleware = _build_middleware()
+    assert middleware.fallback_model is None

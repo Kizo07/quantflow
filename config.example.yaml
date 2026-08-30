@@ -15,7 +15,7 @@
 # ============================================================================
 # Bump this number when the config schema changes.
 # Run `make config-upgrade` to merge new fields into your local config.yaml.
-config_version: 36
+config_version: 37
 
 # ============================================================================
 # Logging
@@ -2614,6 +2614,15 @@ authorization:
 #   # than retry_base_delay_ms so the single burst retry lands after the throttle
 #   # window subsides. Ignored when the provider sends Retry-After (default: 5000)
 #   burst_retry_base_delay_ms: 5000
+#   # Name of a `models:` entry to swap in when the primary model's provider
+#   # fails terminally for a provider-side reason: quota exhausted, busy /
+#   # transient errors after the retry budget is spent, or burst-rate shed.
+#   # The fallback model gets one fresh attempt window per LLM call and an
+#   # `llm_fallback` custom event is streamed so the UI can surface the swap.
+#   # Auth/generic failures never fall back - they indicate configuration or
+#   # request bugs that silent rerouting would mask. Unset (default) keeps the
+#   # legacy behavior of surfacing the provider-unavailable error message.
+#   fallback_model: null
 
 # ============================================================================
 # SSO / OIDC Authentication (optional)

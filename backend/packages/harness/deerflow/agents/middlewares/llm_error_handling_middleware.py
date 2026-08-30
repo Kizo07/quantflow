@@ -380,10 +380,16 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
     # positive int to bound aggregate concurrency and smooth provider
     # burst-rate (limit_burst_rate) spikes. See _get_process_limiter.
     max_concurrent_llm_calls: int = 0
+    # Name of a ``models:`` entry to swap in when the primary provider fails
+    # terminally for a provider-side reason (quota exhausted, busy/transient
+    # retries spent, burst-rate shed). ``None`` keeps the legacy behavior of
+    # surfacing the provider-unavailable error message.
+    fallback_model: str | None = None
 
     def __init__(self, *, app_config: AppConfig, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
+        self._app_config = app_config
         self.circuit_failure_threshold = app_config.circuit_breaker.failure_threshold
         self.circuit_recovery_timeout_sec = app_config.circuit_breaker.recovery_timeout_sec
 
@@ -396,6 +402,7 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
         self.retry_cap_delay_ms = llm_call.retry_cap_delay_ms
         self.burst_retry_base_delay_ms = llm_call.burst_retry_base_delay_ms
         self.max_concurrent_llm_calls = llm_call.max_concurrent_calls
+        self.fallback_model = llm_call.fallback_model
 
         # Resolve the process-wide cap (startup-only: the first ``__init__`` in
         # the process wins and freezes it; later instances - newer or older
@@ -492,6 +499,86 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
         with self._circuit_lock:
             if self._circuit_state == "half_open":
                 self._circuit_probe_in_flight = False
+
+    # Provider-side terminal reasons eligible for a fallback-model swap.
+    # ``auth`` and ``generic`` are intentionally excluded: they indicate
+    # configuration or request bugs that silently rerouting to another
+    # provider would mask instead of surface.
+    _FALLBACK_REASONS = frozenset({"quota", "busy", "burst_rate", "transient"})
+
+    def _build_fallback_model(self) -> Any | None:
+        """Build the configured fallback model, or ``None`` to degrade.
+
+        Resolved lazily (per swap) through the real model factory so hot-reload
+        of the ``models:`` list is honored and a misconfigured fallback name
+        degrades to the legacy error-message path instead of crashing the run.
+        Built with ``attach_tracing=False`` per the in-graph convention: the
+        model runs inside a LangGraph run that already wires tracing at the
+        root, and a second model-level callback would emit duplicate spans.
+        """
+        name = self.fallback_model
+        if not name:
+            return None
+        try:
+            from deerflow.models import create_chat_model
+
+            return create_chat_model(
+                name=name,
+                app_config=self._app_config,
+                attach_tracing=False,
+            )
+        except Exception:
+            logger.warning(
+                "llm_call.fallback_model %r could not be built; falling back to the error message",
+                name,
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
+    def _model_display(model: Any) -> str:
+        for attr in ("display_name", "model", "model_name"):
+            value = getattr(model, attr, None)
+            if isinstance(value, str) and value:
+                return value
+        return type(model).__name__
+
+    def _build_fallback_event(self, from_model: Any, reason: str) -> dict[str, Any]:
+        return {
+            "type": "llm_fallback",
+            "from_model": self._model_display(from_model),
+            "to_model": self.fallback_model,
+            "reason": reason,
+            "message": (f"Primary model unavailable ({reason}); switching to fallback model {self.fallback_model!r}."),
+        }
+
+    def _emit_fallback_event(self, from_model: Any, reason: str) -> None:
+        try:
+            from langgraph.config import get_stream_writer
+
+            writer = get_stream_writer()
+            emit_custom_event(
+                self._build_fallback_event(from_model, reason),
+                writer=writer,
+            )
+        except GraphBubbleUp:
+            raise
+        except Exception:
+            logger.debug("Failed to emit llm_fallback event", exc_info=True)
+
+    async def _aemit_fallback_event(self, from_model: Any, reason: str) -> None:
+        try:
+            from langgraph.config import get_stream_writer
+
+            writer = get_stream_writer()
+            await aemit_custom_event(
+                self._build_fallback_event(from_model, reason),
+                writer=writer,
+            )
+        except GraphBubbleUp:
+            raise
+        except Exception:
+            logger.debug("Failed to emit async llm_fallback event", exc_info=True)
 
     def _classify_error(self, exc: BaseException) -> tuple[bool, str]:
         detail = _extract_error_detail(exc)
@@ -788,6 +875,7 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
 
         attempt = 1
         prev_delay_ms: int | None = None
+        fallback_used = False
         while True:
             try:
                 response = self._bounded_model_call_sync(request, handler)
@@ -814,6 +902,28 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
                     time.sleep(wait_ms / 1000)
                     attempt += 1
                     continue
+                # Provider-side terminal failure: try the configured fallback
+                # model once before surfacing the error message. The swap
+                # resets the attempt window so the fallback provider gets its
+                # own fresh retry budget. auth/generic reasons are excluded
+                # (configuration/request bugs must not be silently rerouted),
+                # and ``fallback_used`` prevents ping-ponging between the two
+                # models when the fallback provider also fails terminally.
+                if not fallback_used and reason in self._FALLBACK_REASONS:
+                    fallback = self._build_fallback_model()
+                    if fallback is not None:
+                        fallback_used = True
+                        logger.warning(
+                            "LLM call failed on primary provider (%s) after %d attempt(s); switching to fallback model %r",
+                            reason,
+                            attempt,
+                            self.fallback_model,
+                        )
+                        self._emit_fallback_event(request.model, reason)
+                        request = request.override(model=fallback)
+                        attempt = 1
+                        prev_delay_ms = None
+                        continue
                 logger.warning(
                     "LLM call failed after %d attempt(s): %s",
                     attempt,
@@ -847,6 +957,7 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
 
         attempt = 1
         prev_delay_ms: int | None = None
+        fallback_used = False
         while True:
             try:
                 response = await self._bounded_model_call(request, handler)
@@ -873,6 +984,24 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
                     await asyncio.sleep(wait_ms / 1000)
                     attempt += 1
                     continue
+                # Provider-side terminal failure: try the configured fallback
+                # model once before surfacing the error message (see the sync
+                # wrapper for the full rationale).
+                if not fallback_used and reason in self._FALLBACK_REASONS:
+                    fallback = self._build_fallback_model()
+                    if fallback is not None:
+                        fallback_used = True
+                        logger.warning(
+                            "LLM call failed on primary provider (%s) after %d attempt(s); switching to fallback model %r",
+                            reason,
+                            attempt,
+                            self.fallback_model,
+                        )
+                        await self._aemit_fallback_event(request.model, reason)
+                        request = request.override(model=fallback)
+                        attempt = 1
+                        prev_delay_ms = None
+                        continue
                 logger.warning(
                     "LLM call failed after %d attempt(s): %s",
                     attempt,

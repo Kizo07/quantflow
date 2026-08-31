@@ -1,13 +1,13 @@
 ---
 title: Work with Memory
-description: This tutorial shows you how to enable and use DeerFlow's memory system so the agent remembers important information about you across multiple sessions.
+description: This tutorial shows you how to enable and use quantflow's memory system so the agent remembers important information about you across multiple sessions.
 ---
 
 import { Callout } from "nextra/components";
 
 # Work with Memory
 
-This tutorial shows you how to enable and use DeerFlow's memory system so the agent remembers important information about you across multiple sessions.
+This tutorial shows you how to enable and use quantflow's memory system so the agent remembers important information about you across multiple sessions.
 
 ## Enable memory
 
@@ -30,7 +30,7 @@ By default, memory works automatically through `MemoryMiddleware`:
 2. **Automatic learning**: the agent extracts and saves important facts in the background.
 3. **Future conversations**: memory facts are automatically injected into the system prompt — the agent does not need you to repeat context.
 
-DeerFlow also has an experimental `mode: tool` option. In tool mode, the agent receives `memory_search`, `memory_add`, `memory_update`, and `memory_delete` tools and decides when to call them. Keep `mode: middleware` unless you specifically want to evaluate model-driven memory behavior.
+quantflow also has an experimental `mode: tool` option. In tool mode, the agent receives `memory_search`, `memory_add`, `memory_update`, and `memory_delete` tools and decides when to call them. Keep `mode: middleware` unless you specifically want to evaluate model-driven memory behavior.
 
 ## Example
 
@@ -70,5 +70,5 @@ This keeps each agent's learned knowledge separate.
 
 ## Next steps
 
-- [Deploy Your Own DeerFlow](/docs/tutorials/deploy-your-own-deerflow)
+- [Deploy Your Own quantflow](/docs/tutorials/deploy-your-own-deerflow)
 - [Memory System Reference](/docs/harness/memory)

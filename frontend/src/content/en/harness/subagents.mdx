@@ -24,7 +24,7 @@ Subagents solve two key problems in long-horizon workflows:
 
 ## Built-in subagents
 
-DeerFlow ships with two built-in subagents:
+quantflow ships with two built-in subagents:
 
 ### general-purpose
 
@@ -133,7 +133,7 @@ These guards engage in addition to the `max_turns` and `timeout` limits. The def
 
 ## ACP agents (external agents)
 
-In addition to the built-in subagents, DeerFlow supports delegating to external agents through the **Agent Client Protocol (ACP)**. ACP allows DeerFlow to invoke agents running as separate processes (including third-party CLI tools wrapped with an ACP adapter).
+In addition to the built-in subagents, quantflow supports delegating to external agents through the **Agent Client Protocol (ACP)**. ACP allows quantflow to invoke agents running as separate processes (including third-party CLI tools wrapped with an ACP adapter).
 
 Configure ACP agents in `config.yaml`:
 
@@ -158,7 +158,7 @@ acp_agents:
 The Lead Agent invokes ACP agents through the `invoke_acp_agent` built-in tool.
 
 <Callout type="tip">
-  ACP agents run as child processes managed by DeerFlow. They communicate over
+  ACP agents run as child processes managed by quantflow. They communicate over
   the ACP wire protocol. The standard CLI tools (like the plain `claude` or
   `codex` commands) are not ACP-compatible by default — use the adapter packages
   listed above or a compatible ACP wrapper.

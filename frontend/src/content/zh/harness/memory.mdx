@@ -1,6 +1,6 @@
 ---
 title: 记忆系统
-description: 记忆是 DeerFlow Harness 的一个运行时功能。它不是简单的对话日志，而是跨多个独立会话持久化、在未来对话中影响 Agent 行为的结构化事实和上下文摘要存储。
+description: 记忆是 quantflow Harness 的一个运行时功能。它不是简单的对话日志，而是跨多个独立会话持久化、在未来对话中影响 Agent 行为的结构化事实和上下文摘要存储。
 ---
 
 import { Callout } from "nextra/components";
@@ -8,11 +8,11 @@ import { Callout } from "nextra/components";
 # 记忆系统
 
 <Callout type="info" emoji="💾">
-  记忆让 DeerFlow 在多个会话中保留有用信息。Agent
+  记忆让 quantflow 在多个会话中保留有用信息。Agent
   记住用户偏好、项目背景和反复出现的事实，这样它可以在不每次从零开始的情况下给出更好的响应。
 </Callout>
 
-记忆是 DeerFlow Harness 的一个运行时功能。它不是简单的对话日志，而是跨多个独立会话持久化、在未来对话中影响 Agent 行为的结构化事实和上下文摘要存储。
+记忆是 quantflow Harness 的一个运行时功能。它不是简单的对话日志，而是跨多个独立会话持久化、在未来对话中影响 Agent 行为的结构化事实和上下文摘要存储。
 
 ## 记忆存储什么
 
@@ -32,7 +32,7 @@ import { Callout } from "nextra/components";
 
 1. **两种模式都会注入**：每次对话开始时，Agent 当前记忆以受控的 token 预算（`max_injection_tokens`）注入到系统提示中。
 2. **中间件模式（默认）**：`MemoryMiddleware` 在每次 Lead Agent 轮次结束后运行，过滤对话、排队后台更新并自动提取新事实。更新通过 `debounce_seconds` 防抖以批量处理快速变化。
-3. **工具模式（实验性）**：DeerFlow 注册 `memory_search`、`memory_add`、`memory_update`、`memory_delete` 四个工具，并跳过 `MemoryMiddleware`。模型自行决定何时搜索或写入记忆，因此效果取决于模型的工具调用行为。这些显式 CRUD 工具不是被动的陈旧性复核路径；启用工具模式意味着运营方选择由模型主动更新/删除记忆，而不是依赖中间件的陈旧性保护栏。
+3. **工具模式（实验性）**：quantflow 注册 `memory_search`、`memory_add`、`memory_update`、`memory_delete` 四个工具，并跳过 `MemoryMiddleware`。模型自行决定何时搜索或写入记忆，因此效果取决于模型的工具调用行为。这些显式 CRUD 工具不是被动的陈旧性复核路径；启用工具模式意味着运营方选择由模型主动更新/删除记忆，而不是依赖中间件的陈旧性保护栏。
 4. **按 Agent 记忆**：当自定义 Agent 激活时，其记忆独立于全局记忆存储。这保持不同 Agent 的知识隔离。
 
 在工具模式中，四个 `memory_*` 工具名是保留名。如果 MCP 服务或自定义工具已经使用 `memory_search`、`memory_add`、`memory_update` 或 `memory_delete`，已有工具会保留该名称，冲突的记忆工具会被跳过并记录告警。
@@ -77,7 +77,7 @@ memory:
 
 ## 全局记忆与按 Agent 记忆
 
-DeerFlow 支持两级记忆：
+quantflow 支持两级记忆：
 
 - **全局记忆**：存储在 `{base_dir}/memory.json`。在没有特定 Agent 激活或 Agent 没有按 Agent 记忆文件时使用。
 - **按 Agent 记忆**：存储在 `{base_dir}/agents/{agent_name}/memory.json`。当自定义 Agent 激活时使用，使该 Agent 学到的知识保持独立。

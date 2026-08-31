@@ -8,7 +8,7 @@ import { Callout, Tabs } from "nextra/components";
 # 沙箱
 
 <Callout type="info" emoji="📦">
-  沙箱是 Agent 进行文件和命令操作的隔离工作区。它让 DeerFlow
+  沙箱是 Agent 进行文件和命令操作的隔离工作区。它让 quantflow
   能够采取真实行动，而不仅仅是对话。
 </Callout>
 
@@ -16,7 +16,7 @@ import { Callout, Tabs } from "nextra/components";
 
 ## 沙箱模式
 
-DeerFlow 支持四种沙箱模式，选择适合你部署的一种：
+quantflow 支持四种沙箱模式，选择适合你部署的一种：
 
 ### LocalSandbox（默认）
 
@@ -61,7 +61,7 @@ sandbox:
 
 ### E2B 云端沙箱
 
-命令在 [E2B](https://e2b.dev) 云端的 micro-VM 中执行。每个线程通过 metadata 绑定到一个独立的 e2b 沙箱，因此即使 Gateway 重启或在多进程之间，同一个 DeerFlow 线程也始终复用同一个 e2b 沙箱。当达到配置的空闲超时时，e2b 会自动回收云端 VM。
+命令在 [E2B](https://e2b.dev) 云端的 micro-VM 中执行。每个线程通过 metadata 绑定到一个独立的 e2b 沙箱，因此即使 Gateway 重启或在多进程之间，同一个 quantflow 线程也始终复用同一个 e2b 沙箱。当达到配置的空闲超时时，e2b 会自动回收云端 VM。
 
 - **适合**：托管/Serverless 部署、不想自行运维 Docker 或 Kubernetes 的团队、开箱即用需要真实 Jupyter 内核的工作流。
 - **取舍**：需要访问 e2b 控制面网络以及一个 API Key；挂载只能在沙箱启动时**一次性上传**（云端沙箱无法做主机 bind-mount）。
@@ -108,7 +108,7 @@ sandbox:
 在 [e2b.dev/dashboard](https://e2b.dev/dashboard) 申请 API Key，然后在 `config.yaml` 中直接配置 `sandbox.api_key`，或在 `.env` 中导出 `E2B_API_KEY`。
 
 <Callout type="info">
-  因为 e2b 是远程沙箱，DeerFlow 的虚拟前缀 `/mnt/user-data`
+  因为 e2b 是远程沙箱，quantflow 的虚拟前缀 `/mnt/user-data`
   会被自动重映射到云端 VM 的 `home_dir`（默认 `/home/user`）。
   原本读写 `/mnt/user-data/...` 的工具无需任何改动即可正常工作。
 </Callout>
@@ -175,7 +175,7 @@ sandbox:
       read_only: true
 ```
 
-如果配置的 `host_path` 对 gateway 进程不可见，DeerFlow 会记录错误日志并忽略该挂载。
+如果配置的 `host_path` 对 gateway 进程不可见，quantflow 会记录错误日志并忽略该挂载。
 
 ## 输出截断
 

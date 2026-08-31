@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2064" height="2591" viewBox="0 0 2064 2591">
+  <g fill="#000000">
+    <text x="1032" y="1180" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="300" font-weight="bold" letter-spacing="14">quantflow</text>
+    <rect x="632" y="1280" width="800" height="14" rx="7"/>
+    <text x="1032" y="1440" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="110" font-style="italic" letter-spacing="8">super agent</text>
+  </g>
+</svg>

@@ -1,13 +1,13 @@
 ---
 title: Operations and Troubleshooting
-description: This page covers day-to-day operational tasks and solutions to common problems when running DeerFlow App.
+description: This page covers day-to-day operational tasks and solutions to common problems when running quantflow App.
 ---
 
 import { Callout } from "nextra/components";
 
 # Operations and Troubleshooting
 
-This page covers day-to-day operational tasks and solutions to common problems when running DeerFlow App.
+This page covers day-to-day operational tasks and solutions to common problems when running quantflow App.
 
 ## Log files
 
@@ -45,7 +45,7 @@ curl http://localhost:2026/api/models
 
 ## Config upgrade
 
-When you pull a new version of DeerFlow, the `config_version` in `config.example.yaml` may be higher than your `config.yaml`. To merge new fields without losing your customizations:
+When you pull a new version of quantflow, the `config_version` in `config.example.yaml` may be higher than your `config.yaml`. To merge new fields without losing your customizations:
 
 ```bash
 make config-upgrade
@@ -107,7 +107,7 @@ If file tools (`read_file`, `ls`, `bash`) fail with permission or path errors:
 
 ### SQLite reports `database is locked`
 
-This usually means SQLite is handling concurrent writes from multiple users or long-running agent runs. SQLite supports concurrent reads, but only one writer can hold the database lock at a time. In DeerFlow, checkpoint writes and application writes share the same SQLite database file.
+This usually means SQLite is handling concurrent writes from multiple users or long-running agent runs. SQLite supports concurrent reads, but only one writer can hold the database lock at a time. In quantflow, checkpoint writes and application writes share the same SQLite database file.
 
 For production or multi-user deployments, switch to Postgres:
 

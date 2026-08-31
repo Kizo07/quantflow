@@ -1,6 +1,6 @@
 ---
 title: Memory
-description: Memory is a runtime feature of the DeerFlow Harness. It is not a simple conversation log — it is a structured store of facts and context summaries that persist across separate sessions and inform the agent's behavior in future conversations.
+description: Memory is a runtime feature of the quantflow Harness. It is not a simple conversation log — it is a structured store of facts and context summaries that persist across separate sessions and inform the agent's behavior in future conversations.
 ---
 
 import { Callout } from "nextra/components";
@@ -8,12 +8,12 @@ import { Callout } from "nextra/components";
 # Memory
 
 <Callout type="info" emoji="💾">
-  Memory lets DeerFlow carry useful information across sessions. The agent
+  Memory lets quantflow carry useful information across sessions. The agent
   remembers user preferences, project context, and recurring facts so it can
   give better responses without starting from zero every time.
 </Callout>
 
-Memory is a runtime feature of the DeerFlow Harness. It is not a simple conversation log — it is a structured store of facts and context summaries that persist across separate sessions and inform the agent's behavior in future conversations.
+Memory is a runtime feature of the quantflow Harness. It is not a simple conversation log — it is a structured store of facts and context summaries that persist across separate sessions and inform the agent's behavior in future conversations.
 
 ## What memory stores
 
@@ -33,7 +33,7 @@ Memory has two operation modes:
 
 1. **Injection in both modes**: at the start of each conversation, the agent's current memory is injected into the system prompt at a controlled token budget (`max_injection_tokens`).
 2. **Middleware mode (default)**: `MemoryMiddleware` runs after each Lead Agent turn. It filters the conversation, queues a background update, and extracts new facts automatically. Updates are debounced by `debounce_seconds` to batch rapid changes.
-3. **Tool mode (experimental)**: DeerFlow registers `memory_search`, `memory_add`, `memory_update`, and `memory_delete` as agent tools and skips `MemoryMiddleware`. The model decides when to search or write memory, so effectiveness depends on model tool-use behavior. These explicit CRUD tools are not the passive staleness-review path; operators who enable tool mode are opting into model-directed updates/deletes instead of the middleware staleness guardrails.
+3. **Tool mode (experimental)**: quantflow registers `memory_search`, `memory_add`, `memory_update`, and `memory_delete` as agent tools and skips `MemoryMiddleware`. The model decides when to search or write memory, so effectiveness depends on model tool-use behavior. These explicit CRUD tools are not the passive staleness-review path; operators who enable tool mode are opting into model-directed updates/deletes instead of the middleware staleness guardrails.
 4. **Per-agent memory**: when a custom agent is active, its memory is stored separately from the global memory. This keeps different agents' knowledge isolated.
 
 In tool mode, the four `memory_*` tool names are reserved. If an MCP server or custom tool already uses `memory_search`, `memory_add`, `memory_update`, or `memory_delete`, the existing tool keeps that name and the colliding memory tool is skipped with a warning.
@@ -93,7 +93,7 @@ memory:
 
 Set `manager_class: openviking` to send completed turns to an independent
 OpenViking server and recall its memory through the official
-`langchain-openviking` adapter. This first version supports one DeerFlow user
+`langchain-openviking` adapter. This first version supports one quantflow user
 with one OpenViking USER API key in middleware mode; DeerMem remains the
 default.
 
@@ -116,7 +116,7 @@ memory:
       max_injection_chars: 12000
 ```
 
-Use `owner_user_id: default` when DeerFlow authentication is disabled. Put the
+Use `owner_user_id: default` when quantflow authentication is disabled. Put the
 USER key in the server environment, not directly in `config.yaml`. Trusted-mode
 account headers, root-key memory access, and multi-user key provisioning are not
 part of this version. See `docs/OPENVIKING.md` for the full boundary and startup
@@ -124,7 +124,7 @@ guide.
 
 ## Global vs per-agent memory
 
-DeerFlow supports two levels of memory:
+quantflow supports two levels of memory:
 
 - **Global memory**: stored at `{base_dir}/memory.json`. Used when no specific agent is active or when the agent has no per-agent memory file.
 - **Per-agent memory**: stored at `{base_dir}/agents/{agent_name}/memory.json`. Used when a custom agent is active, keeping that agent's learned knowledge separate.

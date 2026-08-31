@@ -17,7 +17,7 @@ from langgraph.types import Overwrite
 from app.gateway import services as gateway_services
 from app.gateway.routers import thread_runs, threads
 from deerflow.config.paths import Paths
-from deerflow.persistence.thread_meta import THREAD_PINNED_METADATA_KEY, InvalidMetadataFilterError
+from deerflow.persistence.thread_meta import THREAD_ARCHIVED_METADATA_KEY, THREAD_PINNED_METADATA_KEY, InvalidMetadataFilterError
 from deerflow.persistence.thread_meta.memory import THREADS_NS, MemoryThreadMetaStore
 from deerflow.runtime import ConflictError, ThreadOperationKind
 from deerflow.runtime.checkpoint_state import CheckpointStateAccessor
@@ -1180,6 +1180,88 @@ def test_patch_thread_pin_returns_iso_and_preserves_updated_at() -> None:
     # derive from the same legacy value, so they coerce to the same ISO string.
     assert body["updated_at"] == body["created_at"]
     assert body["metadata"] == {"k": "v0", THREAD_PINNED_METADATA_KEY: True}
+
+
+def test_patch_thread_archive_returns_iso_and_preserves_updated_at() -> None:
+    """An archive/unarchive PATCH must not bump ``updated_at``.
+
+    Archiving a chat is organizational bookkeeping, not conversation
+    activity — same no-touch contract as pin/unpin.
+    """
+    app, store, _checkpointer = _build_thread_app()
+    thread_id = "archive-target"
+
+    legacy_created = "1777000000.000000"
+    legacy_updated = "1777000000.000000"
+
+    async def _seed() -> None:
+        await store.aput(
+            THREADS_NS,
+            thread_id,
+            {
+                "thread_id": thread_id,
+                "status": "idle",
+                "created_at": legacy_created,
+                "updated_at": legacy_updated,
+                "metadata": {"k": "v0"},
+            },
+        )
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        response = client.patch(
+            f"/api/threads/{thread_id}",
+            json={"metadata": {THREAD_ARCHIVED_METADATA_KEY: True}},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert _ISO_TIMESTAMP_RE.match(body["created_at"]), body["created_at"]
+    assert _ISO_TIMESTAMP_RE.match(body["updated_at"]), body["updated_at"]
+    # ``touch=False`` preserves the original ``updated_at``; both timestamps
+    # derive from the same legacy value, so they coerce to the same ISO string.
+    assert body["updated_at"] == body["created_at"]
+    assert body["metadata"] == {"k": "v0", THREAD_ARCHIVED_METADATA_KEY: True}
+
+
+def test_patch_thread_pin_plus_archive_together_preserves_updated_at() -> None:
+    """A combined flag patch (pin + archive) keeps the no-touch contract."""
+    app, store, _checkpointer = _build_thread_app()
+    thread_id = "combo-target"
+
+    legacy_created = "1777000000.000000"
+    legacy_updated = "1777000000.000000"
+
+    async def _seed() -> None:
+        await store.aput(
+            THREADS_NS,
+            thread_id,
+            {
+                "thread_id": thread_id,
+                "status": "idle",
+                "created_at": legacy_created,
+                "updated_at": legacy_updated,
+                "metadata": {},
+            },
+        )
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        response = client.patch(
+            f"/api/threads/{thread_id}",
+            json={
+                "metadata": {
+                    THREAD_PINNED_METADATA_KEY: True,
+                    THREAD_ARCHIVED_METADATA_KEY: True,
+                }
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["updated_at"] == body["created_at"]
 
 
 def test_patch_thread_non_pin_metadata_bumps_updated_at() -> None:

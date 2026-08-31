@@ -24,6 +24,11 @@ from deerflow.runtime.user_context import AUTO, _AutoSentinel
 # ``frontend/tests/e2e/utils/mock-api.ts``.
 THREAD_PINNED_METADATA_KEY = "deerflow_pinned"
 
+# Cross-component metadata key for the archive flag. Keep in sync with
+# ``frontend/src/core/threads/utils.ts`` and
+# ``frontend/tests/e2e/utils/mock-api.ts``.
+THREAD_ARCHIVED_METADATA_KEY = "deerflow_archived"
+
 
 class InvalidMetadataFilterError(ValueError):
     """Raised when all client-supplied metadata filter keys are rejected."""

@@ -46,7 +46,7 @@ from app.gateway.utils import sanitize_log_param
 from deerflow.agents.thread_state import THREAD_STATE_REDUCER_FIELDS
 from deerflow.config.paths import Paths, get_paths
 from deerflow.config.summarization_config import ContextSize
-from deerflow.persistence.thread_meta import THREAD_PINNED_METADATA_KEY
+from deerflow.persistence.thread_meta import THREAD_ARCHIVED_METADATA_KEY, THREAD_PINNED_METADATA_KEY
 from deerflow.runtime import ThreadOperationKind, serialize_channel_values_for_api
 from deerflow.runtime.checkpoint_mode import CheckpointModeMismatchError, CheckpointModeReconfigurationError
 from deerflow.runtime.checkpoint_state import graph_reducer_channels, graph_state_schema, graph_writable_channels
@@ -125,9 +125,19 @@ def _strip_reserved_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     return {k: v for k, v in metadata.items() if k not in _SERVER_RESERVED_METADATA_KEYS}
 
 
-def _is_pin_metadata_patch(metadata: dict[str, Any]) -> bool:
-    """Return True for the narrow pin/unpin PATCH shape."""
-    return set(metadata) == {THREAD_PINNED_METADATA_KEY} and isinstance(metadata.get(THREAD_PINNED_METADATA_KEY), bool)
+_ORGANIZATIONAL_FLAG_KEYS = frozenset({THREAD_PINNED_METADATA_KEY, THREAD_ARCHIVED_METADATA_KEY})
+
+
+def _is_organizational_flag_patch(metadata: dict[str, Any]) -> bool:
+    """Return True for the narrow pin/unpin/archive PATCH shape.
+
+    Only boolean flag updates for the organizational keys qualify; any other
+    key or non-bool value bumps ``updated_at`` as real conversation activity.
+    """
+    keys = set(metadata)
+    return bool(keys) and keys <= _ORGANIZATIONAL_FLAG_KEYS and all(
+        isinstance(metadata.get(key), bool) for key in keys
+    )
 
 
 def _message_id(message: Any) -> str | None:
@@ -1106,7 +1116,7 @@ async def patch_thread(thread_id: ThreadId, body: ThreadPatchRequest, request: R
     # Pin/unpin is not conversation activity, so it must not bump ``updated_at``.
     # Other metadata PATCH callers keep the public endpoint's existing recency
     # contract unless they get their own explicit no-touch API surface.
-    touch = not _is_pin_metadata_patch(body.metadata)
+    touch = not _is_organizational_flag_patch(body.metadata)
     try:
         await thread_store.update_metadata(thread_id, body.metadata, touch=touch)
     except Exception:

@@ -1,8 +1,7 @@
 import { describe, expect, test } from "@rstest/core";
 
-import { computeBars } from "@/core/console/usage-chart";
-
 import type { ConsoleUsageDay } from "@/core/console/types";
+import { computeBars } from "@/core/console/usage-chart";
 
 function day(date: string, total_tokens: number): ConsoleUsageDay {
   return { date, total_tokens, input_tokens: 0, output_tokens: 0, runs: 0, cost: 0 };

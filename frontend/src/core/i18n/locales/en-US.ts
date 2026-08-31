@@ -301,7 +301,28 @@ export const enUS: Translations = {
     demoChats: "Demo chats",
     agents: "Agents",
     scheduledTasks: "Scheduled tasks",
+    usage: "Usage",
     agentsDisabledTooltip: "Feature not enabled",
+  },
+
+  usage: {
+    title: "Usage",
+    unavailable: "Usage statistics are unavailable on this deployment.",
+    totalRuns: "Runs",
+    totalThreads: "Chats",
+    totalTokens: "Tokens",
+    totalCost: "Cost",
+    costUnavailable: "—",
+    lastDays: "Last {days} days",
+    byModel: "By model",
+    model: "Model",
+    tokens: "Tokens",
+    runs: "Runs",
+    recentRuns: "Recent runs",
+    status: "Status",
+    thread: "Chat",
+    duration: "Duration",
+    noRuns: "No runs yet.",
   },
 
   backgroundTasks: {
@@ -590,6 +611,7 @@ export const enUS: Translations = {
   breadcrumb: {
     workspace: "Workspace",
     chats: "Chats",
+    usage: "Usage",
   },
 
   // Workspace

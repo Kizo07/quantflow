@@ -225,8 +225,30 @@ export interface Translations {
     demoChats: string;
     agents: string;
     scheduledTasks: string;
+    usage: string;
     agentsDisabledTooltip: string;
     channels: string;
+  };
+
+  // Usage statistics dashboard
+  usage: {
+    title: string;
+    unavailable: string;
+    totalRuns: string;
+    totalThreads: string;
+    totalTokens: string;
+    totalCost: string;
+    costUnavailable: string;
+    lastDays: string;
+    byModel: string;
+    model: string;
+    tokens: string;
+    runs: string;
+    recentRuns: string;
+    status: string;
+    thread: string;
+    duration: string;
+    noRuns: string;
   };
 
   // Thread-scoped MCP background tasks
@@ -478,6 +500,7 @@ export interface Translations {
   breadcrumb: {
     workspace: string;
     chats: string;
+    usage: string;
   };
 
   // Workspace

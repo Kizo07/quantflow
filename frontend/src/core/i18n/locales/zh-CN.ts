@@ -285,7 +285,28 @@ export const zhCN: Translations = {
     demoChats: "演示对话",
     agents: "智能体",
     scheduledTasks: "定时任务",
+    usage: "用量",
     agentsDisabledTooltip: "功能未启用",
+  },
+
+  usage: {
+    title: "用量",
+    unavailable: "当前部署不支持用量统计。",
+    totalRuns: "运行次数",
+    totalThreads: "对话数",
+    totalTokens: "Token 数",
+    totalCost: "费用",
+    costUnavailable: "—",
+    lastDays: "最近 {days} 天",
+    byModel: "按模型",
+    model: "模型",
+    tokens: "Token",
+    runs: "运行",
+    recentRuns: "最近运行",
+    status: "状态",
+    thread: "对话",
+    duration: "时长",
+    noRuns: "暂无运行记录。",
   },
 
   backgroundTasks: {
@@ -563,6 +584,7 @@ export const zhCN: Translations = {
   breadcrumb: {
     workspace: "工作区",
     chats: "对话",
+    usage: "用量",
   },
 
   // Workspace

@@ -1,6 +1,6 @@
 "use client";
 
-import { BotIcon, CalendarClock, MessagesSquare } from "lucide-react";
+import { BotIcon, CalendarClock, ChartColumn, MessagesSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -86,6 +86,17 @@ export function WorkspaceNavChatList() {
             >
               <CalendarClock />
               <span>{t.sidebar.scheduledTasks}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            isActive={pathname.startsWith("/workspace/usage")}
+            asChild
+          >
+            <Link className="text-muted-foreground" href="/workspace/usage">
+              <ChartColumn />
+              <span>{t.sidebar.usage}</span>
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>

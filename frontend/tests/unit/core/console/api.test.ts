@@ -11,7 +11,6 @@ rs.mock("@/core/config", () => ({
 import { fetch as fetcher } from "@/core/api/fetcher";
 import {
   ConsoleUnavailableError,
-  ConsoleUsageRequestError,
   fetchConsoleRuns,
   fetchConsoleStats,
   fetchConsoleUsage,

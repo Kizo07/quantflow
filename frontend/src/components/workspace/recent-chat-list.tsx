@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  Archive,
+  ArchiveRestore,
   Download,
   FileJson,
   FileText,
@@ -50,6 +52,7 @@ import { writeTextToClipboard } from "@/core/clipboard";
 import { useI18n } from "@/core/i18n/hooks";
 import { exportThread, type ThreadExportFormat } from "@/core/threads/export";
 import {
+  useArchiveThread,
   useDeleteThread,
   useInfiniteThreads,
   usePinThread,
@@ -60,6 +63,7 @@ import { buildThreadListModel } from "@/core/threads/thread-list-model";
 import type { AgentThread, AgentThreadState } from "@/core/threads/types";
 import {
   channelSourceOfThread,
+  isThreadArchived,
   isThreadPinned,
   pathOfThread,
   titleOfThread,
@@ -140,6 +144,7 @@ export function RecentChatList() {
   const { mutate: deleteThread } = useDeleteThread();
   const { mutate: renameThread } = useRenameThread();
   const { mutate: updatePinnedThread } = usePinThread();
+  const { mutate: updateArchivedThread } = useArchiveThread();
 
   // Rename dialog state
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -232,6 +237,25 @@ export function RecentChatList() {
       );
     },
     [t.chats.pinChatFailed, updatePinnedThread],
+  );
+
+  const handleToggleArchive = useCallback(
+    (thread: AgentThread) => {
+      updateArchivedThread(
+        {
+          threadId: thread.thread_id,
+          archived: !isThreadArchived(thread),
+        },
+        {
+          onError: (err) => {
+            toast.error(
+              err instanceof Error ? err.message : t.chats.archiveChatFailed,
+            );
+          },
+        },
+      );
+    },
+    [t.chats.archiveChatFailed, updateArchivedThread],
   );
 
   const handleShare = useCallback(
@@ -398,6 +422,12 @@ export function RecentChatList() {
                               </span>
                             </DropdownMenuItem>
                             <DropdownMenuItem
+                              onSelect={() => handleToggleArchive(thread)}
+                            >
+                              <Archive className="text-muted-foreground" />
+                              <span>{t.chats.archiveChat}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
                               onSelect={() =>
                                 handleRenameClick(
                                   thread.thread_id,
@@ -476,6 +506,74 @@ export function RecentChatList() {
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
+
+      {threadListModel.archivedThreads.length > 0 && (
+        <SidebarGroup data-testid="archived-chat-list">
+          <SidebarGroupLabel>{t.chats.archivedChats}</SidebarGroupLabel>
+          <SidebarGroupContent className="group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0">
+            <SidebarMenu>
+              <div className="flex w-full flex-col gap-1">
+                {threadListModel.archivedThreads.map((thread) => (
+                  <SidebarMenuItem
+                    key={thread.thread_id}
+                    className="group/side-menu-item"
+                  >
+                    <SidebarMenuButton
+                      isActive={pathOfThread(thread) === pathname}
+                      asChild
+                    >
+                      <Link
+                        className="text-muted-foreground min-w-0 whitespace-nowrap group-hover/side-menu-item:overflow-hidden"
+                        href={pathOfThread(thread)}
+                      >
+                        <Archive
+                          aria-hidden="true"
+                          className="text-muted-foreground size-3.5 shrink-0"
+                        />
+                        <span className="min-w-0 truncate">
+                          {titleOfThread(thread)}
+                        </span>
+                      </Link>
+                    </SidebarMenuButton>
+                    {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY !== "true" && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <SidebarMenuAction
+                            showOnHover
+                            className="bg-background/50 hover:bg-background after:left-0!"
+                          >
+                            <MoreHorizontal />
+                            <span className="sr-only">{t.common.more}</span>
+                          </SidebarMenuAction>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          className="w-48 rounded-lg"
+                          side={"right"}
+                          align={"start"}
+                        >
+                          <DropdownMenuItem
+                            onSelect={() => handleToggleArchive(thread)}
+                          >
+                            <ArchiveRestore className="text-muted-foreground" />
+                            <span>{t.chats.unarchiveChat}</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onSelect={() => handleDelete(thread)}
+                          >
+                            <Trash2 className="text-muted-foreground" />
+                            <span>{t.common.delete}</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </SidebarMenuItem>
+                ))}
+              </div>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      )}
 
       {/* Rename Dialog */}
       <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>

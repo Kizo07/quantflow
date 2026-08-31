@@ -4,10 +4,12 @@ import { expect, test } from "@rstest/core";
 import type { AgentThread } from "@/core/threads/types";
 import {
   channelSourceOfThread,
+  isThreadArchived,
   isThreadPinned,
   pathOfThread,
   sortPinnedThreads,
   textOfMessage,
+  THREAD_ARCHIVED_METADATA_KEY,
   THREAD_PINNED_METADATA_KEY,
 } from "@/core/threads/utils";
 
@@ -97,6 +99,28 @@ test("reads pinned thread metadata strictly from the pinned metadata key", () =>
     false,
   );
   expect(isThreadPinned(makeThread("missing"))).toBe(false);
+});
+
+test("reads archived thread metadata strictly from the archived metadata key", () => {
+  expect(
+    isThreadArchived(
+      makeThread("archived", { [THREAD_ARCHIVED_METADATA_KEY]: true }),
+    ),
+  ).toBe(true);
+  expect(
+    isThreadArchived(
+      makeThread("false", { [THREAD_ARCHIVED_METADATA_KEY]: false }),
+    ),
+  ).toBe(false);
+  expect(
+    isThreadArchived(
+      makeThread("truthy", { [THREAD_ARCHIVED_METADATA_KEY]: "true" }),
+    ),
+  ).toBe(false);
+  expect(
+    isThreadArchived(makeThread("legacy-bare-key", { archived: true })),
+  ).toBe(false);
+  expect(isThreadArchived(makeThread("missing"))).toBe(false);
 });
 
 test("sortPinnedThreads keeps pinned threads first without reordering groups", () => {

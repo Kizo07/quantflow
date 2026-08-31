@@ -1,5 +1,5 @@
 import type { AgentThread } from "./types";
-import { isThreadPinned, sortPinnedThreads } from "./utils";
+import { isThreadArchived, isThreadPinned, sortPinnedThreads } from "./utils";
 
 const MAX_VISIBLE_THREADS = 200;
 const modelCache = new WeakMap<object, ThreadListModel>();
@@ -8,6 +8,7 @@ export type ThreadListModel = {
   byId: ReadonlyMap<string, AgentThread>;
   threads: readonly AgentThread[];
   displayedThreads: readonly AgentThread[];
+  archivedThreads: readonly AgentThread[];
   canLoadMore: boolean;
 };
 
@@ -28,14 +29,22 @@ export function buildThreadListModel(
   }
   const threads = [...byId.values()];
   const sortedThreads = sortPinnedThreads(threads);
-  const pinnedThreads = sortedThreads.filter(isThreadPinned);
-  const recentThreads = sortedThreads
+  // Archived chats are organizational noise: keep them out of the Recent
+  // list but expose them separately so an "Archived" section and deep links
+  // into archived threads still work.
+  const archivedThreads = sortedThreads.filter(isThreadArchived);
+  const visibleThreads = sortedThreads.filter(
+    (thread) => !isThreadArchived(thread),
+  );
+  const pinnedThreads = visibleThreads.filter(isThreadPinned);
+  const recentThreads = visibleThreads
     .filter((thread) => !isThreadPinned(thread))
     .slice(0, MAX_VISIBLE_THREADS);
   const model: ThreadListModel = {
     byId,
     threads: sortedThreads,
     displayedThreads: [...pinnedThreads, ...recentThreads],
+    archivedThreads,
     canLoadMore: recentThreads.length < MAX_VISIBLE_THREADS,
   };
   modelCache.set(cacheKey, model);

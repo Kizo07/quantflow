@@ -624,6 +624,10 @@ export const zhCN: Translations = {
     pinChat: "置顶对话",
     unpinChat: "取消置顶",
     pinChatFailed: "更新对话置顶状态失败",
+    archiveChat: "归档对话",
+    unarchiveChat: "取消归档",
+    archiveChatFailed: "更新对话归档状态失败",
+    archivedChats: "已归档",
   },
 
   // Sidecar

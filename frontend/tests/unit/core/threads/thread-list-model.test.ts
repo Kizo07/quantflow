@@ -21,6 +21,13 @@ function pinnedThread(id: string, updatedAt: string): AgentThread {
   };
 }
 
+function archivedThread(id: string, updatedAt: string): AgentThread {
+  return {
+    ...thread(id, updatedAt),
+    metadata: { deerflow_archived: true },
+  };
+}
+
 describe("thread list model", () => {
   it("sorts the full thread list with pinned threads first", () => {
     const unpinned = thread("unpinned", "2026-01-02T00:00:00.000Z");
@@ -30,6 +37,19 @@ describe("thread list model", () => {
 
     expect(model.threads).toEqual([pinned, unpinned]);
     expect(model.displayedThreads).toEqual([pinned, unpinned]);
+  });
+
+  it("hides archived threads from the displayed list but keeps them addressable", () => {
+    const recent = thread("recent", "2026-01-03T00:00:00.000Z");
+    const archived = archivedThread("archived", "2026-01-02T00:00:00.000Z");
+
+    const model = buildThreadListModel([[recent, archived]]);
+
+    expect(model.displayedThreads).toEqual([recent]);
+    expect(model.archivedThreads).toEqual([archived]);
+    // The active thread resolution path must still find archived threads so
+    // deep links into an archived chat keep rendering.
+    expect(model.byId.get("archived")).toBe(archived);
   });
 
   it("deduplicates once while only bounding recent sidebar rows", () => {

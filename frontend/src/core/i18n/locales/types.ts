@@ -539,6 +539,10 @@ export interface Translations {
     pinChat: string;
     unpinChat: string;
     pinChatFailed: string;
+    archiveChat: string;
+    unarchiveChat: string;
+    archiveChatFailed: string;
+    archivedChats: string;
   };
 
   // Sidecar

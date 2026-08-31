@@ -55,7 +55,7 @@ import type {
   RunMessage,
   ThreadTokenUsageResponse,
 } from "./types";
-import { THREAD_PINNED_METADATA_KEY } from "./utils";
+import { THREAD_ARCHIVED_METADATA_KEY, THREAD_PINNED_METADATA_KEY } from "./utils";
 
 export type ThreadStreamOptions = {
   threadId?: string | null | undefined;
@@ -3036,6 +3036,34 @@ export function usePinThread() {
       setThreadMetadataInCaches(queryClient, threadId, {
         ...(response.metadata ?? {}),
         [THREAD_PINNED_METADATA_KEY]: pinned,
+      });
+    },
+    onSettled() {
+      void queryClient.invalidateQueries({ queryKey: ["threads", "search"] });
+      void queryClient.invalidateQueries({
+        queryKey: INFINITE_THREADS_QUERY_KEY_PREFIX,
+      });
+    },
+  });
+}
+
+export function useArchiveThread() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      threadId,
+      archived,
+    }: {
+      threadId: string;
+      archived: boolean;
+    }) =>
+      patchThreadMetadata(threadId, {
+        [THREAD_ARCHIVED_METADATA_KEY]: archived,
+      }),
+    onSuccess(response, { threadId, archived }) {
+      setThreadMetadataInCaches(queryClient, threadId, {
+        ...(response.metadata ?? {}),
+        [THREAD_ARCHIVED_METADATA_KEY]: archived,
       });
     },
     onSettled() {

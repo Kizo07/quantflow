@@ -24,7 +24,9 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.language_models import LanguageModelInput
-from langchain_core.messages import AIMessage
+from langchain_core.language_models.chat_models import agenerate_from_stream
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI
 
 from deerflow.models.assistant_payload_replay import restore_assistant_payloads
@@ -80,6 +82,92 @@ class PatchedChatOpenAI(ChatOpenAI):
         restore_assistant_payloads(payload.get("messages", []), original_messages, _restore_tool_call_signatures)
 
         return payload
+
+
+class StreamingPatchedChatOpenAI(PatchedChatOpenAI):
+    """PatchedChatOpenAI that always talks to the provider over SSE internally.
+
+    Some OpenAI-compatible endpoints (observed: Alibaba Cloud Token Plan,
+    ``token-plan.*.maas.aliyuncs.com/compatible-mode/v1``) silently drop
+    non-streaming requests whose first response byte takes longer than a
+    server-side budget (~60s): the connection is closed before any status
+    line, surfacing as ``httpx.RemoteProtocolError: Server disconnected
+    without sending a response`` / ``openai.APIConnectionError``.  The
+    identical payload with ``stream=true`` gets a first chunk in seconds and
+    completes fine, so the failure is the endpoint's non-stream idle budget,
+    not the request content.
+
+    LangChain agents call the model through ``ainvoke``/``generate`` (no
+    streaming).  This subclass converts those into an internal SSE stream and
+    re-assembles the final message, so every call gets a first byte quickly
+    and the endpoint never sees a non-streaming request.  ``stream_usage``
+    defaults on so token accounting keeps working (langchain-openai only
+    emits ``usage`` on the final chunk when this is set).
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        import httpx
+
+        kwargs.setdefault("stream_usage", True)
+        # The endpoint retries nothing for us on its own: enable SDK-level
+        # retries so a recycled-but-racy connection gets one more attempt.
+        kwargs.setdefault("max_retries", 3)
+        # Recycle pooled keep-alive connections every 30 seconds.
+        #
+        # Long-lived gateway processes otherwise hold pooled sockets past
+        # NAT/LB/server idle cutoffs; the next POST on such a socket dies
+        # with ``httpx.RemoteProtocolError: Server disconnected without
+        # sending a response`` and — POSTs being non-idempotent — httpx will
+        # NOT transparently retry it. That failure mode took down every LLM
+        # call in the gateway after ~5h of uptime until a process restart.
+        # With a 30s keep-alive expiry a pooled connection is never old
+        # enough to be dead server-side. Caller-supplied clients win
+        # (setdefault), so custom transports/proxies stay in control.
+        limits = httpx.Limits(max_keepalive_connections=5, keepalive_expiry=30.0)
+        timeout = httpx.Timeout(600.0, connect=10.0)
+        kwargs.setdefault("http_client", httpx.Client(limits=limits, timeout=timeout))
+        kwargs.setdefault("http_async_client", httpx.AsyncClient(limits=limits, timeout=timeout))
+        super().__init__(**kwargs)
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        return await agenerate_from_stream(self._astream(messages, stop=stop, run_manager=run_manager, **kwargs))
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        # Sync path: bridge through an event loop so in-process/sync callers
+        # (tests, scripts) get the same protection instead of silently
+        # regressing to the endpoint-hostile non-streaming request.  The
+        # gateway's hot path is async (_agenerate above).
+        import asyncio
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs))
+        # Already inside a loop but called synchronously. We must NOT fall
+        # back to the parent's non-streaming request here — that is the exact
+        # request shape the endpoint drops after ~60s of first-byte silence.
+        # Run the streaming coroutine on a dedicated worker thread with its
+        # own event loop instead (cheap: this path is rare; the gateway hot
+        # path is async via _agenerate above).
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="streaming-llm") as pool:
+            return pool.submit(
+                asyncio.run,
+                self._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs),
+            ).result()
 
 
 def _restore_tool_call_signatures(payload_msg: dict, orig_msg: AIMessage) -> None:

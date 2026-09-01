@@ -554,6 +554,17 @@ def _make_session_pool_tool(
             session_env.setdefault("TMPDIR", str(tmp_dir))
             session_env.setdefault("TMP", str(tmp_dir))
             session_env.setdefault("TEMP", str(tmp_dir))
+            # Host-side thread outputs dir. Stdio MCP servers run on the host
+            # (outside the sandbox namespace), so artifacts they render land at
+            # host paths the sandbox-side present_files gate cannot reach.
+            # Servers that publish per-thread deliverables (e.g. report-forge's
+            # publish_report) read this to copy rendered artifacts into the
+            # thread's outputs tree, where they become presentable.
+            session_env.setdefault(
+                "DEERFLOW_THREAD_OUTPUTS_HOST",
+                str(paths.sandbox_outputs_dir(thread_id, user_id=user_id)),
+            )
+            session_env.setdefault("DEERFLOW_THREAD_ID", thread_id)
             session_connection["env"] = session_env
         if session_init_timeout is not None:
             # Cancellation here is safe: MCPSessionPool.get_session owns the

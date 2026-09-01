@@ -659,6 +659,11 @@ async def test_session_pool_tool_pins_cwd_and_temp_env(tmp_path):
     assert session_connection["env"]["TMPDIR"] == str(tmp_dir)
     assert session_connection["env"]["TMP"] == str(tmp_dir)
     assert session_connection["env"]["TEMP"] == str(tmp_dir)
+    # Thread outputs host dir + thread id are exposed to stdio MCP servers so
+    # host-side servers (e.g. report-forge publish_report) can bridge rendered
+    # artifacts into the thread outputs tree.
+    assert session_connection["env"]["DEERFLOW_THREAD_OUTPUTS_HOST"] == str(paths.sandbox_outputs_dir("thread-42", user_id="user-7"))
+    assert session_connection["env"]["DEERFLOW_THREAD_ID"] == "thread-42"
     assert tmp_dir.is_dir()
     assert stat.S_IMODE(tmp_dir.stat().st_mode) == 0o700
 

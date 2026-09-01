@@ -610,6 +610,14 @@ After data collection, user provides: Analysis Framework + Data Summary with bra
 - **Phase 1**: Output the complete Analysis Framework in **Markdown** format
 - **Phase 2**: Output the complete Report in **Markdown** format
 
+## Artifact Delivery (MANDATORY)
+
+When the final report file has been written to the workspace, you MUST call the
+`present_files` tool with the path(s) of every produced deliverable (the final
+report markdown/PDF and any chart assets) as your last action before finishing.
+Runs that produce output files without presenting them fail the platform's
+artifact-delivery verification and are marked as errors.
+
 ## Settings
 
 ```

@@ -462,6 +462,15 @@ run_service() {
 mkdir -p logs
 mkdir -p temp/client_body_temp temp/proxy_temp temp/fastcgi_temp temp/uwsgi_temp temp/scgi_temp
 
+# Preserve prior service logs across restarts (lesson of 2026-09-01: a restart
+# truncated gateway.log and destroyed the only evidence trail of run f44d3e23).
+TS="$(date +%Y%m%d-%H%M%S)"
+for f in logs/gateway.log logs/frontend.log; do
+    if [ -s "$f" ]; then
+        mv "$f" "${f%.log}-${TS}.log"
+    fi
+done
+
 # 1. Gateway API
 run_service "Gateway" \
     "cd backend && PYTHONPATH=. uv run --no-sync uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 $GATEWAY_EXTRA_FLAGS > ../logs/gateway.log 2>&1" \

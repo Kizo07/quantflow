@@ -6,6 +6,15 @@
 **Outcome:** `status=success`, delivery gate satisfied, 16-page PDF + DOCX + HTML rendered.
 Verdict: **the run succeeded, but its success masked several structural weaknesses this plan closes.**
 
+> **Implementation status (2026-09-01):** All five workstreams implemented and committed.
+> report-forge: `8495c5c` (WS-B schema widening), `1e50604` (WS-C publish_report bridge).
+> deer-flow: `13132db` (WS-C thread-outputs env injection), `816afa8` (WS-E web_fetch URL guard),
+> `13132db` also carries this plan. WS-A lives in skills/templates (quant-desk SKILL.md +
+> autonomous-report-runs scripts/templates). WS-D: launcher 5th arg `on|off` for subagents.
+> Open item: Jina API key (WS-E.2) — no key exists on the machine; add `JINA_API_KEY` to the
+> gateway's environment when available. Verification: 44 report-forge tests + 116 MCP tests +
+> 45 jina tests green; live smoke run pending.
+
 ---
 
 ## Issue inventory (chronological, evidence-backed)

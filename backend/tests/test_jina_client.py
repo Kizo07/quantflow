@@ -338,6 +338,26 @@ async def test_web_fetch_tool_offloads_extraction_to_thread(monkeypatch):
     assert "threaded" in result
 
 
+@pytest.mark.anyio
+async def test_web_fetch_tool_rejects_non_http_urls(monkeypatch):
+    """Non-http(s) schemes (e.g. file: paths) fail fast locally instead of
+    hitting the reader for an upstream 400 ("Invalid protocol file:",
+    run d1f6a9b5)."""
+
+    async def mock_crawl(self, url, **kwargs):
+        raise AssertionError("crawl must not be called for non-http(s) URLs")
+
+    monkeypatch.setattr(JinaClient, "crawl", mock_crawl)
+
+    result = await web_fetch_tool.ainvoke("file:///home/fire/report.pdf")
+    assert result.startswith("Error:")
+    assert "http(s)" in result
+    assert "kizonlp_pdf_text" in result
+
+    result = await web_fetch_tool.ainvoke("example.com")
+    assert result.startswith("Error:")
+
+
 @pytest.mark.parametrize(
     ("value", "default", "expected"),
     [

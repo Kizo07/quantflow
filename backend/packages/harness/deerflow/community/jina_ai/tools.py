@@ -56,6 +56,13 @@ async def web_fetch_tool(url: str) -> str:
     timeout = 10
     proxy = None
     trust_env = True
+    # Fail fast on non-http(s) schemes: the reader only accepts web URLs.
+    # Agents have passed local file: paths and burned a call on an upstream
+    # 400 ("Invalid protocol file:", run d1f6a9b5); a local, actionable error
+    # steers them to the right tool (e.g. kizonlp_pdf_text for local PDFs).
+    stripped = url.strip()
+    if not stripped.lower().startswith(("http://", "https://")):
+        return f"Error: web_fetch only accepts http(s) URLs, got: {stripped!r}. For local files use the appropriate MCP tool instead (e.g. kizonlp_pdf_text for local PDFs)."
     config = get_app_config().get_tool_config("web_fetch")
     if config is not None:
         timeout = _coerce_timeout(config.model_extra.get("timeout"), timeout)

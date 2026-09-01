@@ -12,8 +12,12 @@ Verdict: **the run succeeded, but its success masked several structural weakness
 > `13132db` also carries this plan. WS-A lives in skills/templates (quant-desk SKILL.md +
 > autonomous-report-runs scripts/templates). WS-D: launcher 5th arg `on|off` for subagents.
 > Open item: Jina API key (WS-E.2) — no key exists on the machine; add `JINA_API_KEY` to the
-> gateway's environment when available. Verification: 44 report-forge tests + 116 MCP tests +
-> 45 jina tests green; live smoke run pending.
+> gateway's environment when available.
+> **Live verification (2026-09-01, smoke run `e6b472fe`):** scaffold accepted `formats` as a
+> JSON string on the first try (zero validation errors); `publish_report` copied rendered HTML +
+> `index_files/` into thread outputs; `present_files` succeeded with the returned virtual paths;
+> run `status=success` with no fabrication. WS-D: launcher 5th arg `on` confirmed live via
+> gateway log `Create Agent … subagent_enabled: True` (probe run `e20a0aaf`).
 
 ---
 

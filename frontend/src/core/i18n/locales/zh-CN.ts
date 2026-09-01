@@ -279,6 +279,9 @@ export const zhCN: Translations = {
   // Sidebar
   sidebar: {
     newChat: "新对话",
+    importChat: "导入对话",
+    importChatSuccess: "对话已导入",
+    importChatError: "导入失败，请检查文件后重试。",
     chats: "对话",
     channels: "渠道",
     recentChats: "最近的对话",

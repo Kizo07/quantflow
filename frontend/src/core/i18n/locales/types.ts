@@ -221,6 +221,9 @@ export interface Translations {
   sidebar: {
     recentChats: string;
     newChat: string;
+    importChat: string;
+    importChatSuccess: string;
+    importChatError: string;
     chats: string;
     demoChats: string;
     agents: string;

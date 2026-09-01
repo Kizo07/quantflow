@@ -15,6 +15,8 @@ import { useI18n } from "@/core/i18n/hooks";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
+import { ImportChatButton } from "./import-chat-button";
+
 export function WorkspaceHeader({ className }: { className?: string }) {
   const { t } = useI18n();
   const { state } = useSidebar();
@@ -61,6 +63,7 @@ export function WorkspaceHeader({ className }: { className?: string }) {
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>
+        <ImportChatButton />
       </SidebarMenu>
     </>
   );

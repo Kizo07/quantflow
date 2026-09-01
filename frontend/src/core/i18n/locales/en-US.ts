@@ -295,6 +295,9 @@ export const enUS: Translations = {
   // Sidebar
   sidebar: {
     newChat: "New chat",
+    importChat: "Import chat",
+    importChatSuccess: "Conversation imported",
+    importChatError: "Import failed. Check the file and try again.",
     chats: "Chats",
     channels: "Channels",
     recentChats: "Recent chats",

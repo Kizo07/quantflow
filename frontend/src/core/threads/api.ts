@@ -134,6 +134,52 @@ export async function patchThreadMetadata(
   return (await response.json()) as ThreadMetadataPatchResponse;
 }
 
+export type ThreadImportResponse = {
+  thread_id: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+  imported_message_count: number;
+};
+
+export type ThreadImportPayload = {
+  title?: string;
+  thread_id?: string;
+  created_at?: string;
+  exported_at?: string;
+  messages: Array<Record<string, unknown>>;
+};
+
+/**
+ * Import an exported session JSON as a new thread via
+ * ``POST /api/threads/import``. The gateway sanitizes the payload
+ * (human/ai transcript only) and rebuilds it through the state-update
+ * injection path. CSRF is handled by the shared auth fetcher.
+ */
+export async function importThreadSession(
+  payload: ThreadImportPayload,
+): Promise<ThreadImportResponse> {
+  const response = await fetchWithAuth(
+    `${getBackendBaseURL()}/api/threads/import`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readThreadAPIError(response, "Failed to import conversation."),
+    );
+  }
+
+  return (await response.json()) as ThreadImportResponse;
+}
+
 export async function compactThreadContext(
   threadId: string,
   options: CompactThreadContextOptions = {},

@@ -29,6 +29,11 @@ THREAD_PINNED_METADATA_KEY = "deerflow_pinned"
 # ``frontend/tests/e2e/utils/mock-api.ts``.
 THREAD_ARCHIVED_METADATA_KEY = "deerflow_archived"
 
+# Cross-component metadata key marking a thread rebuilt from an imported
+# session export. Keep in sync with ``frontend/src/core/threads/utils.ts``
+# and ``frontend/tests/e2e/utils/mock-api.ts``.
+THREAD_IMPORTED_METADATA_KEY = "deerflow_imported"
+
 
 class InvalidMetadataFilterError(ValueError):
     """Raised when all client-supplied metadata filter keys are rejected."""

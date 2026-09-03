@@ -111,7 +111,9 @@ Blind iteration is why native runs hand-polish and report-forge runs guess. Add:
 
 **New tool:** `reportforge_append_section(project, markdown, before: str | None)`
 - Appends a markdown section to `index.qmd` body (after frontmatter), or inserts before a
-  heading matched by `before`. No full-body rewrite for additive edits.
+  heading matched by `before`. Match = first heading whose text contains `before`
+  (case-insensitive substring); no match is a clean error, never a silent append.
+  No full-body rewrite for additive edits.
 - Implementation: split frontmatter (`---` fence) from body; append/insert; rewrite.
 
 **New template: `bespoke`** (escape hatch)

@@ -68,7 +68,10 @@ DEFAULT_RUN_CONFIG: dict[str, Any] = {"recursion_limit": 100}
 DEFAULT_RUN_CONTEXT: dict[str, Any] = {
     "thinking_enabled": True,
     "is_plan_mode": False,
-    "subagent_enabled": False,
+    # Flipped 2026-09-03 (was False): quant-desk–style delegation is the
+    # normal path now; callers can still opt out per-run via
+    # context.subagent_enabled=false.
+    "subagent_enabled": True,
 }
 STREAM_UPDATE_MIN_INTERVAL_SECONDS = 1.0
 STREAM_UPDATE_MIN_CHARS = 60  # flush immediately when this many chars accumulate

@@ -96,7 +96,9 @@ def _sanitize_import_messages(raw: object) -> list[dict[str, str]]:
             )
         # Deliberately no tool_calls / id / reasoning: untrusted data must
         # not re-enter the runtime as tool invocations or forged identity.
-        cleaned.append({"type": msg_type, "content": stripped})
+        # Store the original content: stripping is only the blank/size test,
+        # so imports stay faithful (leading indentation, trailing newlines).
+        cleaned.append({"type": msg_type, "content": content})
     return cleaned
 
 
@@ -153,7 +155,7 @@ async def import_thread(request: Request) -> ThreadImportResponse:
         await checkpointer.aput(config, empty_checkpoint(), ckpt_metadata, {})
     except Exception:
         logger.exception("Failed to create checkpoint for import %s", sanitize_log_param(thread_id))
-        await _cleanup_failed_import(thread_store, thread_id)
+        await _cleanup_failed_import(thread_store, checkpointer, thread_id)
         raise HTTPException(status_code=500, detail="Failed to create thread for import")
 
     # Inject the transcript through the spike-proven state-update path.
@@ -170,14 +172,14 @@ async def import_thread(request: Request) -> ThreadImportResponse:
                 as_node="session_import",
             )
     except HTTPException:
-        await _cleanup_failed_import(thread_store, thread_id)
+        await _cleanup_failed_import(thread_store, checkpointer, thread_id)
         raise
     except Exception:
         logger.exception("Failed to inject messages for import %s", sanitize_log_param(thread_id))
-        await _cleanup_failed_import(thread_store, thread_id)
+        await _cleanup_failed_import(thread_store, checkpointer, thread_id)
         raise HTTPException(status_code=500, detail="Failed to import messages")
 
-    if title and thread_store is not None:
+    if title:
         try:
             await thread_store.update_display_name(thread_id, title)
         except Exception:
@@ -194,9 +196,15 @@ async def import_thread(request: Request) -> ThreadImportResponse:
     )
 
 
-async def _cleanup_failed_import(thread_store, thread_id: str) -> None:
-    """Best-effort removal of the meta record when injection fails."""
+async def _cleanup_failed_import(thread_store, checkpointer, thread_id: str) -> None:
+    """Best-effort removal of the meta record and any checkpoint when an
+    import fails partway (otherwise the thread id is half-reserved: meta
+    without state, or state without meta)."""
     try:
         await thread_store.delete(thread_id)
     except Exception:
         logger.debug("Failed to clean up thread_meta for %s (non-fatal)", sanitize_log_param(thread_id))
+    try:
+        await checkpointer.adelete_thread(thread_id)
+    except Exception:
+        logger.debug("Failed to clean up checkpoints for %s (non-fatal)", sanitize_log_param(thread_id))

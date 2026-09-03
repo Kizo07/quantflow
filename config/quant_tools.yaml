@@ -75,7 +75,7 @@ tools:
     agents: [quant-analyst, risk-manager]
     mutate: false
   - id: render_report
-    description: Interactive HTML research report/tearsheet from a report dict.
+    description: Interactive HTML research report/tearsheet from a report dict. Pass theme quantflow-dark/light for flagship-matched styling and png_dir to also export every exhibit to PNG for print reports.
     agents: [quant-analyst]
     mutate: false
   - id: refresh_data

@@ -5,11 +5,13 @@ import type { AgentThread } from "@/core/threads/types";
 import {
   channelSourceOfThread,
   isThreadArchived,
+  isThreadImported,
   isThreadPinned,
   pathOfThread,
   sortPinnedThreads,
   textOfMessage,
   THREAD_ARCHIVED_METADATA_KEY,
+  THREAD_IMPORTED_METADATA_KEY,
   THREAD_PINNED_METADATA_KEY,
 } from "@/core/threads/utils";
 
@@ -121,6 +123,35 @@ test("reads archived thread metadata strictly from the archived metadata key", (
     isThreadArchived(makeThread("legacy-bare-key", { archived: true })),
   ).toBe(false);
   expect(isThreadArchived(makeThread("missing"))).toBe(false);
+});
+
+test("reads imported thread metadata strictly from the imported metadata key", () => {
+  expect(
+    isThreadImported(
+      makeThread("imported", { [THREAD_IMPORTED_METADATA_KEY]: true }),
+    ),
+  ).toBe(true);
+  expect(
+    isThreadImported(
+      makeThread("false", { [THREAD_IMPORTED_METADATA_KEY]: false }),
+    ),
+  ).toBe(false);
+  expect(
+    isThreadImported(
+      makeThread("truthy", { [THREAD_IMPORTED_METADATA_KEY]: "true" }),
+    ),
+  ).toBe(false);
+  expect(
+    isThreadImported(makeThread("legacy-bare-key", { imported: true })),
+  ).toBe(false);
+  expect(isThreadImported(makeThread("missing"))).toBe(false);
+});
+
+// Pins the cross-component value shared with the backend thread_meta
+// constant (``deerflow/persistence/thread_meta/base.py``) and the E2E
+// mock-api constant: renaming the key here breaks the import contract.
+test("imported metadata key matches the backend thread_meta value", () => {
+  expect(THREAD_IMPORTED_METADATA_KEY).toBe("deerflow_imported");
 });
 
 test("sortPinnedThreads keeps pinned threads first without reordering groups", () => {

@@ -144,7 +144,14 @@ and asserts `pdfinfo` page count ≥ 1.
 
 ## WS-6 — Quant-capable execution environment
 
-Point the kernel (and therefore both Quarto chunks and WS-1 execution) at real compute:
+> **SUPERSEDED 2026-09-01 (see "Implementation status" below):** do NOT point
+> `REPORTFORGE_PYTHON` at the alpha_engine conda env — it has no ipykernel and
+> is unsuitable as a Quarto kernel host. The original proposal is kept for the
+> record; the shipped behavior is the report-forge `.venv` default (pandas,
+> pyarrow, statsmodels pre-installed there), with `REPORTFORGE_PYTHON` retained
+> only as an override for another kernel-ready env.
+
+Original proposal (not implemented as written):
 
 - Document + support `REPORTFORGE_PYTHON=/opt/anaconda/envs/alpha_engine/bin/python`.
   The alpha_engine env already has pandas/pyarrow/statsmodels — chunks and `run_code` then
@@ -198,9 +205,10 @@ determines which interpreter WS-1 executes.
 
 ## Open decisions (defaults assumed if no answer)
 
-1. **Default execution env**: assume alpha_engine conda env via `REPORTFORGE_PYTHON`
-   (WS-6). Alternative: keep reportforge venv default and set env only in deer-flow config —
-   same end state, config-side. → *Default: config-side, zero code coupling.*
+1. **Default execution env**: ~~assume alpha_engine conda env via `REPORTFORGE_PYTHON`
+   (WS-6)~~ — DECIDED 2026-09-01: report-forge `.venv` default (alpha_engine env
+   has no ipykernel; see WS-6 supersede note + Implementation status).
+   `REPORTFORGE_PYTHON` stays as a config-side override only.
 2. **Shell tool**: none — Python-only execution inside report-forge; agent already has bash
    in deer-flow. → *Default: no shell tool.*
 3. **pdf-web default**: opt-in per render (formats list), never replaces `pdf`. → *Default: opt-in.*

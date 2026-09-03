@@ -53,6 +53,12 @@ test.describe("Session import", () => {
     await expect(page).toHaveURL(`/workspace/chats/${IMPORTED_THREAD_ID}`, {
       timeout: 15_000,
     });
+    // The new thread id is server-minted: the export's own thread_id must
+    // not leak into the navigation target.
+    expect(page.url()).not.toContain("old-thread-ignored");
+    await expect(page.getByText("Conversation imported")).toBeVisible({
+      timeout: 15_000,
+    });
     expect(receivedBody).toMatchObject({
       title: "Imported research chat",
     });

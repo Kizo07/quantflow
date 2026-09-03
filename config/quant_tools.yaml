@@ -10,7 +10,9 @@
 #                quant-analyst only
 
 version: 1
-source_repo: /home/fire/Documents/alpha_engine
+# Sibling checkout of this repo (override with ALPHA_ENGINE_SRC for
+# scripts/validate_quant_tools.py). Keep portable: no absolute local paths.
+source_repo: ../alpha_engine
 tools:
   - id: engine_status
     description: Coverage + freshness digest of the local store; call first.

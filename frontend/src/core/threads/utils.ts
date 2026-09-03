@@ -12,6 +12,11 @@ export const THREAD_PINNED_METADATA_KEY = "deerflow_pinned";
 // constant and the E2E mock-api constant.
 export const THREAD_ARCHIVED_METADATA_KEY = "deerflow_archived";
 
+// Marks a thread rebuilt from an imported session export
+// (``POST /api/threads/import``). Keep in sync with the backend thread_meta
+// constant and the E2E mock-api constant.
+export const THREAD_IMPORTED_METADATA_KEY = "deerflow_imported";
+
 export type ChannelThreadSource = {
   type: "im_channel";
   provider: string;
@@ -76,6 +81,10 @@ export function isThreadPinned(thread: Pick<AgentThread, "metadata">) {
 
 export function isThreadArchived(thread: Pick<AgentThread, "metadata">) {
   return thread.metadata?.[THREAD_ARCHIVED_METADATA_KEY] === true;
+}
+
+export function isThreadImported(thread: Pick<AgentThread, "metadata">) {
+  return thread.metadata?.[THREAD_IMPORTED_METADATA_KEY] === true;
 }
 
 export function sortPinnedThreads<T extends Pick<AgentThread, "metadata">>(

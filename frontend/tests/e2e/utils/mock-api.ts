@@ -20,6 +20,7 @@ export const MOCK_RUN_ID = "00000000-0000-0000-0000-000000000099";
 // constant; the mock must mirror the same metadata contract for pin ordering.
 export const THREAD_PINNED_METADATA_KEY = "deerflow_pinned";
 export const THREAD_ARCHIVED_METADATA_KEY = "deerflow_archived";
+export const THREAD_IMPORTED_METADATA_KEY = "deerflow_imported";
 
 const MOCK_AUTH_USER = {
   id: "default",

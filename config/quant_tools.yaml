@@ -38,6 +38,10 @@ tools:
     description: Cross-section returns for the WHOLE universe (any horizon, optional date/universe filter) with Gini concentration stat. Use for market-breadth/concentration questions instead of looping get_price_history.
     agents: [quant-analyst, risk-manager]
     mutate: false
+  - id: universe_members_as_of
+    description: Point-in-time S&P 500 membership for a date (survivorship-bias-free, 1996-present). MANDATORY for any historical selection — backtest universes, as-of factor exposures. Never use the current snapshot for past dates.
+    agents: [quant-analyst, technical-analyst, risk-manager]
+    mutate: false
   - id: run_momentum_backtest
     description: Cross-sectional momentum backtest (lookback x top_n).
     agents: [quant-analyst]

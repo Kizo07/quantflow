@@ -1,15 +1,15 @@
 """Validate config/quant_tools.yaml against the live MCP server tool defs.
 
-Reads tool names via fastmcp's registry (import alpha_engine.mcp_server) so
-the catalog cannot drift from the actual server. Exit 1 with a diff if the
-catalog is stale. Run from the deer-flow repo root or anywhere, with a Python
-that has fastmcp (e.g. the alpha_engine env); ALPHA_ENGINE_SRC overrides the
-default sibling-checkout lookup.
+Reads tool names by statically parsing ``@mcp.tool()`` decorators in
+alpha_engine's mcp_server.py (``ast`` — stdlib only), so the catalog cannot
+drift from the actual server without importing its heavy third-party chain
+(numpy/pandas/vectorbt/plotly), which has broken validation on unrelated
+dependency drift before. Run from the deer-flow repo root or anywhere;
+ALPHA_ENGINE_SRC overrides the default sibling-checkout lookup.
 """
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 import yaml
@@ -31,17 +31,41 @@ def alpha_engine_src() -> Path:
 
 
 def mcp_tool_names(ae_src: Path) -> set[str]:
-    """Tool names declared in alpha_engine.mcp_server (bare names)."""
-    sys.path.insert(0, str(ae_src))
-    import alpha_engine.mcp_server as mcp_server  # noqa: PLC0415
+    """Tool names declared in alpha_engine's mcp_server.py (bare names).
 
-    import asyncio  # noqa: PLC0415
+    Static ``ast`` extraction of ``@mcp.tool()``-decorated defs — exact for
+    this server (all tools are decorated defs in the one file; verified no
+    dynamic add_tool/mount registration). An explicit ``name=`` kwarg wins
+    when present.
+    """
+    import ast  # noqa: PLC0415
 
-    async def _collect() -> set[str]:
-        listed = await mcp_server.mcp.list_tools()
-        return {t.name for t in listed}
-
-    return asyncio.run(_collect())
+    server_py = ae_src / "alpha_engine" / "mcp_server.py"
+    if not server_py.is_file():
+        print(f"mcp_server.py not found at {server_py}")
+        print("Set ALPHA_ENGINE_SRC to the '<checkout>/src' directory and retry.")
+        raise SystemExit(2)
+    tree = ast.parse(server_py.read_text(), filename=str(server_py))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for dec in node.decorator_list:
+            func = dec.func if isinstance(dec, ast.Call) else dec
+            if not (
+                isinstance(func, ast.Attribute)
+                and func.attr == "tool"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "mcp"
+            ):
+                continue
+            name = node.name
+            if isinstance(dec, ast.Call):
+                for kw in dec.keywords:
+                    if kw.arg == "name" and isinstance(kw.value, ast.Constant):
+                        name = str(kw.value.value)
+            names.add(name)
+    return names
 
 
 def main() -> int:

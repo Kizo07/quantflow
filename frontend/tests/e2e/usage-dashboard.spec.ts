@@ -49,10 +49,18 @@ const USAGE = {
 
 function mockConsoleAPI(page: import("@playwright/test").Page) {
   void page.route("**/api/console/stats", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(STATS) }),
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(STATS),
+    }),
   );
   void page.route("**/api/console/usage**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(USAGE) }),
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(USAGE),
+    }),
   );
   void page.route("**/api/console/runs**", (route) =>
     route.fulfill({

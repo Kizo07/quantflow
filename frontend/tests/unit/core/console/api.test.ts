@@ -143,9 +143,7 @@ describe("console api", () => {
   });
 
   test("non-503 errors surface as ConsoleUsageRequestError with detail", async () => {
-    mockedFetch.mockResolvedValueOnce(
-      jsonResponse(500, { detail: "boom" }),
-    );
+    mockedFetch.mockResolvedValueOnce(jsonResponse(500, { detail: "boom" }));
 
     await expect(fetchConsoleStats()).rejects.toMatchObject({
       name: "ConsoleUsageRequestError",

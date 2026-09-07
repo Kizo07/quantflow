@@ -135,9 +135,7 @@ def _is_organizational_flag_patch(metadata: dict[str, Any]) -> bool:
     key or non-bool value bumps ``updated_at`` as real conversation activity.
     """
     keys = set(metadata)
-    return bool(keys) and keys <= _ORGANIZATIONAL_FLAG_KEYS and all(
-        isinstance(metadata.get(key), bool) for key in keys
-    )
+    return bool(keys) and keys <= _ORGANIZATIONAL_FLAG_KEYS and all(isinstance(metadata.get(key), bool) for key in keys)
 
 
 def _message_id(message: Any) -> str | None:

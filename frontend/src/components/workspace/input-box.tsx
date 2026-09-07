@@ -2374,7 +2374,7 @@ export function InputBox({
                       <GraduationCapIcon className="size-3" />
                     )}
                     {context.mode === "ultra" && (
-                      <RocketIcon className="size-3 text-[#dabb5e]" />
+                      <RocketIcon className="size-3 text-[#e3ac55]" />
                     )}
                   </div>
                   <div
@@ -2499,7 +2499,7 @@ export function InputBox({
                           <RocketIcon
                             className={cn(
                               "mr-2 size-4",
-                              context.mode === "ultra" && "text-[#dabb5e]",
+                              context.mode === "ultra" && "text-[#e3ac55]",
                             )}
                           />
                           <div

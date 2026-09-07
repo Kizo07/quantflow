@@ -132,7 +132,7 @@ function HeroWordRotate({
           <AuroraText
             className="max-w-full [overflow-wrap:anywhere] whitespace-normal"
             speed={3}
-            colors={["#efefbb", "#e9c665", "#e3a812"]}
+            colors={["#f1d59c", "#e3ac55", "#cf9440"]}
           >
             {words[index]}
           </AuroraText>

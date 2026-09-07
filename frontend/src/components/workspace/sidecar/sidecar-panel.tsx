@@ -769,7 +769,7 @@ function SidecarModeMenu({
             {mode === "thinking" && <LightbulbIcon className="size-3" />}
             {mode === "pro" && <GraduationCapIcon className="size-3" />}
             {mode === "ultra" && (
-              <RocketIcon className="size-3 text-[#dabb5e]" />
+              <RocketIcon className="size-3 text-[#e3ac55]" />
             )}
           </div>
           <div
@@ -889,7 +889,7 @@ function SidecarModeMenu({
                 <RocketIcon
                   className={cn(
                     "mr-2 size-4",
-                    mode === "ultra" && "text-[#dabb5e]",
+                    mode === "ultra" && "text-[#e3ac55]",
                   )}
                 />
                 <div className={cn(mode === "ultra" && "golden-text")}>

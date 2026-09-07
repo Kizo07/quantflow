@@ -55,7 +55,7 @@ export async function Header({ className, homeURL, locale }: HeaderProps) {
         <div
           className="pointer-events-none absolute inset-0 z-0 h-full w-full rounded-full opacity-30 blur-2xl"
           style={{
-            background: "linear-gradient(90deg, #ff80b5 0%, #9089fc 100%)",
+            background: "linear-gradient(90deg, #08bfff 0%, #e3ac55 100%)",
             filter: "blur(16px)",
           }}
         />

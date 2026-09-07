@@ -4,7 +4,14 @@ import type { ConsoleUsageDay } from "@/core/console/types";
 import { computeBars } from "@/core/console/usage-chart";
 
 function day(date: string, total_tokens: number): ConsoleUsageDay {
-  return { date, total_tokens, input_tokens: 0, output_tokens: 0, runs: 0, cost: 0 };
+  return {
+    date,
+    total_tokens,
+    input_tokens: 0,
+    output_tokens: 0,
+    runs: 0,
+    cost: 0,
+  };
 }
 
 describe("computeBars", () => {
@@ -15,9 +22,21 @@ describe("computeBars", () => {
     );
 
     expect(bars).toHaveLength(3);
-    expect(bars[0]).toMatchObject({ date: "2026-08-29", heightPct: 25, heightPx: 30 });
-    expect(bars[1]).toMatchObject({ date: "2026-08-30", heightPct: 100, heightPx: 120 });
-    expect(bars[2]).toMatchObject({ date: "2026-08-31", heightPct: 50, heightPx: 60 });
+    expect(bars[0]).toMatchObject({
+      date: "2026-08-29",
+      heightPct: 25,
+      heightPx: 30,
+    });
+    expect(bars[1]).toMatchObject({
+      date: "2026-08-30",
+      heightPct: 100,
+      heightPx: 120,
+    });
+    expect(bars[2]).toMatchObject({
+      date: "2026-08-31",
+      heightPct: 50,
+      heightPx: 60,
+    });
   });
 
   test("all-zero series produces zero heights without NaN", () => {

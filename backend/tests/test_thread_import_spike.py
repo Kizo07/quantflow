@@ -4,13 +4,37 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+import yaml
 from _router_auth_helpers import make_authed_test_app
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 
 from app.gateway.routers import threads
+from deerflow.config.app_config import reset_app_config
 from deerflow.persistence.thread_meta.memory import THREADS_NS, MemoryThreadMetaStore
+
+
+@pytest.fixture(autouse=True)
+def _config_env(tmp_path, monkeypatch):
+    """State-mutation routes read AppConfig on every request via
+    ``deps.get_run_context`` and 503 when no config.yaml exists (CI has none,
+    the file is gitignored). Point the loader at a minimal test config."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "sandbox": {"use": "deerflow.sandbox.local:LocalSandboxProvider"},
+                "models": [{"name": "test-model", "use": "langchain_openai:ChatOpenAI", "model": "gpt-test"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DEER_FLOW_CONFIG_PATH", str(config_path))
+    reset_app_config()
+    yield
+    reset_app_config()
 
 
 class _PermissiveThreadMetaStore(MemoryThreadMetaStore):

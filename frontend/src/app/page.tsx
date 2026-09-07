@@ -10,7 +10,7 @@ import { DEFAULT_LOCALE } from "@/core/i18n/locale";
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen w-full overflow-x-clip bg-[#0a0a0a]">
+    <div className="min-h-screen w-full overflow-x-clip bg-[#020609]">
       <Header locale={DEFAULT_LOCALE} />
       <main className="flex w-full flex-col">
         <Hero />

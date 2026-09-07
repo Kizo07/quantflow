@@ -135,8 +135,12 @@ describe("UsageDashboard", () => {
   });
 
   it("shows the unavailable state on ConsoleUnavailableError", async () => {
-    mockedStats.mockRejectedValue(new ConsoleUnavailableError("memory backend"));
-    mockedUsage.mockRejectedValue(new ConsoleUnavailableError("memory backend"));
+    mockedStats.mockRejectedValue(
+      new ConsoleUnavailableError("memory backend"),
+    );
+    mockedUsage.mockRejectedValue(
+      new ConsoleUnavailableError("memory backend"),
+    );
 
     render(<UsageDashboard />, { wrapper });
 

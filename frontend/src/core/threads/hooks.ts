@@ -55,7 +55,10 @@ import type {
   RunMessage,
   ThreadTokenUsageResponse,
 } from "./types";
-import { THREAD_ARCHIVED_METADATA_KEY, THREAD_PINNED_METADATA_KEY } from "./utils";
+import {
+  THREAD_ARCHIVED_METADATA_KEY,
+  THREAD_PINNED_METADATA_KEY,
+} from "./utils";
 
 export type ThreadStreamOptions = {
   threadId?: string | null | undefined;

@@ -57,7 +57,7 @@ export function UsageDashboard() {
 
   if (unavailable) {
     return (
-      <p className="text-sm text-muted-foreground">{t.usage.unavailable}</p>
+      <p className="text-muted-foreground text-sm">{t.usage.unavailable}</p>
     );
   }
 
@@ -69,9 +69,7 @@ export function UsageDashboard() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard
           label={t.usage.totalRuns}
-          value={
-            stats.data ? formatNumber(stats.data.total_runs, locale) : "—"
-          }
+          value={stats.data ? formatNumber(stats.data.total_runs, locale) : "—"}
         />
         <StatCard
           label={t.usage.totalThreads}
@@ -97,7 +95,7 @@ export function UsageDashboard() {
       </div>
 
       <section>
-        <h3 className="mb-2 text-sm font-medium text-muted-foreground">
+        <h3 className="text-muted-foreground mb-2 text-sm font-medium">
           {t.usage.lastDays.replace("{days}", String(USAGE_DAYS))}
         </h3>
         {usageData ? (
@@ -116,7 +114,7 @@ export function UsageDashboard() {
                     data-usage-bar
                     title={`${bar.date}: ${formatNumber(bar.tokens, locale)}`}
                     className={cn(
-                      "w-full max-w-8 rounded-t bg-primary/70",
+                      "bg-primary/70 w-full max-w-8 rounded-t",
                       bar.heightPx === 0 && "bg-muted",
                     )}
                     style={{ height: Math.max(bar.heightPx, 2) }}
@@ -126,18 +124,18 @@ export function UsageDashboard() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">—</p>
+          <p className="text-muted-foreground text-sm">—</p>
         )}
       </section>
 
       <section>
-        <h3 className="mb-2 text-sm font-medium text-muted-foreground">
+        <h3 className="text-muted-foreground mb-2 text-sm font-medium">
           {t.usage.byModel}
         </h3>
         {usageData && Object.keys(usageData.by_model).length > 0 ? (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b text-left text-muted-foreground">
+              <tr className="text-muted-foreground border-b text-left">
                 <th className="py-1.5 pr-2 font-normal">{t.usage.model}</th>
                 <th className="py-1.5 pr-2 text-right font-normal">
                   {t.usage.tokens}
@@ -173,7 +171,7 @@ export function UsageDashboard() {
             </tbody>
           </table>
         ) : (
-          <p className="text-sm text-muted-foreground">—</p>
+          <p className="text-muted-foreground text-sm">—</p>
         )}
       </section>
     </div>
@@ -182,8 +180,8 @@ export function UsageDashboard() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-card p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div className="bg-card rounded-lg border p-3">
+      <div className="text-muted-foreground text-xs">{label}</div>
       <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
     </div>
   );

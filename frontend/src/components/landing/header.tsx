@@ -29,7 +29,7 @@ export async function Header({ className, homeURL, locale }: HeaderProps) {
     >
       <div className="flex min-w-0 items-center gap-6">
         <a
-          href={homeURL ?? "https://github.com/bytedance/deer-flow"}
+          href={homeURL ?? "https://github.com/Kizo07/quantflow"}
           target={isExternalHome ? "_blank" : "_self"}
           rel={isExternalHome ? "noopener noreferrer" : undefined}
           className="font-serif text-xl whitespace-nowrap"
@@ -66,7 +66,7 @@ export async function Header({ className, homeURL, locale }: HeaderProps) {
           className="group relative z-10"
         >
           <a
-            href="https://github.com/bytedance/deer-flow"
+            href="https://github.com/Kizo07/quantflow"
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -93,7 +93,7 @@ async function StarCounter() {
 
   try {
     const response = await fetch(
-      "https://api.github.com/repos/bytedance/deer-flow",
+      "https://api.github.com/repos/Kizo07/quantflow",
       {
         headers: env.GITHUB_OAUTH_TOKEN
           ? {

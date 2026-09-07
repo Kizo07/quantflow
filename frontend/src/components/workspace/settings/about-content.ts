@@ -4,7 +4,7 @@
  */
 import { APP_VERSION } from "@/version";
 
-export const aboutMarkdown = `# [About quantflow ${APP_VERSION}](https://github.com/bytedance/deer-flow)
+export const aboutMarkdown = `# [About quantflow ${APP_VERSION}](https://github.com/Kizo07/quantflow)
 
 > **From Open Source, Back to Open Source**
 
@@ -24,17 +24,17 @@ quantflow is an open-source **super agent harness** that orchestrates **sub-agen
 
 ## 🌟 GitHub Repository
 
-![Star History Chart](https://api.star-history.com/svg?repos=bytedance/deer-flow&type=Date)
+![Star History Chart](https://api.star-history.com/svg?repos=Kizo07/quantflow&type=Date)
 
-Explore quantflow on GitHub: [github.com/bytedance/deer-flow](https://github.com/bytedance/deer-flow)
+Explore quantflow on GitHub: [github.com/Kizo07/quantflow](https://github.com/Kizo07/quantflow)
 
 ## 🌐 Official Website
 
-Visit the official website of quantflow: [deerflow.tech](https://deerflow.tech/)
+Visit the official website of quantflow: [kizo07.github.io](https://kizo07.github.io/)
 
 ## 📧 Support
 
-If you have any questions or need help, please contact us at [support@deerflow.tech](mailto:support@deerflow.tech).
+If you have any questions or need help, please open an issue on [GitHub](https://github.com/Kizo07/quantflow/issues).
 
 ---
 

@@ -1,4 +1,4 @@
-# 🦌 [About DeerFlow 2.0](https://github.com/bytedance/deer-flow)
+# 🦌 [About DeerFlow 2.0](https://github.com/Kizo07/quantflow)
 
 > **From Open Source, Back to Open Source**
 
@@ -10,15 +10,15 @@ different levels of tasks that could take minutes to hours.
 
 ## 🌟 GitHub Repository
 
-Explore DeerFlow on GitHub: [github.com/bytedance/deer-flow](https://github.com/bytedance/deer-flow)
+Explore DeerFlow on GitHub: [github.com/Kizo07/quantflow](https://github.com/Kizo07/quantflow)
 
 ## 🌐 Official Website
 
-Visit the official website of DeerFlow: [deerflow.tech](https://deerflow.tech/)
+Visit the official website of DeerFlow: [kizo07.github.io](https://kizo07.github.io/)
 
 ## 📧 Support
 
-If you have any questions or need help, please contact us at [support@deerflow.tech](mailto:support@deerflow.tech).
+If you have any questions or need help, please open an issue on [GitHub](https://github.com/Kizo07/quantflow/issues).
 
 ---
 

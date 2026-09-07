@@ -90,7 +90,7 @@ export function WorkspaceNavMenu() {
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <a
-                    href="https://deerflow.tech/"
+                    href="https://kizo07.github.io/"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -100,7 +100,7 @@ export function WorkspaceNavMenu() {
                     </DropdownMenuItem>
                   </a>
                   <a
-                    href="https://github.com/bytedance/deer-flow"
+                    href="https://github.com/Kizo07/quantflow"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -111,7 +111,7 @@ export function WorkspaceNavMenu() {
                   </a>
                   <DropdownMenuSeparator />
                   <a
-                    href="https://github.com/bytedance/deer-flow/issues"
+                    href="https://github.com/Kizo07/quantflow/issues"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -120,7 +120,11 @@ export function WorkspaceNavMenu() {
                       {t.workspace.reportIssue}
                     </DropdownMenuItem>
                   </a>
-                  <a href="mailto:support@deerflow.tech">
+                  <a
+                    href="https://github.com/Kizo07/quantflow/issues"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     <DropdownMenuItem>
                       <MailIcon />
                       {t.workspace.contactUs}

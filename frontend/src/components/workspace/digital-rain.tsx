@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from "react";
 
 // Digital rain ported from the Kizo07 portfolio site (assets/matrix.js):
 // cyan streams with occasional ledger-gold ones, rendered on one
-// viewport-sized decorative canvas behind the landing content.
+// viewport-sized decorative canvas over the workspace app. The canvas is
+// pointer-events-none and sits below dialogs/menus (z-50) so the app stays
+// fully interactive; a horizontal mask keeps the busy center calm.
 const GLYPHS =
   "01アイウエオカキクケコサシスセソタチツテトナニヌネノラリルレロΣλΔΩπ";
 const MOTION_STORAGE_KEY = "quantflow-motion";
@@ -213,7 +215,7 @@ export function DigitalRain() {
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className="pointer-events-none fixed inset-0 z-0 h-full w-full [mask-image:linear-gradient(90deg,#000,rgba(0,0,0,0.55)_22%,rgba(0,0,0,0.4)_50%,rgba(0,0,0,0.55)_78%,#000)] opacity-42"
+        className="pointer-events-none fixed inset-0 z-30 h-full w-full [mask-image:linear-gradient(90deg,#000,rgba(0,0,0,0.5)_25%,rgba(0,0,0,0.3)_50%,rgba(0,0,0,0.5)_75%,#000)] opacity-30"
       />
       <button
         ref={toggleRef}
@@ -221,7 +223,7 @@ export function DigitalRain() {
         hidden={reducedMotion}
         aria-label={label}
         title={label}
-        className="bg-background/80 text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground fixed bottom-6 left-6 z-20 grid size-8 place-items-center rounded-md border backdrop-blur-sm transition-colors"
+        className="bg-background/80 text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground fixed right-6 bottom-6 z-40 grid size-8 place-items-center rounded-md border backdrop-blur-sm transition-colors"
       >
         {paused ? (
           <PlayIcon className="size-3.5" aria-hidden="true" />

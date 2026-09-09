@@ -6,7 +6,7 @@ test.describe("Localized documentation links", () => {
   }) => {
     await page.goto("/en/docs/introduction/core-concepts");
 
-    const card = page.locator("a.nextra-card", { hasText: "Why quantflow" });
+    const card = page.locator("a.nextra-card", { hasText: "Why QuantFlow" });
     await expect(card).toHaveAttribute(
       "href",
       "/en/docs/introduction/why-deerflow",
@@ -14,7 +14,7 @@ test.describe("Localized documentation links", () => {
 
     await card.click();
     await expect(page).toHaveURL(/\/en\/docs\/introduction\/why-deerflow$/);
-    await expect(page.locator("main h1")).toContainText("Why quantflow");
+    await expect(page.locator("main h1")).toContainText("Why QuantFlow");
   });
 
   test("keeps Chinese card navigation in the Chinese docs", async ({

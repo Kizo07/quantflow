@@ -14,8 +14,9 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "quantflow",
-  description: "A LangChain-based framework for building super agents.",
+  title: "QuantFlow",
+  description:
+    "QuantFlow — a personal SuperAgent workspace that researches, codes, and creates. Built on the open-source DeerFlow harness.",
 };
 
 export default function RootLayout({

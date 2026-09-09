@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: Learn how to create and run a quantflow agent with create_deerflow_agent, from model setup to streaming responses.
+description: Learn how to create and run a QuantFlow agent with create_deerflow_agent, from model setup to streaming responses.
 ---
 
 import { Callout, Steps } from "nextra/components";
@@ -8,15 +8,15 @@ import { Callout, Steps } from "nextra/components";
 # Quick Start
 
 <Callout type="info" emoji="🚀">
-  This guide shows you how to build and run a quantflow agent in Python with
+  This guide shows you how to build and run a QuantFlow agent in Python with
   <code>create_deerflow_agent</code>.
 </Callout>
 
-The fastest way to understand quantflow Harness is to create an agent directly in code. This quick start walks through model setup, agent creation, and streaming a response.
+The fastest way to understand QuantFlow Harness is to create an agent directly in code. This quick start walks through model setup, agent creation, and streaming a response.
 
 ## Prerequisites
 
-quantflow Harness requires Python 3.12 or later. The package is part of the `deerflow` repository under `backend/packages/harness`.
+QuantFlow Harness requires Python 3.12 or later. The package is part of the `deerflow` repository under `backend/packages/harness`.
 
 If you are working from the repository clone:
 
@@ -53,13 +53,13 @@ model = ChatOpenAI(
 agent = create_deerflow_agent(model)
 ```
 
-This returns a compiled LangGraph agent with quantflow's default middleware chain.
+This returns a compiled LangGraph agent with QuantFlow's default middleware chain.
 
 ### Stream a response
 
 ```python
 for event in agent.stream(
-    {"messages": [{"role": "user", "content": "Explain what quantflow Harness is."}]},
+    {"messages": [{"role": "user", "content": "Explain what QuantFlow Harness is."}]},
     stream_mode=["messages", "values"],
 ):
     print(event)

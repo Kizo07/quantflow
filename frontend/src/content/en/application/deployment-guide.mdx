@@ -1,17 +1,17 @@
 ---
 title: Deployment Guide
-description: "This guide covers all supported deployment methods for quantflow App: local development, Docker Compose, and production with Kubernetes-managed sandboxes."
+description: "This guide covers all supported deployment methods for QuantFlow App: local development, Docker Compose, and production with Kubernetes-managed sandboxes."
 ---
 
 import { Callout, Steps, Tabs } from "nextra/components";
 
 # Deployment Guide
 
-This guide covers all supported deployment methods for quantflow App: local development, Docker Compose, and production with Kubernetes-managed sandboxes.
+This guide covers all supported deployment methods for QuantFlow App: local development, Docker Compose, and production with Kubernetes-managed sandboxes.
 
 ## Local development deployment
 
-The local workflow is the fastest way to run quantflow. All services run as native processes on your machine.
+The local workflow is the fastest way to run QuantFlow. All services run as native processes on your machine.
 
 <Tabs items={["Start", "Stop", "Logs"]}>
   <Tabs.Tab>
@@ -123,7 +123,7 @@ For any deployment with more than one concurrent user, use a container-based san
 
 SQLite is convenient for local development and single-user deployments, but it is not a production backend for concurrent users.
 
-In SQLite mode, quantflow stores LangGraph checkpoint data and application data in one `deerflow.db` file. WAL mode allows concurrent reads, but SQLite still permits only one writer at a time. When several users run agents at once, checkpoint writes and application writes can contend for the same file and raise `sqlite3.OperationalError: database is locked`.
+In SQLite mode, QuantFlow stores LangGraph checkpoint data and application data in one `deerflow.db` file. WAL mode allows concurrent reads, but SQLite still permits only one writer at a time. When several users run agents at once, checkpoint writes and application writes can contend for the same file and raise `sqlite3.OperationalError: database is locked`.
 
 For production or any multi-user deployment, use Postgres:
 
@@ -190,7 +190,7 @@ nginx routes all traffic to the frontend or Gateway. `/api/langgraph/*` is rewri
 
 ### Authentication
 
-quantflow App uses [Better Auth](https://www.better-auth.com/) for session management. In production:
+QuantFlow App uses [Better Auth](https://www.better-auth.com/) for session management. In production:
 
 1. Set `BETTER_AUTH_SECRET` to a strong random string (minimum 32 characters).
 2. Set `BETTER_AUTH_URL` to your public-facing URL (e.g., `https://your-domain.com`).

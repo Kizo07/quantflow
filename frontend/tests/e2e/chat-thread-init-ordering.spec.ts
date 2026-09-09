@@ -72,7 +72,7 @@ test.describe("Chat: thread API request ordering on first send", () => {
     await textarea.press("Enter");
 
     // Wait for streaming response so all init requests have a chance to fire.
-    await expect(page.getByText("Hello from quantflow!")).toBeVisible({
+    await expect(page.getByText("Hello from QuantFlow!")).toBeVisible({
       timeout: 15_000,
     });
 

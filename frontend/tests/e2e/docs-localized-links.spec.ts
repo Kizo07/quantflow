@@ -6,7 +6,7 @@ test.describe("Localized documentation links", () => {
   }) => {
     await page.goto("/en/docs/introduction/core-concepts");
 
-    const card = page.locator("a.nextra-card", { hasText: "Why quantflow" });
+    const card = page.locator("a.nextra-card", { hasText: "Why QuantFlow" });
     await expect(card).toHaveAttribute(
       "href",
       "/en/docs/introduction/why-deerflow",
@@ -14,7 +14,7 @@ test.describe("Localized documentation links", () => {
 
     await card.click();
     await expect(page).toHaveURL(/\/en\/docs\/introduction\/why-deerflow$/);
-    await expect(page.locator("main h1")).toContainText("Why quantflow");
+    await expect(page.locator("main h1")).toContainText("Why QuantFlow");
   });
 
   test("keeps Chinese card navigation in the Chinese docs", async ({
@@ -72,12 +72,12 @@ test.describe("Localized documentation links", () => {
 
     await expect(
       page.getByRole("link", { name: "Question? Give us feedback" }),
-    ).toHaveAttribute("href", /github\.com\/bytedance\/deer-flow\/issues\/new/);
+    ).toHaveAttribute("href", /github\.com\/Kizo07\/quantflow\/issues\/new/);
     await expect(
       page.getByRole("link", { name: "Edit this page" }),
     ).toHaveAttribute(
       "href",
-      "https://github.com/bytedance/deer-flow/tree/main/frontend/src/content/en/application/quick-start.mdx",
+      "https://github.com/Kizo07/quantflow/tree/main/frontend/src/content/en/application/quick-start.mdx",
     );
   });
 });

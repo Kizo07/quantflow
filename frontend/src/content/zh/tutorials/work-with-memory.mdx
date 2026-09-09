@@ -1,11 +1,11 @@
 ---
 title: 使用记忆系统
-description: 本教程介绍如何在 quantflow 中启用和使用记忆系统，让 Agent 在多次会话中记住关于你的重要信息。
+description: 本教程介绍如何在 QuantFlow 中启用和使用记忆系统，让 Agent 在多次会话中记住关于你的重要信息。
 ---
 
 # 使用记忆系统
 
-本教程介绍如何在 quantflow 中启用和使用记忆系统，让 Agent 在多次会话中记住关于你的重要信息。
+本教程介绍如何在 QuantFlow 中启用和使用记忆系统，让 Agent 在多次会话中记住关于你的重要信息。
 
 ## 启用记忆
 
@@ -28,7 +28,7 @@ memory:
 2. **自动学习**：Agent 在后台提取并保存重要事实。
 3. **后续对话**：记忆事实自动注入到系统提示中，Agent 无需你重新解释背景。
 
-quantflow 也提供实验性的 `mode: tool`。在工具模式中，Agent 会获得 `memory_search`、`memory_add`、`memory_update` 和 `memory_delete` 工具，并自行决定何时调用。除非你明确想评估模型主动管理记忆的行为，否则建议保持 `mode: middleware`。
+QuantFlow 也提供实验性的 `mode: tool`。在工具模式中，Agent 会获得 `memory_search`、`memory_add`、`memory_update` 和 `memory_delete` 工具，并自行决定何时调用。除非你明确想评估模型主动管理记忆的行为，否则建议保持 `mode: middleware`。
 
 ## 示例
 
@@ -58,5 +58,5 @@ cat backend/.deer-flow/memory.json
 
 ## 下一步
 
-- [部署你的 quantflow](/docs/tutorials/deploy-your-own-deerflow)
+- [部署你的 QuantFlow](/docs/tutorials/deploy-your-own-deerflow)
 - [记忆系统文档](/docs/harness/memory)

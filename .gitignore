@@ -31,6 +31,8 @@ backend/scripts/benchmark/*.jsonl
 
 # Configuration files
 config.yaml
+# Backup copies of config/env files (e.g. config.yaml.bak-models-20260904)
+*.bak*
 mcp_config.json
 extensions_config.json
 
@@ -60,7 +62,6 @@ web/
 
 # Deployment artifacts
 backend/Dockerfile.langgraph
-config.yaml.bak
 .playwright-mcp
 /frontend/test-results/
 /frontend/playwright-report/

@@ -45,6 +45,12 @@ export function DigitalRain() {
       "(prefers-reduced-motion: reduce)",
     );
 
+    // Decorative animation: stay inert under browser automation (e2e) so
+    // tests exercise the app without background rAF/canvas work. One static
+    // frame is still drawn for visual consistency.
+    const automated = navigator.webdriver === true;
+    const stillMotion = () => reducedMotionQuery.matches || automated;
+
     try {
       pausedRef.current = localStorage.getItem(MOTION_STORAGE_KEY) === "paused";
     } catch {}
@@ -143,16 +149,12 @@ export function DigitalRain() {
     };
 
     const sync = () => {
-      setReducedMotion(reducedMotionQuery.matches);
+      setReducedMotion(stillMotion());
       setPaused(pausedRef.current);
       cancelAnimationFrame(frame);
       frame = 0;
       lastFrame = 0;
-      if (
-        !pausedRef.current &&
-        !reducedMotionQuery.matches &&
-        !document.hidden
-      ) {
+      if (!pausedRef.current && !stillMotion() && !document.hidden) {
         frame = requestAnimationFrame(tick);
       }
     };

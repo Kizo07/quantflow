@@ -449,19 +449,35 @@ async def langgraph_runtime(app: FastAPI, startup_config: AppConfig) -> AsyncGen
         app.state.checkpointer = await stack.enter_async_context(make_checkpointer(config))
         app.state.store = await stack.enter_async_context(make_store(config))
 
+        # Record the checkpointer/Store backend selected from this startup
+        # snapshot so GET /health/ready probes what the running process
+        # actually uses. These singletons are restart-required by design and
+        # are never rebuilt on config.yaml hot reload, so the probe must not
+        # re-resolve process-wide configuration per request.
+        from app.gateway.health import READINESS_CHECKPOINTER_CONFIG_ATTR, resolve_checkpointer_config
+
+        setattr(app.state, READINESS_CHECKPOINTER_CONFIG_ATTR, resolve_checkpointer_config(config))
+
         # Initialize repositories — one get_session_factory() call for all.
         sf = get_session_factory()
         if sf is not None:
             from deerflow.persistence.feedback import FeedbackRepository
+            from deerflow.persistence.personal_access_tokens import PersonalAccessTokenRepository
             from deerflow.persistence.run import RunRepository
 
             app.state.run_store = RunRepository(sf)
             app.state.feedback_repo = FeedbackRepository(sf)
+            from app.gateway.auth.pat import PAT_LAST_USED_WRITE_INTERVAL_SECONDS
+
+            app.state.pat_repo = PersonalAccessTokenRepository(sf, last_used_write_interval_seconds=PAT_LAST_USED_WRITE_INTERVAL_SECONDS)
         else:
             from deerflow.runtime.runs.store.memory import MemoryRunStore
 
             app.state.run_store = MemoryRunStore()
             app.state.feedback_repo = None
+            # Memory backend has no durable PAT store, so Bearer credentials
+            # cannot be validated there and are rejected by the middleware.
+            app.state.pat_repo = None
 
         # Services are app-scoped. Capture this app's immutable extension set
         # once and close over the same object for teardown; the process-wide
@@ -497,12 +513,14 @@ async def langgraph_runtime(app: FastAPI, startup_config: AppConfig) -> AsyncGen
         app.state.thread_store = make_thread_store(sf, app.state.store)
         if sf is not None:
             from deerflow.persistence.mcp_tasks import McpTaskRepository
+            from deerflow.persistence.projects import ProjectRepository
             from deerflow.persistence.scheduled_task_runs import (
                 ScheduledTaskRunRepository,
             )
             from deerflow.persistence.scheduled_tasks import ScheduledTaskRepository
             from deerflow.persistence.subagent_batches import SubagentBatchRepository
 
+            app.state.project_repo = ProjectRepository(sf)
             app.state.scheduled_task_repo = ScheduledTaskRepository(
                 sf,
                 run_repository=app.state.run_store,
@@ -515,6 +533,7 @@ async def langgraph_runtime(app: FastAPI, startup_config: AppConfig) -> AsyncGen
             app.state.subagent_batch_repo = SubagentBatchRepository(sf)
         else:
             app.state.mcp_task_repo = None
+            app.state.project_repo = None
             app.state.subagent_batch_repo = None
             app.state.scheduled_task_repo = None
             app.state.scheduled_task_run_repo = None
@@ -632,6 +651,7 @@ get_checkpointer: Callable[[Request], Checkpointer] = _require("checkpointer", "
 get_run_event_store: Callable[[Request], RunEventStore] = _require("run_event_store", "Run event store")
 get_feedback_repo: Callable[[Request], FeedbackRepository] = _require("feedback_repo", "Feedback")
 get_run_store: Callable[[Request], RunStore] = _require("run_store", "Run store")
+get_project_repo = _require("project_repo", "Projects")
 
 
 def get_store(request: Request):
@@ -752,6 +772,19 @@ def get_local_provider() -> LocalAuthProvider:
     return _cached_local_provider
 
 
+def get_pat_repo(request: Request):
+    """Return the personal-access-token repository from app state.
+
+    Raises 503 when the process runs on the memory backend (no durable PAT
+    storage), so PAT management routes fail explicitly instead of silently
+    accepting tokens nobody can validate.
+    """
+    pat_repo = getattr(request.app.state, "pat_repo", None)
+    if pat_repo is None:
+        raise HTTPException(status_code=503, detail="Personal access tokens require a configured database")
+    return pat_repo
+
+
 async def get_current_user_from_request(request: Request):
     """Get the current authenticated user from the request cookie.
 
@@ -759,12 +792,13 @@ async def get_current_user_from_request(request: Request):
     """
     state = getattr(request, "state", None)
     state_user = getattr(state, "user", None)
-    from app.gateway.auth_disabled import AUTH_SOURCE_AUTH_DISABLED, AUTH_SOURCE_INTERNAL, AUTH_SOURCE_SESSION
+    from app.gateway.auth_disabled import AUTH_SOURCE_AUTH_DISABLED, AUTH_SOURCE_INTERNAL, AUTH_SOURCE_PAT, AUTH_SOURCE_SESSION
 
     if state_user is not None and getattr(state, "auth_source", None) in {
         AUTH_SOURCE_SESSION,
         AUTH_SOURCE_AUTH_DISABLED,
         AUTH_SOURCE_INTERNAL,
+        AUTH_SOURCE_PAT,
     }:
         return state_user
 
@@ -817,6 +851,13 @@ async def is_admin_user(request: Request) -> bool:
     per-router copies that previously existed in ``mcp``, ``channel_connections``
     and ``channels``.
     """
+    # PAT credentials never carry admin capability: no scope in the PAT
+    # universe grants it, so an admin's automation token must not unlock
+    # admin-only routes (skill installs, integration credentials, MCP config).
+    from app.gateway.auth_disabled import AUTH_SOURCE_PAT
+
+    if getattr(request.state, "auth_source", None) == AUTH_SOURCE_PAT:
+        return False
     user = getattr(request.state, "user", None)
     if user is None:
         user = await get_current_user_from_request(request)

@@ -1,0 +1,25 @@
+{
+  "release_id": "8bc95a9b136b",
+  "qmd_sha256": "d7b1590dbd6fb1662bf65d76756a72246a3d14de56d3d91126f7fac3b5da49f5",
+  "registry_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "toolchain": {
+    "quarto": "1.10.18",
+    "python": "3.12.14",
+    "reportforge": "0.1.0"
+  },
+  "template_version": "6d194f08ad3e",
+  "revision": 2,
+  "registry_version": 0,
+  "artifacts": {
+    "pdf": {
+      "path": "/home/fire/Documents/report-forge/reports/msft-12m-muse-light-v2/output/index.pdf",
+      "sha256": "be253effaa44f89814524da1eef0a0a5fbe55baa5aaa9ba066d4c1092d6754ab",
+      "bytes": 2802385
+    },
+    "html": {
+      "path": "/home/fire/Documents/report-forge/reports/msft-12m-muse-light-v2/output/index.html",
+      "sha256": "aaf354215dced3fcf360ee2b1c25e10e7f8ff337fcf542cd27d61040ce268fba",
+      "bytes": 76442
+    }
+  }
+}

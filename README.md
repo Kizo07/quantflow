@@ -5,6 +5,8 @@ into a local quant stack (market data, factors, backtests, portfolio constructio
 and a multi-format report engine — ask for stock ideas, evidence-backed research,
 and investment-committee style reports.
 
+![QuantFlow workspace — chat, desk analysts, and report deliverables](docs/images/quantflow-workspace.jpg)
+
 > **Fork note:** QuantFlow is forked from
 > [**DeerFlow**](https://github.com/bytedance/deer-flow) by ByteDance (the 2.0
 > super-agent harness: sub-agents, skills, memory, sandboxes). All harness credit
@@ -15,24 +17,62 @@ and investment-committee style reports.
 ## What's different in this fork
 
 - **alpha_engine MCP integration** (local stdio server, wired via
-  `extensions_config.json` — see "Quant MCP servers" below; tools catalogued in
-  `config/quant_tools.yaml`, validated by `scripts/validate_quant_tools.py`):
-  S&P 500 price history, FF/AQR/JKP factor analysis, walk-forward ML signal
-  scores, momentum backtests + GPU param sweeps, portfolio optimization
-  (max-Sharpe / HRP / Black-Litterman), Brinson attribution, and factor risk
-  decomposition — dealt out to desk agents per tool (`quant-analyst`,
-  `technical-analyst`, `risk-manager`).
-- **report-forge MCP integration** (host-side stdio server): one-source reports
-  rendered via Quarto to HTML / PDF (Typst) / pdf-web / DOCX, with code execution
-  (`reportforge_run_code`), static chart export, asset ingestion, and project
-  inspection — see `docs/plans/2026-09-01-reportforge-native-flexibility.md`.
-- **kizonlp MCP integration**: financial NLP (sentiment scoring, zero-shot
-  classification, summarization, keyphrases, PDF extraction) feeding the
-  news/document analysts.
+  `extensions_config.json` — see "Quant MCP servers" below; 17 tools
+  catalogued in `config/quant_tools.yaml` and machine-checked by
+  `scripts/validate_quant_tools.py`), dealt out to desk agents per tool:
+  - *Data, survivorship-bias-free*: `engine_status` (freshness first),
+    `get_price_history`, `get_latest_quotes`, `list_instruments`,
+    `universe_members_as_of` (point-in-time S&P membership, mandatory for
+    any historical selection), `cross_section_returns` (whole-universe
+    breadth + concentration), `refresh_data` (quant-analyst only).
+  - *Factors & signals*: `get_factor_history` (FF/AQR/JKP/universe factors),
+    `run_factor_analysis` (IC + quantile tearsheets, builtin or DSL),
+    `ml_signal_scores` (walk-forward, no look-ahead).
+  - *Backtests*: `run_momentum_backtest`, `run_param_sweep` (CUDA grid
+    search over lookback × top_n).
+  - *Portfolio*: `optimize_portfolio` (max-Sharpe / HRP / Black-Litterman /
+    equal-weight), `attribute_portfolio` (factor attribution),
+    `brinson_attribution` (allocation/selection/interaction vs benchmark),
+    `portfolio_risk_decomposition` (factor vs idiosyncratic vol).
+  - *Reports*: `render_report` — interactive HTML tearsheets
+    (`backtest` | `factor` | `single_name` equity note | `portfolio`
+    review) in the QuantFlow identity (`quantflow-dark`/`light`,
+    `ledger-dark`/`light`), with `png_dir` PNG export feeding print
+    reports and an `intro` narrative lead-in.
+- **report-forge MCP integration** (host-side stdio server, ~30 tools):
+  one-source reports rendered via Quarto to HTML / PDF (Typst) / pdf-web /
+  DOCX — scaffold → write → gate → publish, with infographic covers
+  (verdict band, key-point cards, 3-scenario strip), `rf-showtable`
+  spreadsheet tables, native Exhibit numbering, provenance-burned charts,
+  and mechanical quality gates that refuse to ship bad exhibits.
+  16 templates: 8 base (`standard`, `memo`, `whitepaper`, `modern`,
+  `studio`, `portfolio-light/dark`, `bespoke`) + 8 domain briefs
+  (`earnings-recap`, `sector-outlook`, `thematic-deepdive`,
+  `macro-outlook`, `quant-factor-brief`, `technical-brief`,
+  `esg-sustainability`, `crypto-digital`). Code execution
+  (`reportforge_run_code`), static chart export, asset ingestion, and
+  project inspection included — see
+  `docs/plans/2026-09-01-reportforge-native-flexibility.md`.
+- **kizonlp MCP integration**: financial NLP feeding the news/document
+  analysts — `fin_sentiment` (transformer tone scoring), `zero_shot_classify`
+  (guidance/risk/forward-looking labels), `summarize`, `extract_keyphrases`,
+  `pdf_text` (earnings releases, filings, transcripts).
 - **quant-desk skill** (`skills/custom/quant-desk/SKILL.md`): a CIO-style
   evidence-first workflow — frame the brief, gather evidence in parallel,
   bull-vs-bear debate, risk-manager veto, then a sourced synthesis. Research
-  only, never financial advice.
+  only, never financial advice. Specialist roster: `quant-analyst`
+  (owns every number), `technical-analyst` (setups, levels, regimes),
+  `news-analyst` (dated catalysts + sentiment), `earnings-analyst`
+  (print vs consensus, guidance, call signals), `sector-researcher`
+  (peer comps, cycle position), `macro-analyst` (rates/FX/commodities,
+  scenario math), `thematic-analyst` and `demand-analyst` (theme exposure,
+  TAM-with-math), `document-analyst` (attached files), `bull/bear-researcher`
+  (adversarial debate with recorded demotions), `risk-manager` (caps,
+  concentration, vol budgets). Reader-facing output is always branded
+  `QuantFlow Research` — never upstream names.
+- **QuantFlow personalization**: full UI rebrand plus a theme-aware
+  digital-rain workspace backdrop (toggleable, respects
+  `prefers-reduced-motion` and stays off under browser automation).
 - **More model choices**: `config.example.yaml` shows the OpenAI-compatible
   gateway pattern, so you can add Meta's Muse Spark family via the Meta Model
   API alongside the Qwen / GLM / DeepSeek / Kimi examples — see "Muse models"
@@ -112,6 +152,33 @@ Ask things like *"find 10 momentum names with fresh catalysts"* or
 
 Data freshness first: the desk checks `engine_status` and refreshes the local
 store (`refresh_data`, quant-analyst only) before trusting a screen.
+
+## Flagship reports
+
+Full investment-committee deliverables this stack has produced —
+desk research through alpha_engine, typeset by report-forge (PDF + HTML,
+verdict call with bear/base/bull scenarios):
+
+- **MSFT 12-month outlook** (14pp, light edition, Sep 2026) — OVERWEIGHT,
+  Base $575 (+16.8% from $492.44), 16 exhibits. Full report in-repo:
+  [PDF](docs/showcase/msft-12m-outlook/index.pdf) ·
+  [HTML](docs/showcase/msft-12m-outlook/index.html).
+- **GOOGL 12-month outlook** (26pp, dark + light editions) — OVERWEIGHT,
+  Base $415 (+23%), 25 charts.
+- **META 12-month outlook** (24pp) — Base $720, 25 charts.
+- **NVDA 12-month outlook** (22pp), **MU deep-dive** (30pp).
+
+Cover with verdict band, key-point cards and scenario strip, all on page 1:
+
+![MSFT flagship cover](docs/showcase/msft-12m-outlook/cover.png)
+
+Exhibit-led body — scenario fan with labeled terminal values, provenance
+burned into every chart:
+
+![MSFT scenario fan](docs/showcase/msft-12m-outlook/charts/ex03-fan.png)
+
+Ask the desk for the next one the same way: *"produce a full 12-month
+outlook on TICKER"*.
 
 ## Repo map
 

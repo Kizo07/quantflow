@@ -172,10 +172,10 @@ Cover with verdict band, key-point cards and scenario strip, all on page 1:
 
 ![MSFT flagship cover](docs/showcase/msft-12m-outlook/cover.png)
 
-Exhibit-led body — scenario fan with labeled terminal values, provenance
-burned into every chart:
+Exhibit-led body — distribution exhibits, spreadsheet scenario tables,
+and running risk analysis, all cross-referenced:
 
-![MSFT scenario fan](docs/showcase/msft-12m-outlook/charts/ex03-fan.png)
+![MSFT report body — risk and sizing spread](docs/showcase/msft-12m-outlook/body-risk-sizing.png)
 
 Ask the desk for the next one the same way: *"produce a full 12-month
 outlook on TICKER"*.

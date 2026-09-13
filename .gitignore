@@ -29,6 +29,9 @@ backend/scripts/benchmark/*.jsonl
 # Environment variables
 .env
 
+# Machine-local ZCode agent wiring (MCP servers, personal paths)
+.zcode/
+
 # Configuration files
 config.yaml
 # Backup copies of config/env files (e.g. config.yaml.bak-models-20260904)

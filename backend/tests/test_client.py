@@ -4223,3 +4223,15 @@ class TestBugAgentInvalidationInconsistency:
 
         assert client._agent is None
         assert client._agent_config_key is None
+
+
+def test_embedded_default_recursion_limit_matches_scheduler(client):
+    """Dense multi-step runs must not die at LangGraph's 100-step default.
+
+    Regression: a 10-page report run hit GraphRecursionError at 100 steps
+    while the scheduler and frontend both budget 1000. The embedded
+    client default now matches; explicit overrides still win.
+    """
+    assert client._get_runnable_config("t1").get("recursion_limit") == 1000
+    assert client._get_runnable_config(
+        "t1", recursion_limit=25).get("recursion_limit") == 25

@@ -2166,7 +2166,11 @@ def ls_tool(runtime: Runtime, path: str, description: str = "") -> str:
     except FileNotFoundError:
         return f"Error: Directory not found: {requested_path}"
     except PermissionError:
-        return f"Error: Permission denied: {requested_path}"
+        return (
+            f"Error: Permission denied: {requested_path} "
+            "(sandbox tools only see /mnt/... virtual paths — thread "
+            "deliverables live under /mnt/user-data/outputs)"
+        )
     except Exception as e:
         return f"Error: Unexpected error listing directory: {_sanitize_error(e, runtime)}"
 

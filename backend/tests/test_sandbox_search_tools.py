@@ -847,3 +847,28 @@ def test_ls_tool_does_not_surface_disabled_custom_skill(tmp_path, monkeypatch) -
 
     assert "secret-custom" not in result
     assert "open-custom" in result
+
+
+def test_ls_denial_hints_at_virtual_paths(tmp_path, monkeypatch) -> None:
+    """ls on a host-absolute path outside the mounts must hint /mnt/...
+
+    Regression: a 2026-09-13 harness run died guessing a host report
+    path; the bare denial gave no pointer to the virtual tree.
+    """
+    from deerflow.sandbox.tools import ls_tool
+
+    runtime = _make_runtime(tmp_path)
+    (tmp_path / "workspace").mkdir(exist_ok=True)
+    monkeypatch.setattr(
+        "deerflow.sandbox.tools.ensure_sandbox_initialized",
+        lambda runtime: LocalSandbox(id="local"),
+    )
+
+    result = ls_tool.func(
+        runtime=runtime,
+        description="list host path",
+        path=str(tmp_path / "nope-outside-mounts"),
+    )
+
+    assert "Permission denied" in result
+    assert "/mnt/" in result

@@ -6,6 +6,7 @@ import concurrent.futures
 import contextvars
 import functools
 import logging
+import threading
 from collections.abc import Callable
 from typing import Any, get_type_hints
 
@@ -17,6 +18,62 @@ logger = logging.getLogger(__name__)
 _SYNC_TOOL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=10, thread_name_prefix="tool-sync")
 
 atexit.register(lambda: _SYNC_TOOL_EXECUTOR.shutdown(wait=False))
+
+# Process-global event loop for sync -> async bridging, running on its own
+# daemon thread (same pattern as the BoxLite provider and the browser
+# session manager). Every sync tool call is marshalled onto THIS loop via
+# run_coroutine_threadsafe, so parallel calls share one loop.
+#
+# Why not asyncio.run() per call: the MCP session pool keys in-flight
+# session creation by event loop. Per-call loops made parallel calls to
+# the same server arrive on different loops, where each new arrival
+# evicts and cancels the others' creations mid-initialize() — surfacing
+# as a bare CancelledError that kills the whole tools node. One shared
+# loop keeps same-server callers on the join path instead.
+_shared_loop_guard = threading.Lock()
+_shared_loop: asyncio.AbstractEventLoop | None = None
+_shared_loop_thread: threading.Thread | None = None
+
+
+def _shared_event_loop() -> asyncio.AbstractEventLoop:
+    """Return the process-global bridge loop, starting it on first use."""
+    global _shared_loop, _shared_loop_thread
+    with _shared_loop_guard:
+        if _shared_loop is None or _shared_loop.is_closed():
+            loop = asyncio.new_event_loop()
+            thread = threading.Thread(
+                target=loop.run_forever,
+                name="tool-sync-loop",
+                daemon=True,
+            )
+            thread.start()
+            _shared_loop = loop
+            _shared_loop_thread = thread
+        assert _shared_loop is not None
+        return _shared_loop
+
+
+def _shutdown_shared_loop() -> None:
+    global _shared_loop, _shared_loop_thread
+    with _shared_loop_guard:
+        loop, _shared_loop, _shared_loop_thread = (_shared_loop, None, None)
+    if loop is not None and not loop.is_closed():
+        try:
+            loop.call_soon_threadsafe(loop.stop)
+        except RuntimeError:
+            pass
+
+
+atexit.register(_shutdown_shared_loop)
+
+
+def _run_on_shared_loop(coro: Any) -> Any:
+    """Drive one coroutine on the shared bridge loop from any thread."""
+    loop = _shared_event_loop()
+    if threading.current_thread() is _shared_loop_thread:
+        raise RuntimeError("sync tool invoked from inside the shared bridge loop thread; refusing to deadlock")
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result()
 
 
 def _get_runnable_config_param(func: Callable[..., Any]) -> str | None:
@@ -83,10 +140,13 @@ def make_sync_tool_wrapper(coro: Callable[..., Any], tool_name: str) -> Callable
 
         try:
             if loop is not None and loop.is_running():
+                # Blocking .result() would deadlock this loop thread, so
+                # hop to a worker thread first; the coroutine itself still
+                # runs on the shared bridge loop (see below).
                 context = contextvars.copy_context()
-                future = _SYNC_TOOL_EXECUTOR.submit(context.run, lambda: asyncio.run(coro(*args, **kwargs)))
+                future = _SYNC_TOOL_EXECUTOR.submit(context.run, lambda: _run_on_shared_loop(coro(*args, **kwargs)))
                 return future.result()
-            return asyncio.run(coro(*args, **kwargs))
+            return _run_on_shared_loop(coro(*args, **kwargs))
         except Exception as e:
             logger.error("Error invoking tool %r via sync wrapper: %s", tool_name, e, exc_info=True)
             raise

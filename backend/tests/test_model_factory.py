@@ -604,6 +604,65 @@ def test_reasoning_effort_preserved_when_supported(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# reasoning_effort per-run / profile deduplication
+# ---------------------------------------------------------------------------
+
+
+def _make_profile_effort_model(name="effort-dup"):
+    """Non-Codex model with a profile-level reasoning_effort (muse-spark shape)."""
+    model = _make_model(
+        name,
+        supports_thinking=True,
+        supports_reasoning_effort=True,
+        when_thinking_disabled={"reasoning_effort": "minimal"},
+    )
+    model.reasoning_effort = "max"
+    return model
+
+
+def _patch_capturing_factory(monkeypatch, cfg, captured):
+    class CapturingModel(FakeChatModel):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            BaseChatModel.__init__(self, **kwargs)
+
+    _patch_factory(monkeypatch, cfg)
+    monkeypatch.setattr(factory_module, "resolve_class", lambda path, base: CapturingModel)
+
+
+def test_per_run_reasoning_effort_wins_over_profile(monkeypatch):
+    """An explicit per-run effort must not collide with the profile value."""
+    cfg = _make_app_config([_make_profile_effort_model()])
+    captured: dict = {}
+    _patch_capturing_factory(monkeypatch, cfg, captured)
+
+    factory_module.create_chat_model(name="effort-dup", thinking_enabled=True, reasoning_effort="high")
+
+    assert captured.get("reasoning_effort") == "high"
+
+
+def test_none_per_run_reasoning_effort_keeps_profile(monkeypatch):
+    """Lead agent always passes the key (None = no override); profile must stand."""
+    cfg = _make_app_config([_make_profile_effort_model()])
+    captured: dict = {}
+    _patch_capturing_factory(monkeypatch, cfg, captured)
+
+    factory_module.create_chat_model(name="effort-dup", thinking_enabled=True, reasoning_effort=None)
+
+    assert captured.get("reasoning_effort") == "max"
+
+
+def test_none_per_run_reasoning_effort_keeps_disabled_profile(monkeypatch):
+    cfg = _make_app_config([_make_profile_effort_model()])
+    captured: dict = {}
+    _patch_capturing_factory(monkeypatch, cfg, captured)
+
+    factory_module.create_chat_model(name="effort-dup", thinking_enabled=False, reasoning_effort=None)
+
+    assert captured.get("reasoning_effort") == "minimal"
+
+
+# ---------------------------------------------------------------------------
 # thinking shortcut field
 # ---------------------------------------------------------------------------
 

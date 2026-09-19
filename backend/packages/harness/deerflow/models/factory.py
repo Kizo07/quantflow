@@ -293,6 +293,16 @@ def create_chat_model(name: str | None = None, thinking_enabled: bool = False, *
         elif "reasoning_effort" not in model_settings_from_config:
             model_settings_from_config["reasoning_effort"] = "medium"
 
+    # Deduplicate a per-run reasoning_effort against the profile-level value. The
+    # lead agent always passes the key (None when no override was requested), so a
+    # non-Codex model with a profile-level reasoning_effort would otherwise reach
+    # the constructor twice and raise "got multiple values for keyword argument".
+    # An explicit per-run value wins; otherwise the profile value stands. No-op
+    # for Codex (kwargs already popped above) and unsupported models (stripped).
+    explicit_effort = kwargs.pop("reasoning_effort", None)
+    if explicit_effort is not None and model_config.supports_reasoning_effort:
+        model_settings_from_config["reasoning_effort"] = explicit_effort
+
     # For MindIE models: enforce conservative retry defaults.
     # Timeout normalization is handled inside MindIEChatModel itself.
     if getattr(model_class, "__name__", "") == "MindIEChatModel":

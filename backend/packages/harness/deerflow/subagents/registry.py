@@ -51,6 +51,8 @@ def _build_custom_subagent_config(name: str, *, app_config: Any | None = None) -
         model=custom.model,
         max_turns=custom.max_turns,
         timeout_seconds=custom.timeout_seconds,
+        thinking_enabled=custom.thinking_enabled,
+        reasoning_effort=custom.reasoning_effort,
     )
 
 

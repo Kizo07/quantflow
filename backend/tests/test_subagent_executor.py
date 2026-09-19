@@ -29,6 +29,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from packaging.version import Version
 
+import deerflow.models.factory as real_model_factory
+import deerflow.models.openai_codex_provider  # noqa: F401 - warm sys.modules for the factory's lazy import
+from deerflow.config.model_config import ModelConfig
 from deerflow.sandbox.lease import SandboxLeaseManager
 from deerflow.skills.types import Skill
 from deerflow.subagents.capacity import SubagentCapacityRejected
@@ -388,6 +391,193 @@ class TestAgentConstruction:
         assert captured["agent"]["middleware"] is middlewares
         assert captured["agent"]["tools"] == []
         assert captured["agent"]["system_prompt"] is None  # system_prompt is merged into initial state messages
+
+    def test_create_agent_passes_explicit_thinking_to_model(
+        self,
+        classes,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Explicit thinking config must reach model construction as kwargs."""
+        from deerflow.subagents import executor as executor_module
+
+        SubagentConfig = classes["SubagentConfig"]
+        SubagentExecutor = classes["SubagentExecutor"]
+
+        model_profile = SimpleNamespace(name="agent-model", supports_thinking=True)
+        app_config = SimpleNamespace(
+            models=[SimpleNamespace(name="agent-model")],
+            get_model_config=lambda name: model_profile if name == "agent-model" else None,
+        )
+        captured: dict[str, object] = {}
+
+        def fake_create_chat_model(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr(executor_module, "create_chat_model", fake_create_chat_model)
+        monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: object())
+        monkeypatch.setitem(
+            sys.modules,
+            "deerflow.agents.middlewares.tool_error_handling_middleware",
+            _module(
+                "deerflow.agents.middlewares.tool_error_handling_middleware",
+                build_subagent_runtime_middlewares=lambda **kwargs: [],
+            ),
+        )
+
+        config = SubagentConfig(
+            name="thinking-agent",
+            description="Thinking agent",
+            model="agent-model",
+            thinking_enabled=True,
+            reasoning_effort="high",
+        )
+        executor = SubagentExecutor(config=config, tools=[], app_config=app_config)
+
+        executor._create_agent()
+
+        assert captured["name"] == "agent-model"
+        assert captured["thinking_enabled"] is True
+        assert captured["reasoning_effort"] == "high"
+
+    def test_create_agent_rejects_thinking_on_incapable_model(
+        self,
+        classes,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Thinking on a model without supports_thinking fails fast at launch."""
+        from deerflow.subagents import executor as executor_module
+
+        SubagentConfig = classes["SubagentConfig"]
+        SubagentExecutor = classes["SubagentExecutor"]
+
+        model_profile = SimpleNamespace(name="agent-model", supports_thinking=False)
+        app_config = SimpleNamespace(
+            models=[SimpleNamespace(name="agent-model")],
+            get_model_config=lambda name: model_profile if name == "agent-model" else None,
+        )
+
+        def fail_create_chat_model(**kwargs):
+            raise AssertionError("model construction must not be reached")
+
+        monkeypatch.setattr(executor_module, "create_chat_model", fail_create_chat_model)
+
+        config = SubagentConfig(
+            name="thinking-agent",
+            description="Thinking agent",
+            model="agent-model",
+            thinking_enabled=True,
+        )
+        executor = SubagentExecutor(config=config, tools=[], app_config=app_config)
+
+        with pytest.raises(ValueError, match="does not support thinking"):
+            executor._create_agent()
+
+    def test_create_agent_rejects_invalid_effort(
+        self,
+        classes,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A bad effort level fails fast at launch, before model construction."""
+        from deerflow.subagents import executor as executor_module
+
+        SubagentConfig = classes["SubagentConfig"]
+        SubagentExecutor = classes["SubagentExecutor"]
+
+        app_config = SimpleNamespace(models=[SimpleNamespace(name="agent-model")])
+
+        def fail_create_chat_model(**kwargs):
+            raise AssertionError("model construction must not be reached")
+
+        monkeypatch.setattr(executor_module, "create_chat_model", fail_create_chat_model)
+
+        config = SubagentConfig(
+            name="thinking-agent",
+            description="Thinking agent",
+            model="agent-model",
+            reasoning_effort="ultra",
+        )
+        executor = SubagentExecutor(config=config, tools=[], app_config=app_config)
+
+        with pytest.raises(ValueError, match="invalid reasoning_effort"):
+            executor._create_agent()
+
+    def test_create_agent_thinking_enabled_construction_with_profile_effort(
+        self,
+        classes,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Thinking-enabled subagent construction through the real model factory.
+
+        Pins the full chain: SubagentConfig(thinking_enabled=True,
+        reasoning_effort=...) -> resolution -> create_chat_model against a
+        profile that itself carries reasoning_effort. Must not raise the
+        duplicate-kwarg TypeError (fix/muse-reasoning-effort-dup); the
+        explicit effort wins and the thinking settings apply.
+        """
+        from langchain.chat_models import BaseChatModel
+
+        from deerflow.subagents import executor as executor_module
+
+        SubagentConfig = classes["SubagentConfig"]
+        SubagentExecutor = classes["SubagentExecutor"]
+
+        model_profile = ModelConfig(
+            name="agent-model",
+            display_name="agent-model",
+            description=None,
+            use="langchain_openai:ChatOpenAI",
+            model="agent-model",
+            supports_thinking=True,
+            supports_reasoning_effort=True,
+            when_thinking_enabled={"extra_body": {"thinking": {"type": "enabled"}}},
+            reasoning_effort="max",
+        )
+        app_config = SimpleNamespace(
+            models=[SimpleNamespace(name="agent-model")],
+            get_model_config=lambda name: model_profile if name == "agent-model" else None,
+        )
+        captured: dict = {}
+
+        class CapturingModel(BaseChatModel):
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                BaseChatModel.__init__(self, **kwargs)
+
+            @property
+            def _llm_type(self) -> str:
+                return "fake"
+
+            def _generate(self, *args, **kwargs):
+                raise NotImplementedError
+
+        monkeypatch.setattr(real_model_factory, "resolve_class", lambda path, base: CapturingModel)
+        monkeypatch.setattr(real_model_factory, "build_tracing_callbacks", lambda: [])
+        monkeypatch.setattr(executor_module, "create_chat_model", real_model_factory.create_chat_model)
+        monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: kwargs["model"])
+        monkeypatch.setitem(
+            sys.modules,
+            "deerflow.agents.middlewares.tool_error_handling_middleware",
+            _module(
+                "deerflow.agents.middlewares.tool_error_handling_middleware",
+                build_subagent_runtime_middlewares=lambda **kwargs: [],
+            ),
+        )
+
+        config = SubagentConfig(
+            name="thinking-agent",
+            description="Thinking agent",
+            model="agent-model",
+            thinking_enabled=True,
+            reasoning_effort="high",
+        )
+        executor = SubagentExecutor(config=config, tools=[], app_config=app_config)
+
+        model = executor._create_agent()
+
+        assert isinstance(model, CapturingModel)
+        assert captured["reasoning_effort"] == "high"
+        assert captured["extra_body"]["thinking"]["type"] == "enabled"
 
     @pytest.mark.anyio
     async def test_load_skills_uses_explicit_app_config_for_skill_storage(

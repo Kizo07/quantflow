@@ -29,6 +29,11 @@ class SubagentConfig:
             effective limit is the global ``subagents.timeout_seconds`` (default
             1800 = 30 min), layered on by the registry; this 900 only applies
             when no differing global value exists.
+        thinking_enabled: Extended-thinking mode for this subagent's model.
+            None (default) preserves today's behavior: non-thinking.
+        reasoning_effort: Named effort override for this subagent's model, one
+            of ``SUBAGENT_REASONING_EFFORT_LEVELS``. None (default) means no
+            override — the model profile value (if any) stands.
     """
 
     name: str
@@ -40,6 +45,37 @@ class SubagentConfig:
     model: str = "inherit"
     max_turns: int = 50
     timeout_seconds: int = 900
+    thinking_enabled: bool | None = None
+    reasoning_effort: str | None = None
+
+
+SUBAGENT_REASONING_EFFORT_LEVELS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
+"""Named reasoning-effort levels accepted by subagent config.
+
+Same vocabulary as the run launcher's thinking control. Whether a level is
+accepted by a given provider endpoint varies (e.g. some OpenAI-compatible
+endpoints reject ``max``) — this set only rejects typos, not valid names.
+"""
+
+
+def resolve_subagent_thinking(config: SubagentConfig, model_config) -> tuple[bool, str | None]:
+    """Resolve ``(thinking_enabled, reasoning_effort)`` for model construction.
+
+    ``None`` fields preserve today's behavior: non-thinking, no effort
+    override. Raises ``ValueError`` for an unknown effort level, or for
+    thinking on a model without ``supports_thinking``. A ``None``
+    ``model_config`` (profile unknown) skips the capability check so the
+    model factory can raise its canonical unknown-model error downstream.
+    Effort on a model without ``supports_reasoning_effort`` is passed
+    through untouched — the factory strips it.
+    """
+    effort = config.reasoning_effort
+    if effort is not None and effort not in SUBAGENT_REASONING_EFFORT_LEVELS:
+        raise ValueError(f"Subagent '{config.name}': invalid reasoning_effort {effort!r}; expected one of {sorted(SUBAGENT_REASONING_EFFORT_LEVELS)}.")
+    thinking = config.thinking_enabled if config.thinking_enabled is not None else False
+    if thinking and model_config is not None and not getattr(model_config, "supports_thinking", False):
+        raise ValueError(f"Subagent '{config.name}': thinking_enabled=true but model '{getattr(model_config, 'name', '?')}' does not support thinking.")
+    return thinking, effort
 
 
 def _default_model_name(app_config: "AppConfig") -> str:

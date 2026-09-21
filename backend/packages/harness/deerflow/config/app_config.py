@@ -53,6 +53,7 @@ from deerflow.config.tool_progress_config import ToolProgressConfig
 from deerflow.config.tool_search_config import ToolSearchConfig, load_tool_search_config_from_dict
 from deerflow.config.verification_config import VerificationConfig
 from deerflow.extensions.loader import ExtensionSpec
+from deerflow.knowledge.config import KnowledgeConfig, load_knowledge_config_from_dict
 
 load_dotenv()
 
@@ -250,6 +251,7 @@ class AppConfig(BaseModel):
     title: TitleConfig = Field(default_factory=TitleConfig, description="Automatic title generation configuration")
     summarization: SummarizationConfig = Field(default_factory=SummarizationConfig, description="Conversation summarization configuration")
     memory: MemoryConfig = Field(default_factory=MemoryConfig, description="Memory subsystem configuration")
+    knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig, description="Research Knowledge Plane configuration (experiments, evidence, experiment search)")
     agents_api: AgentsApiConfig = Field(default_factory=AgentsApiConfig, description="Custom-agent management API configuration")
     acp_agents: dict[str, ACPAgentConfig] = Field(default_factory=dict, description="ACP-compatible agent configuration")
     subagents: SubagentsAppConfig = Field(default_factory=SubagentsAppConfig, description="Subagent runtime configuration")
@@ -480,6 +482,7 @@ class AppConfig(BaseModel):
         load_title_config_from_dict(config.title.model_dump())
         load_summarization_config_from_dict(config.summarization.model_dump())
         load_memory_config_from_dict(config.memory.model_dump())
+        load_knowledge_config_from_dict(config.knowledge.model_dump())
         load_agents_api_config_from_dict(config.agents_api.model_dump())
         load_subagents_config_from_dict(config.subagents.model_dump())
         load_tool_search_config_from_dict(config.tool_search.model_dump())

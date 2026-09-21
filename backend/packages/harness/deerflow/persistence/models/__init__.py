@@ -14,6 +14,30 @@ its storage implementation lives in ``deerflow.runtime.events.store.db`` and
 there is no matching entity directory.
 """
 
+from deerflow.knowledge.schema import (
+    AgentRunRow as KnowledgeAgentRunRow,
+)
+from deerflow.knowledge.schema import (
+    ArtifactRow as KnowledgeArtifactRow,
+)
+from deerflow.knowledge.schema import (
+    AssumptionRow as KnowledgeAssumptionRow,
+)
+from deerflow.knowledge.schema import (
+    DatasetVersionRow as KnowledgeDatasetVersionRow,
+)
+from deerflow.knowledge.schema import (
+    ExperimentArtifactRow as KnowledgeExperimentArtifactRow,
+)
+from deerflow.knowledge.schema import (
+    ExperimentDatasetRow as KnowledgeExperimentDatasetRow,
+)
+from deerflow.knowledge.schema import (
+    ExperimentRow as KnowledgeExperimentRow,
+)
+from deerflow.knowledge.schema import (
+    ResearchProjectRow as KnowledgeResearchProjectRow,
+)
 from deerflow.persistence.agents.model import AgentRow
 from deerflow.persistence.channel_connections.model import (
     ChannelConnectionRow,
@@ -42,6 +66,14 @@ __all__ = [
     "ChannelCredentialRow",
     "ChannelOAuthStateRow",
     "FeedbackRow",
+    "KnowledgeAgentRunRow",
+    "KnowledgeArtifactRow",
+    "KnowledgeAssumptionRow",
+    "KnowledgeDatasetVersionRow",
+    "KnowledgeExperimentArtifactRow",
+    "KnowledgeExperimentDatasetRow",
+    "KnowledgeExperimentRow",
+    "KnowledgeResearchProjectRow",
     "McpTaskRow",
     "ManagedSubagentRow",
     "PersonalAccessTokenRow",

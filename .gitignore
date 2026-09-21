@@ -76,3 +76,16 @@ backend/Dockerfile.langgraph
 
 # Local Hermes agent plan state
 .hermes/
+
+# Research Knowledge Plane: harness ONLY — knowledge CONTENT never ships.
+# Sources, artifact bytes, dataset stores, and object-store credentials
+# always stay local; only code, schema, and synthetic fixtures are tracked.
+deploy/knowledge/minio.env
+kb_sources/
+**/kb_sources/
+knowledge-artifacts/
+**/knowledge-artifacts/
+.knowledge-artifacts/
+**/.knowledge-artifacts/
+*_experiment_bundle.json
+**/*_experiment_bundle.json

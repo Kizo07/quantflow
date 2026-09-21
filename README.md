@@ -77,6 +77,12 @@ and investment-committee style reports.
   gateway pattern, so you can add Meta's Muse Spark family via the Meta Model
   API alongside the Qwen / GLM / DeepSeek / Kimi examples — see "Muse models"
   below.
+- **Research Knowledge Plane** (`backend/packages/harness/deerflow/knowledge/`):
+  an evidence-backed research ledger on the harness PostgreSQL — first-class
+  experiments with family/execution identity hashes, content-addressed
+  artifacts (MinIO/S3), dataset vintages, assumptions, and a retrieval-eval
+  fixture. Harness only: knowledge *content* stays local and gitignored —
+  see "Research Knowledge Plane" below.
 
 ## Quick start
 
@@ -180,6 +186,27 @@ and running risk analysis, all cross-referenced:
 Ask the desk for the next one the same way: *"produce a full 12-month
 outlook on TICKER"*.
 
+## Research Knowledge Plane
+
+Experiments, failures, and evidence as shared, queryable state instead of
+chat memory. Phase 0–1 ships: the PG schema + migration (`research_project`,
+`agent_run`, `artifact`, `dataset_version`, `experiment` + links,
+`assumption`), a SHA-256 content-addressed artifact store (S3 API, MinIO
+for local dev), the experiment begin/commit/search API, and the
+alpha_engine bundle client (dataset manifests + content hashes with
+cross-side parity tests).
+
+```bash
+make -C backend test-knowledge   # unit suite (fake stores, no services needed)
+make -C backend eval-knowledge   # retrieval-eval fixture (fails pre-Phase-2, by design)
+cp deploy/knowledge/minio.env.example deploy/knowledge/minio.env  # then edit secrets
+docker compose -f deploy/knowledge/docker-compose.minio.yml up -d
+```
+
+Content policy: only the harness ships. Sources, artifact bytes, dataset
+stores, and credentials (`kb_sources/`, local artifact roots, `data/`,
+`*.env`) are gitignored — see `.gitignore`.
+
 ## Repo map
 
 - `config.example.yaml` / `config.yaml` — models, token budgets, tool policy.
@@ -190,6 +217,9 @@ outlook on TICKER"*.
 - `scripts/validate_quant_tools.py` — keeps the tool catalog in sync with the engine.
 - `docs/plans/` — design notes (report-forge flexibility, remediation logs).
 - `backend/` + `frontend/` — the harness itself (upstream DeerFlow 2.0).
+- `backend/packages/harness/deerflow/knowledge/` — Knowledge Plane API + schema.
+- `deploy/knowledge/` — MinIO compose for local artifact storage.
+- `backend/tests/test_knowledge_*.py` — harness-side knowledge tests.
 
 ## Security notice
 

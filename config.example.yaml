@@ -20,7 +20,7 @@
 # ============================================================================
 # Bump this number when the config schema changes.
 # Run `make config-upgrade` to merge new fields into your local config.yaml.
-config_version: 40
+config_version: 41
 
 # ============================================================================
 # Logging
@@ -1878,6 +1878,34 @@ summarization:
     - read
     - view
     - cat
+
+# ============================================================================
+# Research Knowledge Plane Configuration
+# ============================================================================
+# Evidence-backed research ledger (experiments, failures, assumptions,
+# content-addressed artifacts) on top of the harness PostgreSQL persistence.
+# Phase 1 covers the synchronous evidence-commit path + experiment search.
+knowledge:
+  # Master switch for the Knowledge API (default: true).
+  # Override at read time with DEER_FLOW_KNOWLEDGE_ENABLED=0/1.
+  enabled: true
+  # PostgreSQL DSN for canonical knowledge state. Falls back to
+  # DEER_FLOW_KNOWLEDGE_DSN. Omit to leave the PG binding unconfigured
+  # (the Knowledge API then works only with an explicitly passed store).
+  # database_dsn: postgresql+psycopg://deerflow:secret@localhost:5432/deerflow
+  # S3-compatible endpoint URL holding immutable evidence artifacts
+  # (MinIO for local dev — see deploy/knowledge/docker-compose.minio.yml;
+  # real S3 in prod). Falls back to DEER_FLOW_KNOWLEDGE_S3_ENDPOINT.
+  # object_store_endpoint: http://127.0.0.1:9000
+  # Bucket / region for evidence artifacts (env overrides:
+  # DEER_FLOW_KNOWLEDGE_S3_BUCKET / DEER_FLOW_KNOWLEDGE_S3_REGION).
+  object_store_bucket: quantflow-knowledge
+  object_store_region: us-east-1
+  # Paging for experiment_search (requests above max_page_size are rejected).
+  default_page_size: 20
+  max_page_size: 100
+  # Maximum canonical-JSON bytes accepted for a single write payload.
+  max_payload_bytes: 1000000
 
 # ============================================================================
 # Memory Configuration

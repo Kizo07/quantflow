@@ -28,6 +28,29 @@ test-live:
 test-blocking-io:
 	PYTHONPATH=. PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run pytest tests/blocking_io -q --tb=short
 
+# Research Knowledge Plane tests: write/search API (in-memory fake), artifact
+# store, Phase 1 schema + migration, PG search-store binding, AppConfig wiring.
+test-knowledge:
+	PYTHONPATH=. PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run pytest -q --tb=short \
+		tests/test_knowledge_artifacts.py \
+		tests/test_knowledge_schema_phase1.py \
+		tests/test_knowledge_pg_store.py \
+		tests/test_knowledge_config_wiring.py \
+		packages/harness/deerflow/knowledge/test_knowledge_api.py
+
+# Research Knowledge Plane retrieval eval (Phase 0 fixture). Runs the
+# runner's embedded self-test (must pass) plus the keyword baseline. Exit 2
+# from the baseline run is the expected pre-Phase-2 state (recall below
+# target); exit 1 (usage/fixture error) fails the target.
+eval-knowledge:
+	PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run python packages/harness/deerflow/knowledge/eval/runner.py --self-test
+	@PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run python packages/harness/deerflow/knowledge/eval/runner.py --retriever keyword; code=$$?; \
+	if [ $$code -eq 2 ]; then \
+		echo "eval-knowledge: baseline below target (exit 2) -- expected pre-Phase-2 state"; \
+	elif [ $$code -ne 0 ]; then \
+		exit $$code; \
+	fi
+
 # Run the backend unit-test suite as one shard of a parallel CI split.
 #   SPLITS = total number of shards; GROUP = 1-based shard index.
 # Duration-aware: `least_duration` balances the shards by real wall-clock cost

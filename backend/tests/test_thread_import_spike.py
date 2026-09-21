@@ -48,8 +48,8 @@ class _PermissiveThreadMetaStore(MemoryThreadMetaStore):
             return not require_existing
         return True
 
-    async def create(self, thread_id, *, assistant_id=None, user_id=None, display_name=None, metadata=None):  # type: ignore[override]
-        return await super().create(thread_id, assistant_id=assistant_id, user_id=None, display_name=display_name, metadata=metadata)
+    async def create(self, thread_id, *, assistant_id=None, user_id=None, display_name=None, metadata=None, project_id=None):  # type: ignore[override]
+        return await super().create(thread_id, assistant_id=assistant_id, user_id=None, display_name=display_name, metadata=metadata, project_id=project_id)
 
 
 class _ThreadTestRunManager:

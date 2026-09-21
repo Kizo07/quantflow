@@ -23,14 +23,24 @@ Submodules:
   store over pluggable object backends (local FS, MinIO/S3).
 * :mod:`deerflow.knowledge.eval` — retrieval-eval fixture + runner (Phase 0;
   stdlib-only, no ``deerflow`` imports).
+* :mod:`deerflow.knowledge.retrieval` — hybrid retrieval planner, RRF fusion,
+  and fixed-budget context packets (Phase 2; namespace package, no I/O).
+* :mod:`deerflow.knowledge.embeddings` — embedding provider interface,
+  deterministic test fake, and backfill helper (Phase 2; no I/O).
+* :mod:`deerflow.knowledge.tools` — agent lookup tools, run-start bootstrap,
+  and bootstrap middleware (Phase 2; namespace package, no I/O).
+* :mod:`deerflow.knowledge.pg_retrieval` — binds the retrieval, lookup, and
+  embedding store protocols to PostgreSQL/SQLite (integration).
 
 Import-cycle contract: ``deerflow.config.app_config`` imports
 ``deerflow.knowledge.config``, so importing this package must never pull in
 ``deerflow.config``. The eagerly imported modules below depend only on the
-stdlib, pydantic, and each other; the SQLAlchemy-backed ``pg_store`` and
-``schema`` submodules load lazily via :func:`__getattr__` (explicit
-``deerflow.knowledge.pg_store`` / ``deerflow.knowledge.schema`` imports work
-directly and are unaffected).
+stdlib, pydantic, and each other; the SQLAlchemy-backed ``pg_store``,
+``pg_retrieval`` and ``schema`` submodules — plus ``retrieval``,
+``embeddings`` and ``tools`` (``tools`` pulls langchain) — load lazily via
+:func:`__getattr__` (explicit ``deerflow.knowledge.pg_store`` /
+``deerflow.knowledge.retrieval.planner`` style imports work directly and are
+unaffected).
 """
 
 from __future__ import annotations
@@ -105,7 +115,11 @@ __all__ = [
     "search",
     "write_api",
     "pg_store",
+    "pg_retrieval",
     "schema",
+    "retrieval",
+    "embeddings",
+    "tools",
     "ENV_DSN",
     "ENV_ENABLED",
     "ENV_S3_BUCKET",
@@ -158,7 +172,7 @@ __all__ = [
     "failure_record",
 ]
 
-_LAZY_SUBMODULES = frozenset({"pg_store", "schema"})
+_LAZY_SUBMODULES = frozenset({"pg_store", "pg_retrieval", "schema", "retrieval", "embeddings", "tools"})
 
 
 def __getattr__(name: str) -> Any:

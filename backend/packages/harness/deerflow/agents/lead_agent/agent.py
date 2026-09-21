@@ -61,6 +61,7 @@ from deerflow.config.subagents_config import (
     DEFAULT_MAX_TOTAL_SUBAGENTS_PER_RUN,
     effective_subagent_concurrency,
 )
+from deerflow.knowledge.tools.middleware import KnowledgeBootstrapMiddleware
 from deerflow.models import create_chat_model
 from deerflow.runtime.checkpoint_mode import (
     INTERNAL_CHECKPOINT_MODE_KEY,
@@ -209,10 +210,12 @@ def _resolve_model_name(requested_model_name: str | None = None, *, app_config: 
         raise ValueError("No chat models are configured. Please configure at least one model in config.yaml.")
 
     if requested_model_name and app_config.get_model_config(requested_model_name):
+        logger.debug("Model resolution: requested '%s' -> resolved '%s'.", requested_model_name, requested_model_name)
         return requested_model_name
 
     if requested_model_name and requested_model_name != default_model_name:
         logger.warning(f"Model '{requested_model_name}' not found in config; fallback to default model '{default_model_name}'.")
+    logger.debug("Model resolution: requested '%s' -> resolved default '%s'.", requested_model_name, default_model_name)
     return default_model_name
 
 
@@ -452,6 +455,7 @@ Being proactive with task management demonstrates thoroughness and ensures all r
 # TodoListMiddleware should be before ClarificationMiddleware to allow todo management
 # TitleMiddleware generates title after first exchange
 # MemoryMiddleware queues conversation for memory update (after TitleMiddleware)
+# KnowledgeBootstrapMiddleware injects the research context packet once per run (after MemoryMiddleware)
 # ViewImageMiddleware should be before ClarificationMiddleware to inject image details before LLM
 # ToolErrorHandlingMiddleware should be before ClarificationMiddleware to convert tool exceptions to ToolMessages
 # ClarificationMiddleware should be last to intercept clarification requests after model calls
@@ -614,6 +618,12 @@ def build_middlewares(
         if resolved_app_config.memory.mode == "tool" and not resolved_app_config.memory.enabled:
             logger.warning("memory.mode is 'tool' but memory.enabled is false; memory tools will not be registered.")
         middlewares.append(MemoryMiddleware(agent_name=agent_name, memory_config=resolved_app_config.memory))
+
+    # Add KnowledgeBootstrapMiddleware after MemoryMiddleware: the compulsory
+    # KB run-start step injects the research context packet before the agent
+    # acts. The middleware self-gates on the knowledge config and degrades
+    # to a no-op until PG backends are bound, so it is always in the chain.
+    middlewares.append(KnowledgeBootstrapMiddleware(agent_name=agent_name))
 
     # Add ViewImageMiddleware only if the current model supports vision.
     # Use the resolved runtime model_name from make_lead_agent to avoid stale config values.

@@ -204,7 +204,7 @@ def _assemble_from_features(
 ) -> tuple[list[AgentMiddleware], list[BaseTool]]:
     """Build an ordered middleware chain + extra tools from *feat*.
 
-    Middleware order matches ``make_lead_agent`` (14 middlewares):
+    Middleware order matches ``make_lead_agent``:
 
       0-2. Sandbox infrastructure (ThreadData → Uploads → Sandbox)
       3.   DanglingToolCallMiddleware (always)
@@ -214,10 +214,12 @@ def _assemble_from_features(
       7.   TodoMiddleware (plan_mode parameter)
       8.   TitleMiddleware (auto_title feature)
       9.   MemoryMiddleware (memory feature)
-      10.  ViewImageMiddleware (vision feature)
-      11.  SubagentLimitMiddleware (subagent feature)
-      12.  LoopDetectionMiddleware (loop_detection feature)
-      13.  ClarificationMiddleware (always last)
+      10.  KnowledgeBootstrapMiddleware (knowledge feature)
+      11.  ViewImageMiddleware (vision feature)
+      12.  SubagentLimitMiddleware (subagent feature)
+      13.  LoopDetectionMiddleware (loop_detection feature)
+      14.  TokenBudgetMiddleware (token_budget feature)
+      15.  ClarificationMiddleware (always last)
 
     Two-phase ordering:
       1. Built-in chain — fixed sequential append.
@@ -310,7 +312,16 @@ def _assemble_from_features(
 
                 chain.append(MemoryMiddleware(agent_name=name, memory_config=memory_cfg))
 
-    # --- [10] Vision ---
+    # --- [10] Knowledge bootstrap (run-start research context packet) ---
+    if feat.knowledge is not False:
+        if isinstance(feat.knowledge, AgentMiddleware):
+            chain.append(feat.knowledge)
+        else:
+            from deerflow.knowledge.tools.middleware import KnowledgeBootstrapMiddleware
+
+            chain.append(KnowledgeBootstrapMiddleware(agent_name=name))
+
+    # --- [11] Vision ---
     if feat.vision is not False:
         if isinstance(feat.vision, AgentMiddleware):
             chain.append(feat.vision)
@@ -324,7 +335,7 @@ def _assemble_from_features(
 
             extra_tools.append(view_image_tool)
 
-    # --- [11] Subagent ---
+    # --- [12] Subagent ---
     if feat.subagent is not False:
         if isinstance(feat.subagent, AgentMiddleware):
             chain.append(feat.subagent)
@@ -372,7 +383,7 @@ def _assemble_from_features(
 
                 extra_tools.extend((batch_task, batch_status, cancel_batch))
 
-    # --- [12] LoopDetection ---
+    # --- [13] LoopDetection ---
     if feat.loop_detection is not False:
         if isinstance(feat.loop_detection, AgentMiddleware):
             chain.append(feat.loop_detection)
@@ -382,7 +393,7 @@ def _assemble_from_features(
 
             chain.append(LoopDetectionMiddleware.from_config(LoopDetectionConfig()))
 
-    # --- [13] TokenBudget ---
+    # --- [14] TokenBudget ---
     if feat.token_budget is not False:
         if isinstance(feat.token_budget, AgentMiddleware):
             chain.append(feat.token_budget)
@@ -392,7 +403,7 @@ def _assemble_from_features(
 
             chain.append(TokenBudgetMiddleware.from_config(TokenBudgetConfig()))
 
-    # --- [14] Clarification (always last among built-ins) ---
+    # --- [15] Clarification (always last among built-ins) ---
     chain.append(ClarificationMiddleware())
     extra_tools.append(ask_clarification_tool)
 

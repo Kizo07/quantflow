@@ -36,6 +36,9 @@ from deerflow.knowledge.schema import (
     ExperimentRow as KnowledgeExperimentRow,
 )
 from deerflow.knowledge.schema import (
+    FindingRow as KnowledgeFindingRow,
+)
+from deerflow.knowledge.schema import (
     ResearchProjectRow as KnowledgeResearchProjectRow,
 )
 from deerflow.persistence.agents.model import AgentRow
@@ -73,6 +76,7 @@ __all__ = [
     "KnowledgeExperimentArtifactRow",
     "KnowledgeExperimentDatasetRow",
     "KnowledgeExperimentRow",
+    "KnowledgeFindingRow",
     "KnowledgeResearchProjectRow",
     "McpTaskRow",
     "ManagedSubagentRow",

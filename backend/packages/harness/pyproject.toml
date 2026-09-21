@@ -97,6 +97,10 @@ monocle = ["monocle_apptrace>=0.8.8"]
 browser = ["playwright>=1.40"]
 # Optional Chinese tokenization for the FTS5 memory retrieval adapter.
 memory-zh = ["jieba>=0.42.1"]
+# Real semantic embeddings for the knowledge plane (providers_st wiring).
+# Optional so the core install stays free of torch; the retrieval plane runs
+# struct+lexical without it and the provider fails closed when absent.
+knowledge-st = ["sentence-transformers>=3,<4"]
 
 [build-system]
 requires = ["hatchling"]

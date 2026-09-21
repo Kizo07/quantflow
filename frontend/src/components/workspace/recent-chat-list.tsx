@@ -416,6 +416,8 @@ export function RecentChatList() {
   // Archived chats render in their own sidebar section below. They need a
   // dedicated query because the main query excludes archived threads, and
   // archiving must not shift offsets in the recent list.
+  // Shared path with the chats page tabs (workspace/chats/page.tsx): same
+  // useInfiniteThreads + useThreadArchiveAction hooks — keep them in sync.
   const { data: infiniteArchivedThreads } = useInfiniteThreads(
     { archived: true },
     { enabled: env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY !== "true" },

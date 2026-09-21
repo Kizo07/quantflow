@@ -1416,6 +1416,9 @@ def test_get_thread_preserves_metadata_status_without_checkpoint(stored_status: 
     assert response.json()["status"] == stored_status
 
 
+# Single-flag matrix; see also the standalone two-flag combo test
+# test_patch_thread_pin_plus_archive_together_preserves_updated_at below
+# (cannot fit this single-``key`` shape).
 @pytest.mark.parametrize("key", [THREAD_PINNED_METADATA_KEY, "deerflow_archived"])
 def test_patch_thread_pin_returns_iso_and_preserves_updated_at(key) -> None:
     """A pin/unpin PATCH must not bump ``updated_at``.
@@ -1505,6 +1508,8 @@ def test_patch_thread_archive_returns_iso_and_preserves_updated_at() -> None:
     assert body["metadata"] == {"k": "v0", THREAD_ARCHIVED_METADATA_KEY: True}
 
 
+# Standalone two-flag combo test; kept separate from the single-``key``
+# per-flag matrix above (test_patch_thread_pin_returns_iso_and_preserves_updated_at).
 def test_patch_thread_pin_plus_archive_together_preserves_updated_at() -> None:
     """A combined flag patch (pin + archive) keeps the no-touch contract."""
     app, store, _checkpointer = _build_thread_app()

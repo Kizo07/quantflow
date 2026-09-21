@@ -1,6 +1,19 @@
-# Single source of truth for alpha_engine MCP tools exposed to deer-flow agents.
-# Validated against alpha_engine/src/alpha_engine/mcp_server.py @mcp.tool() defs
-# by scripts/validate_quant_tools.py — keep in sync.
+# Tool-scope layers (one place documenting all three; Unit D contract):
+#   Layer 1 — runtime capabilities catalog (frontend/src/core/capabilities/,
+#             served at /api/capabilities/): what the running backend/frontend
+#             actually exposes, resolved at runtime.
+#   Layer 2 — THIS FILE (agent<->tool map): which desk agents (quant-analyst,
+#             technical-analyst, risk-manager) should have which alpha_engine
+#             MCP tools in their toolbox. Static; validated against
+#             alpha_engine/src/alpha_engine/mcp_server.py @mcp.tool() defs by
+#             scripts/validate_quant_tools.py — keep in sync.
+#   Layer 3 — MCP server enablement (extensions_config.json; template in
+#             extensions_config.example.json): whether the alpha_engine server
+#             itself is wired up. The validator cross-checks (warn-only) that
+#             the example template still carries the alpha_engine entry.
+# NOTE: catalog entries carry no `server` field today — every entry here
+# belongs to the single alpha_engine MCP server. A multi-server catalog will
+# need a per-entry schema field before entries can map to servers.
 #
 # Fields:
 #   id:          exact MCP tool name (must match mcp_server.py)

@@ -6,9 +6,14 @@ drift from the actual server without importing its heavy third-party chain
 (numpy/pandas/vectorbt/plotly), which has broken validation on unrelated
 dependency drift before. Run from the deer-flow repo root or anywhere;
 ALPHA_ENGINE_SRC overrides the default sibling-checkout lookup.
+
+Also cross-checks the layer-3 scope contract (warn-only, never fails): the
+``alpha_engine`` entry must exist in ``extensions_config.example.json`` so the
+enablement template cannot silently drop the server this catalog maps.
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -68,6 +73,34 @@ def mcp_tool_names(ae_src: Path) -> set[str]:
     return names
 
 
+def check_extensions_config_layer() -> None:
+    """Layer-3 cross-check: warn unless the example template enables alpha_engine.
+
+    Warn-only by design (Unit D): a mismatch must not fail validation until
+    the catalog resync lands.
+
+    NOTE: catalog entries carry no ``server`` field today — all current
+    entries belong to the single ``alpha_engine`` MCP server, so this check
+    can only assert that one server entry. A multi-server catalog will need a
+    per-entry schema field (e.g. ``server: <mcpServers key>``) before entries
+    can be mapped to their servers.
+    """
+    example = REPO / "extensions_config.example.json"
+    if not example.is_file():
+        print(f"WARN: layer 3: {example.name} not found at repo root")
+        return
+    try:
+        config = json.loads(example.read_text())
+    except json.JSONDecodeError as exc:
+        print(f"WARN: layer 3: {example.name} is not valid JSON: {exc}")
+        return
+    servers = config.get("mcpServers", {})
+    if "alpha_engine" not in servers:
+        print(f"WARN: layer 3: no 'alpha_engine' entry in {example.name}")
+        return
+    print("LAYER 3 OK: alpha_engine entry present in extensions_config.example.json")
+
+
 def main() -> int:
     ae_src = alpha_engine_src()
     if not ae_src.is_dir():
@@ -92,6 +125,7 @@ def main() -> int:
         print("STALE in catalog (remove/rename):", stale_in_catalog)
     ok = not missing_in_catalog and not stale_in_catalog
     print("CATALOG OK" if ok else "CATALOG OUT OF SYNC")
+    check_extensions_config_layer()
     return 0 if ok else 1
 
 

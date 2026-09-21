@@ -637,3 +637,4 @@ reasoning_locale = en
 - **Traceability**: If requested, you must be able to point to the specific line in the Data Summary or External Search Findings that supports a claim.
 - The framework should adapt its analytical dimensions and depth to the specific domain (financial analysis uses different frameworks than consumer insights)
 - When the research subject is ambiguous, default to the broadest reasonable scope and note assumptions
+- For quant/finance runs (systematic screens, backtests, portfolio construction), hand data collection to the `quant-desk` skill and treat its subagent briefs as the Data Package

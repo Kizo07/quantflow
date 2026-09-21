@@ -74,7 +74,6 @@ import type {
   ThreadTokenUsageResponse,
 } from "./types";
 import {
-  THREAD_ARCHIVED_METADATA_KEY,
   THREAD_PINNED_METADATA_KEY,
   THREAD_PROJECT_METADATA_KEY,
 } from "./utils";
@@ -3629,34 +3628,6 @@ export function useMoveThreadToProject(options?: {
       // ([...PROJECTS_QUERY_KEY, "threads", id, ...]).
       void queryClient.invalidateQueries({
         queryKey: [...PROJECTS_QUERY_KEY, "threads"],
-      });
-    },
-  });
-}
-
-export function useArchiveThread() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      threadId,
-      archived,
-    }: {
-      threadId: string;
-      archived: boolean;
-    }) =>
-      patchThreadMetadata(threadId, {
-        [THREAD_ARCHIVED_METADATA_KEY]: archived,
-      }),
-    onSuccess(response, { threadId, archived }) {
-      setThreadMetadataInCaches(queryClient, threadId, {
-        ...(response.metadata ?? {}),
-        [THREAD_ARCHIVED_METADATA_KEY]: archived,
-      });
-    },
-    onSettled() {
-      void queryClient.invalidateQueries({ queryKey: ["threads", "search"] });
-      void queryClient.invalidateQueries({
-        queryKey: INFINITE_THREADS_QUERY_KEY_PREFIX,
       });
     },
   });

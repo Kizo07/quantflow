@@ -51,6 +51,26 @@ eval-knowledge:
 		exit $$code; \
 	fi
 
+# Research Knowledge Plane Phase 2 tests: findings schema + migration,
+# retrieval planner/fusion/packet, embeddings, agent tools + middleware,
+# PG retrieval bindings, and Phase 2 integration wiring.
+test-knowledge-2:
+	PYTHONPATH=. PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run pytest -q --tb=short \
+		tests/test_knowledge_findings_schema.py \
+		tests/test_knowledge_pg_retrieval.py \
+		tests/test_knowledge_phase2_wiring.py \
+		packages/harness/deerflow/knowledge/test_retrieval_plane.py \
+		packages/harness/deerflow/knowledge/test_embeddings.py \
+		packages/harness/deerflow/knowledge/tools/test_knowledge_tools.py
+
+# Research Knowledge Plane Phase 2 eval wiring: seeder self-test (must
+# pass), judgment-coverage check (exit 2 on coverage failure), and the
+# write_api round-trip validation over the merged fixture bundle.
+eval-knowledge-2:
+	PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run python packages/harness/deerflow/knowledge/eval/seed_phase2.py --self-test
+	PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run python packages/harness/deerflow/knowledge/eval/seed_phase2.py --check
+	PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run python packages/harness/deerflow/knowledge/eval/seed_phase2.py --validate-writes
+
 # Run the backend unit-test suite as one shard of a parallel CI split.
 #   SPLITS = total number of shards; GROUP = 1-based shard index.
 # Duration-aware: `least_duration` balances the shards by real wall-clock cost

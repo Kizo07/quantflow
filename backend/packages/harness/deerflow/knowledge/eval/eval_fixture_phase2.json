@@ -1,0 +1,153 @@
+{
+  "version": "0.1.0",
+  "description": "Phase 2 retrieval-eval extension: 10 additional corpus documents (5 experiments, 3 failures, 2 findings) + 6 research-intent queries with graded relevance judgments and must-recall failure cases. Same schema as eval_fixture.json (version pinned to 0.1.0 so runner.py loads it unchanged); doc/query IDs carry a p2 infix so the Phase 2 seeder (seed_phase2.py) can merge both fixtures without collisions. Covers intermediate-horizon momentum, short-leg borrow costs, monthly-factor attribution joins, DSL-blended ML composites, multi-view Black-Litterman, and PIT/restatement discipline for fundamentals.",
+  "documents": [
+    {
+      "doc_id": "exp_p2_factor_mom63d_me",
+      "kind": "experiment",
+      "title": "Factor tearsheet: mom_63d intermediate momentum, monthly",
+      "tool": "run_factor_analysis",
+      "params": {"signal_name": "mom_63d", "horizon_days": 63, "q": 5, "rebalance": "ME", "sector_neutralize": false},
+      "metrics": {"ic_mean": 0.027, "icir": 0.58, "ic_tstat": 2.01, "hit_rate": 0.55, "ls_sharpe": 0.55, "ls_turnover": 3.1, "coverage": 0.92},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "63d", "frequency": "daily"},
+      "text": "Single-factor evaluation of the intermediate mom_63d signal at a 63-day horizon: IC mean 0.027, ICIR 0.58, t-stat 2.01, hit rate 0.55. Quintile long-short backtest earns Sharpe 0.55 with 3.1x turnover and 92% rebalance coverage. Bridges the gap between short-horizon mom_21d and the 126-day baseline on the IC decay curve."
+    },
+    {
+      "doc_id": "exp_p2_backtest_reversal_costs",
+      "kind": "experiment",
+      "title": "Reversal backtest with explicit borrow costs on the short leg",
+      "tool": "run_backtest",
+      "params": {"type": "reversal", "lookback": 5, "holding": 5, "turnover": 1.0, "universe_pit": "40 liquid names@2020-01-02", "costs": {"bps": 5, "slippage": 2, "borrow": 150}, "splits": {"purge": 5, "embargo": 10}},
+      "metrics": {"sr": 0.31, "T": 1520, "skew": -0.08, "kurt": 5.1, "gross_sr": 0.71, "cost_drag": 0.4, "borrow_drag": 0.22, "ic_mean": 0.016, "oos_sr": 0.18, "oos_T": 380},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "pit-40", "horizon": "5d", "frequency": "daily"},
+      "text": "spark-mcp 15.2 reversal backtest with borrow costs charged on the short leg: 150 bps annualized borrow adds 0.22 Sharpe points of drag on top of 5 bps costs plus 2 bps slippage, taking net Sharpe to 0.31 from gross 0.71. Purge 5 and embargo 10 splits with a PIT universe; OOS Sharpe 0.18. Short-leg borrow is first-order for any long-short reversal claim."
+    },
+    {
+      "doc_id": "exp_p2_attr_qmj_bab",
+      "kind": "experiment",
+      "title": "Attribution on monthly AQR quality and betting-against-beta factors",
+      "tool": "attribute_portfolio",
+      "params": {"symbols_weights": "AAPL:0.3,MSFT:0.3,JNJ:0.2,PG:0.2", "factors": "ff_mkt_rf,aqr_qmj_us,aqr_bab_us", "join": "month-period asof"},
+      "metrics": {"beta_mkt": 0.94, "tstat_mkt": 18.6, "beta_qmj": 0.34, "tstat_qmj": 3.1, "beta_bab": 0.19, "tstat_bab": 1.7, "alpha_annualized": 0.008, "alpha_tstat": 0.6, "r2": 0.88, "residual_vol_annualized": 0.054, "n_obs": 36},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "3y", "frequency": "monthly"},
+      "text": "Factor attribution of a quality-tilted portfolio on monthly AQR QMJ and BAB factors plus the market, joined to holdings via month periods (asof) so no month-end factor rows are dropped. Quality beta 0.34 with t-stat 3.1, BAB 0.19, R-squared 0.88, insignificant alpha 0.8%. Cross-frequency joins must use month periods, never naive calendar-day equality."
+    },
+    {
+      "doc_id": "exp_p2_ml_dsl_feature",
+      "kind": "experiment",
+      "title": "Walk-forward ridge blend with a DSL-defined value feature",
+      "tool": "ml_signal_scores",
+      "params": {"features": "mom_126d,CLOSE / @mavg(CLOSE, 1y) - 1", "horizon": 63, "model": "ridge", "rebalance": "ME", "min_train_dates": 504},
+      "metrics": {"coef_mom_126d": 0.55, "coef_value_dsl": 0.31, "coverage": 0.9},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "63d", "frequency": "daily"},
+      "text": "Walk-forward ML composite at a 63-day horizon: ridge regression fit only on data strictly before each monthly rebalance blends mom_126d with a DSL-defined value feature (price over trailing 1-year moving average minus one) using 504 training dates. Latest coefficients load 0.55 on momentum and 0.31 on value with 90% coverage. Point-in-time with no look-ahead; DSL features compose with built-in signals."
+    },
+    {
+      "doc_id": "exp_p2_opt_bl_two_views",
+      "kind": "experiment",
+      "title": "Black-Litterman tilt with two opposing sector views",
+      "tool": "optimize_portfolio",
+      "params": {"symbols": "12 liquid S&P 500 names", "method": "black_litterman", "views": "AAPL outperforms the basket; XOM underperforms the basket"},
+      "metrics": {"aapl_tilt_pp": 3.2, "xom_tilt_pp": -2.6, "expected_sharpe": 0.91, "max_weight_realized": 0.14},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "1y", "frequency": "daily"},
+      "text": "Black-Litterman optimization from an equal-cap prior with two views: AAPL outperforms the basket while XOM underperforms. Tilts AAPL up 3.2 percentage points and XOM down 2.6 points with stable weights elsewhere (max 14%). Multiple views compose cleanly when each view portfolio is specified outright; views default to historical means when unspecified."
+    },
+    {
+      "doc_id": "fail_p2_stale_fundamentals",
+      "kind": "failure",
+      "title": "Restated fundamentals overstate value IC twofold",
+      "tool": "run_factor_analysis",
+      "failure_class": "data",
+      "params": {"signal_name": "value_dsl", "horizon_days": 63, "fundamentals": "latest restated snapshot (wrong)"},
+      "metrics": {"ic_restated": 0.041, "ic_pit": 0.018, "bias_ratio": 2.28},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "63d", "frequency": "daily"},
+      "text": "Failed experiment: a value factor built on latest restated fundamentals showed IC 0.041, but rebuilding on point-in-time vintage fundamentals cut IC to 0.018 — restatement bias overstated the signal more than twofold. Lesson: fundamentals must be vintage-stamped (dataset_version with vintage_at); any factor using as-reported-latest accounting data inherits look-ahead bias."
+    },
+    {
+      "doc_id": "fail_p2_cost_borrow_short",
+      "kind": "failure",
+      "title": "Omitted borrow costs flip a long-short reversal claim negative",
+      "tool": "run_backtest",
+      "failure_class": "execution",
+      "params": {"type": "reversal", "lookback": 5, "holding": 5, "costs": {"bps": 5, "slippage": 2, "borrow": 0}},
+      "metrics": {"sr_no_borrow": 0.52, "sr_with_borrow": -0.05, "borrow_drag": 0.57, "turnover": 16.2},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "pit-40", "horizon": "5d", "frequency": "daily"},
+      "text": "Failed experiment: a long-short reversal backtest claimed Sharpe 0.52 with only 5 bps costs and 2 bps slippage, but charging realistic short-leg borrow flipped net Sharpe to -0.05 (borrow drag 0.57 Sharpe points at 16.2x turnover). Lesson: long-short backtests must charge borrow explicitly via the costs model; gross-of-borrow Sharpe is not evidence."
+    },
+    {
+      "doc_id": "fail_p2_hypothesis_regime",
+      "kind": "failure",
+      "title": "Twelve-month momentum hypothesis fails in the post-2022 regime",
+      "tool": "run_momentum_backtest",
+      "failure_class": "hypothesis",
+      "params": {"lookback_days": 252, "top_n": 50, "rebalance": "ME", "fees": 0.0005, "oos_window": "2023-01-01/2026-09-19"},
+      "metrics": {"sharpe_insample": 0.64, "sharpe_oos": -0.12, "oos_T": 920},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "12m", "frequency": "daily"},
+      "text": "Failed hypothesis: the 12-month top-50 momentum design earned Sharpe 0.64 in sample but -0.12 out of sample over 2023-2026, consistent with post-publication crowding and a regime break rather than a coding or data error. Lesson: momentum premia carry regime risk; hypotheses need validity windows (effective_from/effective_to) and OOS confirmation before promotion to validated findings."
+    },
+    {
+      "doc_id": "find_p2_borrow_costs_short_leg",
+      "kind": "finding",
+      "title": "Short-leg borrow must be modeled explicitly in long-short evaluation",
+      "tool": "",
+      "params": {},
+      "metrics": {"borrow_drag_range_sr": "0.2-0.6", "turnover_threshold": 10.0},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "5d", "frequency": "daily"},
+      "text": "Methodological finding: borrow costs on the short leg drag long-short Sharpe by 0.2 to 0.6 points at realistic turnover, enough to flip marginal reversal claims negative. Supported by the borrow-aware reversal backtest and the omitted-borrow failure; every long-short evaluation must report net-of-borrow metrics with the borrow assumption stated."
+    },
+    {
+      "doc_id": "find_p2_pit_fundamentals",
+      "kind": "finding",
+      "title": "Fundamentals factors require point-in-time vintages, not restated snapshots",
+      "tool": "",
+      "params": {},
+      "metrics": {"restatement_bias_ratio": 2.28, "ic_pit": 0.018},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "63d", "frequency": "daily"},
+      "text": "Data-quality finding: accounting-based factors built on restated snapshots overstate IC by about twofold versus point-in-time vintages (0.041 vs 0.018 on the value DSL signal). Supported by the restatement-bias failure; dataset versions for fundamentals must carry vintage_at and every factor run must record which vintage it consumed."
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "q_p201_mom_63d_gap",
+      "query_text": "What evidence exists for intermediate-horizon momentum around 63 trading days?",
+      "intent": {"topic": "intermediate momentum", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "63d", "frequency": "daily", "concepts": ["momentum", "IC decay", "intermediate horizon", "quantile backtest"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "validated_findings", "failures"]},
+      "relevant": [{"doc_id": "exp_p2_factor_mom63d_me", "grade": 2, "rationale": "Exact mom_63d tearsheet at 63-day horizon."}, {"doc_id": "exp_p2_ml_dsl_feature", "grade": 1, "rationale": "Blends momentum at an adjacent 63-day horizon."}],
+      "must_recall_failures": ["fail_p2_hypothesis_regime"]
+    },
+    {
+      "query_id": "q_p202_short_leg_costs",
+      "query_text": "How do borrow costs on the short leg change long-short reversal results?",
+      "intent": {"topic": "short-leg borrow costs", "asset_class": "equity", "markets": ["US"], "universe": "pit-40", "horizon": "5d", "frequency": "daily", "concepts": ["borrow", "short leg", "reversal", "net Sharpe", "turnover"], "requested_period": ["2018-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures", "validated_findings"]},
+      "relevant": [{"doc_id": "exp_p2_backtest_reversal_costs", "grade": 2, "rationale": "Borrow-aware reversal run with explicit drag accounting."}, {"doc_id": "find_p2_borrow_costs_short_leg", "grade": 2, "rationale": "States the borrow-modeling rule."}, {"doc_id": "fail_p2_cost_borrow_short", "grade": 1, "rationale": "Omitted-borrow failure on this design."}],
+      "must_recall_failures": ["fail_p2_cost_borrow_short"]
+    },
+    {
+      "query_id": "q_p203_monthly_factor_attribution",
+      "query_text": "Can I attribute a portfolio to monthly AQR quality and BAB factors without losing rows?",
+      "intent": {"topic": "monthly factor attribution", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "3y", "frequency": "monthly", "concepts": ["AQR", "QMJ", "BAB", "month period", "attribution"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures", "validated_findings"]},
+      "relevant": [{"doc_id": "exp_p2_attr_qmj_bab", "grade": 2, "rationale": "QMJ/BAB attribution via month-period joins."}, {"doc_id": "find_p2_pit_fundamentals", "grade": 1, "rationale": "Vintage discipline for factor inputs."}],
+      "must_recall_failures": ["fail_p2_stale_fundamentals"]
+    },
+    {
+      "query_id": "q_p204_ml_dsl_composite",
+      "query_text": "Can a DSL-defined value feature be blended with momentum in a walk-forward composite?",
+      "intent": {"topic": "DSL signal blending", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "63d", "frequency": "daily", "concepts": ["DSL", "ridge", "walk-forward", "composite", "value"], "requested_period": ["2018-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_p2_ml_dsl_feature", "grade": 2, "rationale": "Walk-forward ridge run with a DSL value leg."}, {"doc_id": "exp_p2_factor_mom63d_me", "grade": 1, "rationale": "Single-signal evidence at the same horizon."}],
+      "must_recall_failures": ["fail_p2_stale_fundamentals"]
+    },
+    {
+      "query_id": "q_p205_bl_two_views",
+      "query_text": "How do two opposing stock views combine in a Black-Litterman portfolio?",
+      "intent": {"topic": "Black-Litterman multiple views", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "1y", "frequency": "daily", "concepts": ["Black-Litterman", "views", "tilt", "prior"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_p2_opt_bl_two_views", "grade": 2, "rationale": "Two-view BL run with measured tilts."}, {"doc_id": "fail_p2_hypothesis_regime", "grade": 1, "rationale": "Views are hypotheses that can break by regime."}],
+      "must_recall_failures": ["fail_p2_hypothesis_regime"]
+    },
+    {
+      "query_id": "q_p206_restatement_bias",
+      "query_text": "Why do fundamentals factors need point-in-time vintages, and how big is restatement bias?",
+      "intent": {"topic": "restatement bias", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "63d", "frequency": "daily", "concepts": ["restatement", "point-in-time", "vintage", "value", "look-ahead"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["failures", "validated_findings", "prior_experiments"]},
+      "relevant": [{"doc_id": "find_p2_pit_fundamentals", "grade": 2, "rationale": "States the PIT-vintage rule with bias size."}, {"doc_id": "fail_p2_stale_fundamentals", "grade": 2, "rationale": "The restatement-bias failure this avoids."}, {"doc_id": "exp_p2_attr_qmj_bab", "grade": 1, "rationale": "Factor run that depends on clean inputs."}],
+      "must_recall_failures": ["fail_p2_stale_fundamentals"]
+    }
+  ]
+}

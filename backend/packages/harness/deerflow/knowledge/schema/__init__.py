@@ -1,10 +1,11 @@
-"""Phase 1 ORM models for the Research Knowledge Plane (KB episodic half).
+"""ORM models for the Research Knowledge Plane (KB episodic + semantic rows).
 
-Re-exports the eight mapped rows (migration ``0022_knowledge_phase1``) plus
-the shared column helpers and enum vocabularies so call sites bind to one
+Re-exports the mapped rows (Phase 1 migration ``0022_knowledge_phase1`` plus
+the Phase 2 ``finding`` table from ``0023_knowledge_findings``) and the
+shared column helpers and enum vocabularies so call sites bind to one
 stable import surface::
 
-    from deerflow.knowledge.schema import AssumptionRow, ExperimentRow
+    from deerflow.knowledge.schema import AssumptionRow, ExperimentRow, FindingRow
 
 Table layout:
 
@@ -15,6 +16,9 @@ Table layout:
 * ``experiment`` / ``experiment_dataset`` / ``experiment_artifact`` /
   ``assumption`` (:mod:`.experiments`) — first-class experiments with typed
   dataset/artifact links and explicit assumptions.
+* ``finding`` (:mod:`.findings`) — versioned, evidence-backed claims with
+  the asynchronously populated retrieval columns (``search_document``,
+  ``embedding``).
 """
 
 from __future__ import annotations
@@ -25,6 +29,17 @@ from deerflow.knowledge.schema.experiments import (
     ExperimentArtifactRow,
     ExperimentDatasetRow,
     ExperimentRow,
+)
+from deerflow.knowledge.schema.findings import (
+    EMBEDDING_DIMENSIONS,
+    FINDING_STATUSES,
+    FINDING_STATUSES_PHASE2,
+    FINDING_TYPES,
+    EmbeddingVector,
+    FindingRow,
+    NativeVector,
+    embedding_vector,
+    tsvector,
 )
 from deerflow.knowledge.schema.research import AgentRunRow, ResearchProjectRow
 from deerflow.knowledge.schema.types import (
@@ -52,7 +67,16 @@ __all__ = [
     "ExperimentArtifactRow",
     "ExperimentDatasetRow",
     "ExperimentRow",
+    "FindingRow",
     "ResearchProjectRow",
+    "EMBEDDING_DIMENSIONS",
+    "FINDING_STATUSES",
+    "FINDING_STATUSES_PHASE2",
+    "FINDING_TYPES",
+    "EmbeddingVector",
+    "NativeVector",
+    "embedding_vector",
+    "tsvector",
     "AGENT_RUN_STATUSES",
     "ARTIFACT_KINDS",
     "ASSUMPTION_CATEGORIES",

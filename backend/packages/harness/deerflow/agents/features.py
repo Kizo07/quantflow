@@ -29,6 +29,10 @@ class RuntimeFeatures:
 
     sandbox: bool | AgentMiddleware = True
     memory: bool | AgentMiddleware = False
+    # Research Knowledge Plane run-start bootstrap (Phase 2: shared recall).
+    # True appends the default KnowledgeBootstrapMiddleware, which self-gates
+    # on KnowledgeConfig + bound backends and degrades to a no-op otherwise.
+    knowledge: bool | AgentMiddleware = False
     # Explicit memory config for direct create_deerflow_agent(features=...) callers.
     # The lead-agent AppConfig path passes resolved_app_config.memory directly.
     memory_config: MemoryConfig | None = None

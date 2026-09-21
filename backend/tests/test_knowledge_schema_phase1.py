@@ -165,11 +165,13 @@ class TestRevisionChain:
         assert migration.down_revision == "0019_thread_incarnations"
 
     def test_single_head_is_new_revision(self) -> None:
+        # Phase 2 landed revision 0023 on top of this one; the head pin
+        # follows the chain tip (single head, no branches).
         migrations_dir = Path(migration.__file__).resolve().parent.parent
         config = Config()
         config.set_main_option("script_location", migrations_dir.as_posix())
         script = ScriptDirectory.from_config(config)
-        assert script.get_heads() == ["0022_knowledge_phase1"]
+        assert script.get_heads() == ["0023_knowledge_findings"]
 
 
 class TestModels:

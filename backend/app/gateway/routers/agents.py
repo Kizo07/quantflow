@@ -12,6 +12,7 @@ from deerflow.agents.memory.manager import get_memory_manager
 from deerflow.config.agents_api_config import get_agents_api_config
 from deerflow.config.agents_config import (
     AgentConfig,
+    AgentDisplayName,
     AgentModelSettings,
     list_custom_agents,
     load_agent_config,
@@ -20,6 +21,7 @@ from deerflow.config.agents_config import (
 )
 from deerflow.config.app_config import get_app_config
 from deerflow.config.paths import get_paths
+from deerflow.knowledge_scope import KnowledgeScope, canonicalize_knowledge_scope
 from deerflow.persistence.agents import AgentDeleteOutcome, AgentExistsError, get_agent_store
 from deerflow.runtime.user_context import get_effective_user_id
 
@@ -40,9 +42,12 @@ class AgentResponse(BaseModel):
     """Response model for a custom agent."""
 
     name: str = Field(..., description="Agent name (hyphen-case)")
+    display_name: AgentDisplayName | None = Field(default=None, description="Optional Unicode display name; name remains the stable identifier")
     description: str = Field(default="", description="Agent description")
     model: str | None = Field(default=None, description="Optional model override")
     tool_groups: list[str] | None = Field(default=None, description="Optional tool group whitelist")
+    mcp_plugins: list[str] | None = Field(default=None, description="MCP installation selection (None=all, []=none)")
+    knowledge_scope: KnowledgeScope | None = Field(default=None, description="Default RAGFlow scope for new turns; null inherits operator scope")
     skills: list[str] | None = Field(default=None, description="Optional skill whitelist (None=all, []=none)")
     allowed_subagents: list[str] | None = Field(default=None, description="Subagent allowlist (None=all enabled, []=none)")
     model_settings: AgentModelSettings | None = Field(default=None, description="Per-agent sampling overrides (temperature / max_tokens)")
@@ -61,9 +66,12 @@ class AgentCreateRequest(BaseModel):
     """Request body for creating a custom agent."""
 
     name: str = Field(..., description="Agent name (must match ^[A-Za-z0-9-]+$, stored as lowercase)")
+    display_name: AgentDisplayName | None = None
     description: str = Field(default="", description="Agent description")
     model: str | None = Field(default=None, description="Optional model override")
     tool_groups: list[str] | None = Field(default=None, description="Optional tool group whitelist")
+    mcp_plugins: list[str] | None = Field(default=None, description="MCP installation selection (None=all, []=none)")
+    knowledge_scope: KnowledgeScope | None = Field(default=None, description="Default RAGFlow scope for new turns; null inherits operator scope")
     skills: list[str] | None = Field(default=None, description="Optional skill whitelist (None=all enabled, []=none)")
     allowed_subagents: list[str] | None = Field(default=None, description="Subagent allowlist (None=all enabled, []=none)")
     model_settings: AgentModelSettings | None = Field(default=None, description="Per-agent sampling overrides (temperature / max_tokens)")
@@ -75,9 +83,12 @@ class AgentCreateRequest(BaseModel):
 class AgentUpdateRequest(BaseModel):
     """Request body for updating a custom agent."""
 
+    display_name: AgentDisplayName | None = Field(default=None, description="Updated display name; null clears it")
     description: str | None = Field(default=None, description="Updated description")
     model: str | None = Field(default=None, description="Updated model override")
     tool_groups: list[str] | None = Field(default=None, description="Updated tool group whitelist")
+    mcp_plugins: list[str] | None = Field(default=None, description="MCP installation selection (None=all, []=none)")
+    knowledge_scope: KnowledgeScope | None = Field(default=None, description="Default RAGFlow scope for new turns; null inherits operator scope")
     skills: list[str] | None = Field(default=None, description="Updated skill whitelist (None=all, []=none)")
     allowed_subagents: list[str] | None = Field(default=None, description="Updated subagent allowlist (None=all, []=none)")
     model_settings: AgentModelSettings | None = Field(default=None, description="Updated per-agent sampling overrides")
@@ -189,10 +200,13 @@ def _agent_config_to_response(agent_cfg: AgentConfig, include_soul: bool = False
 
     return AgentResponse(
         name=agent_cfg.name,
+        display_name=agent_cfg.display_name,
         description=agent_cfg.description,
         model=agent_cfg.model,
         tool_groups=agent_cfg.tool_groups,
         skills=agent_cfg.skills,
+        mcp_plugins=agent_cfg.mcp_plugins,
+        knowledge_scope=agent_cfg.knowledge_scope,
         allowed_subagents=agent_cfg.allowed_subagents,
         model_settings=agent_cfg.model_settings,
         thinking_enabled=agent_cfg.thinking_enabled,
@@ -328,10 +342,16 @@ async def create_agent_endpoint(request: AgentCreateRequest) -> AgentResponse:
     # Config document — only the fields the caller set, matching the historical
     # writer (an omitted field stays absent rather than being materialized).
     config_data: dict = {"name": normalized_name}
+    if request.display_name:
+        config_data["display_name"] = request.display_name
     if request.description:
         config_data["description"] = request.description
     if request.tool_groups is not None:
         config_data["tool_groups"] = request.tool_groups
+    if request.knowledge_scope is not None:
+        config_data["knowledge_scope"] = canonicalize_knowledge_scope(request.knowledge_scope)
+    if request.mcp_plugins is not None:
+        config_data["mcp_plugins"] = request.mcp_plugins
     if request.skills is not None:
         config_data["skills"] = request.skills
     if request.allowed_subagents is not None:
@@ -415,7 +435,7 @@ async def update_agent(name: str, request: AgentUpdateRequest) -> AgentResponse:
         # Use model_fields_set to distinguish "field omitted" from "explicitly set to null".
         # This is critical for skills where None means "inherit all" (not "don't change").
         fields_set = request.model_fields_set
-        config_changed = bool(fields_set & ({"description", "tool_groups", "skills", "allowed_subagents"} | set(_MODEL_BEHAVIOR_FIELDS)))
+        config_changed = bool(fields_set & ({"display_name", "description", "tool_groups", "skills", "mcp_plugins", "knowledge_scope", "allowed_subagents"} | set(_MODEL_BEHAVIOR_FIELDS)))
 
         updated: dict | None = None
         if config_changed:
@@ -423,10 +443,18 @@ async def update_agent(name: str, request: AgentUpdateRequest) -> AgentResponse:
                 "name": agent_cfg.name,
                 "description": request.description if "description" in fields_set else agent_cfg.description,
             }
+            if "display_name" in fields_set:
+                updated["display_name"] = request.display_name or None
 
             new_tool_groups = request.tool_groups if "tool_groups" in fields_set else agent_cfg.tool_groups
             if new_tool_groups is not None:
                 updated["tool_groups"] = new_tool_groups
+
+            if "knowledge_scope" in fields_set:
+                updated["knowledge_scope"] = canonicalize_knowledge_scope(request.knowledge_scope) if request.knowledge_scope is not None else None
+
+            if "mcp_plugins" in fields_set:
+                updated["mcp_plugins"] = request.mcp_plugins
 
             # skills: None = inherit all, [] = no skills, ["a","b"] = whitelist
             if "skills" in fields_set:

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BlocksIcon,
   BotIcon,
   CalendarClock,
   ChartColumn,
@@ -102,6 +103,20 @@ export function WorkspaceNavChatList() {
             <Link className="text-muted-foreground" href="/workspace/usage">
               <ChartColumn />
               <span>{t.sidebar.usage}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            isActive={pathname.startsWith("/workspace/capabilities")}
+            asChild
+          >
+            <Link
+              className="text-muted-foreground"
+              href="/workspace/capabilities"
+            >
+              <BlocksIcon />
+              <span>{t.capabilities.title}</span>
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>

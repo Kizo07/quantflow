@@ -5,8 +5,9 @@ does not enable ``pipefail``, so the pipeline's exit code is ``head``'s, not
 ``find``'s. A missing ``find`` binary (127) then looks like an empty listing
 and becomes ``FileNotFoundError``.
 
-The command below writes ``find``'s own status after the bounded listing so
-callers can tell a missing path from a command failure. ``head`` closing the
+The command checks root existence before running ``find`` and writes its own
+status after the bounded listing, distinguishing missing paths from traversal
+failures even when no entries were printed. ``head`` closing the
 pipe can kill ``find`` with SIGPIPE (141); that is a successful truncation,
 not an error.
 """
@@ -15,11 +16,14 @@ from __future__ import annotations
 
 import shlex
 
+from deerflow.sandbox.search import should_ignore_path
+
 _STATUS_PREFIX = "__DF_FIND_STATUS__:"
+_MISSING_ROOT = "missing"
 _LIST_LIMIT = 500
-# 0 = ok, 1 = find reported a missing start point / tree error, 141 = SIGPIPE
-# from head truncating a large listing.
-_FIND_OK = (0, 1, 141)
+# 0 = ok, 141 = SIGPIPE from head truncating a large listing.
+# A missing root has its own marker; status 1 always means traversal failed.
+_FIND_OK = (0, 141)
 
 
 def remote_list_dir_command(path: str, max_depth: int, *, limit: int = _LIST_LIMIT) -> str:
@@ -32,13 +36,20 @@ def remote_list_dir_command(path: str, max_depth: int, *, limit: int = _LIST_LIM
     # a login-profile ``set -e`` so a failing find still records $?. End with
     # ``exit`` of that status (126 if the file is missing): the last command
     # would otherwise be ``rm``, whose 0/1 is not find's status.
+    # ``set +e`` stays outermost (pinned by existing tests); the rest runs in a
+    # ( ... ) subshell: a bare ``exit`` in the implicit persistent session kills
+    # the session's shell process and the AIO server's response path for that
+    # request hangs forever (verified: bare ``exit 0`` always wedges; a subshell
+    # ``exit`` only kills the subshell, the session survives, and the exit code
+    # and output propagate unchanged).
     return (
-        f"set +e; _st=/tmp/df_find_$$; "
+        f"set +e; ( if [ ! -e {quoted} ]; then printf '%s\\n' {_STATUS_PREFIX}{_MISSING_ROOT}; exit 1; fi; "
+        f"_st=/tmp/df_find_$$; "
         f"{{ find -H {quoted} -maxdepth {depth} \\( -type f -o -type d \\) 2>/dev/null; "
         f'echo $? > "$_st"; }} | head -n {n}; '
         f'st=$(cat "$_st" 2>/dev/null); '
         f"printf '\\n%s\\n' {_STATUS_PREFIX}$st; "
-        f'rm -f "$_st"; exit "${{st:-126}}"'
+        f'rm -f "$_st"; exit "${{st:-126}}" )'
     )
 
 
@@ -50,9 +61,18 @@ def parse_remote_list_dir_output(
 ) -> list[str]:
     """Parse listing stdout, preferring the find-status marker over pipeline status.
 
+    Entries under ignored directories (``IGNORE_PATTERNS``) are dropped, matching
+    the local ``list_dir`` and the remote ``glob``/``grep`` implementations, which
+    already skip those paths. Patterns apply to the path relative to the listing
+    root, so an ignored name only hides that directory's *descendants*: explicitly
+    listing ``build`` — or a path below an ignored ancestor — still returns its
+    contents, as the local walk does. Filtering happens after the empty-output
+    check, so a directory whose entries are all ignored returns an empty list
+    rather than a missing-path error.
+
     Raises:
-        OSError: Command/client failure (missing binary, invocation error, ...).
-        FileNotFoundError: ``find`` ran and produced no entries (missing path).
+        OSError: Command/client failure or an incomplete traversal.
+        FileNotFoundError: The root is missing or ``find`` produced no output.
     """
     # find delimits records with "\n" only. splitlines() would also split on
     # \v, \f, \x1c-\x1e and \x85, which are legal in Linux filenames. Do not
@@ -64,6 +84,8 @@ def parse_remote_list_dir_output(
     find_status: int | None = None
     if lines and lines[-1].startswith(_STATUS_PREFIX):
         raw = lines.pop()[len(_STATUS_PREFIX) :]
+        if raw == _MISSING_ROOT:
+            raise FileNotFoundError(resolved)
         try:
             find_status = int(raw)
         except ValueError:
@@ -73,15 +95,34 @@ def parse_remote_list_dir_output(
 
     if find_status is None:
         # Do not treat a missing marker as success. The process status used to
-        # be ``rm``'s (0/1, both in _FIND_OK), which reclassified a lost 127
+        # be ``rm``'s (0/1), which reclassified a lost 127
         # as FileNotFoundError.
-        if pipeline_exit_code is not None and pipeline_exit_code not in _FIND_OK:
+        if pipeline_exit_code is not None and pipeline_exit_code not in (*_FIND_OK, 1):
             raise OSError(f"Failed to list_dir {resolved}: command exited with code {pipeline_exit_code}")
         raise OSError(f"Failed to list_dir {resolved}: find status marker missing")
+
+    entries = [line for line in lines if line]
+    if find_status == 1:
+        raise OSError(f"Failed to list_dir {resolved}: find exited with code 1, usually because some files or directories could not be read; results would be incomplete, so list a narrower path")
     if find_status not in _FIND_OK:
         raise OSError(f"Failed to list_dir {resolved}: command exited with code {find_status}")
 
-    entries = [line for line in lines if line]
     if not entries:
         raise FileNotFoundError(resolved)
-    return entries
+    root = resolved.rstrip("/") or "/"
+    prefix = "/" if root == "/" else f"{root}/"
+    kept: list[str] = []
+    for entry in entries:
+        if entry.rstrip("/") == root:
+            # The requested root is what the caller asked for; keep it even when
+            # its own name matches an ignore pattern.
+            kept.append(entry)
+        elif entry.startswith(prefix):
+            if not should_ignore_path(entry[len(prefix) :]):
+                kept.append(entry)
+        else:
+            # ``find -H`` prints the resolved target when the root is a symlink,
+            # so an entry may not carry the requested prefix. Keep it: a path
+            # that cannot be placed relative to the root must not disappear.
+            kept.append(entry)
+    return kept

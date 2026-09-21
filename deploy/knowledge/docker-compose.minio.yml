@@ -1,0 +1,72 @@
+# MinIO (S3-compatible) object store for the Quantflow Research Knowledge Plane.
+#
+# Standalone usage from the repo root:
+#   cp deploy/knowledge/minio.env.example deploy/knowledge/minio.env  # then edit credentials
+#   docker compose -f deploy/knowledge/docker-compose.minio.yml up -d
+#   python -c "from deerflow.knowledge.artifacts import ArtifactStore, create_backend; ..."
+#
+# The artifact store then points at it via:
+#   backend = create_backend("s3://quantflow-evidence",
+#                            endpoint_url="http://127.0.0.1:9000",
+#                            aws_access_key_id=..., aws_secret_access_key=...,
+#                            region_name="us-east-1")
+#
+# Ports bind to loopback by default (repo convention: every published port
+# needs an explicit bind address). Override with BIND_HOST / MINIO_PORT /
+# MINIO_CONSOLE_PORT in deploy/knowledge/minio.env.
+
+name: deer-flow-knowledge
+
+services:
+  minio:
+    image: minio/minio:RELEASE.2026-02-04T19-07-04Z
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    env_file:
+      - path: ./minio.env
+        required: false
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${MINIO_PORT:-9000}:9000"
+      - "${BIND_HOST:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  # One-shot bucket provisioning (idempotent): creates the evidence bucket
+  # once MinIO is healthy. Disable by removing this service.
+  minio-init:
+    image: minio/mc:RELEASE.2026-01-14T01-46-02Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    env_file:
+      - path: ./minio.env
+        required: false
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-quantflow-evidence}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        mc alias set local "http://minio:9000" "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "local/$$MINIO_BUCKET"
+        mc version suspend "local/$$MINIO_BUCKET" >/dev/null 2>&1 || true
+        echo "bucket ready: $$MINIO_BUCKET"
+    networks:
+      - default
+
+volumes:
+  minio-data:
+    name: deer-flow-knowledge-minio-data

@@ -134,6 +134,14 @@ class CustomSubagentConfig(BaseModel):
         ge=1,
         description="Maximum execution time in seconds",
     )
+    thinking_enabled: bool | None = Field(
+        default=None,
+        description="Extended-thinking mode for this subagent's model (None = non-thinking, today's behavior)",
+    )
+    reasoning_effort: str | None = Field(
+        default=None,
+        description="Named effort override for this subagent's model (None = no override); validated at launch",
+    )
 
 
 class SubagentsAppConfig(BaseModel):

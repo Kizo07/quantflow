@@ -1,6 +1,7 @@
 """Tests for the read-before-write gate (issue #3857, output layer)."""
 
 import hashlib
+import logging
 import posixpath
 from unittest.mock import MagicMock, patch
 
@@ -203,6 +204,20 @@ class TestWriteGate:
         result = mw.wrap_tool_call(request, handler)
         handler.assert_called_once()
         assert result.status != "error"
+
+    def test_gate_permission_error_fails_open_quietly(self, caplog):
+        """Host/out-of-sandbox paths (e.g. report-forge project paths) are
+        rejected by the tool layer itself — the gate must let them through
+        to the tool's own denial without a fail-open WARNING (NVDA 2026-09-19)."""
+        host_path = "/home/fire/Documents/report-forge/reports/x/index.qmd"
+        mw = _middleware({host_path: PermissionError("Only paths under /mnt/user-data/ are allowed")})
+        request = _make_request("write_file", {"description": "d", "path": host_path, "content": "v2"})
+        handler = MagicMock(return_value=ToolMessage(content="OK", tool_call_id="call-1", name="write_file"))
+        with caplog.at_level(logging.WARNING, logger="deerflow.agents.middlewares.read_before_write_middleware"):
+            result = mw.wrap_tool_call(request, handler)
+        handler.assert_called_once()
+        assert result.status != "error"
+        assert "could not inspect" not in caplog.text
 
     def test_normalized_path_matching(self):
         mw = _middleware({self.PATH: "v1"})

@@ -1,0 +1,590 @@
+{
+  "version": "0.1.0",
+  "description": "Phase 0 retrieval-eval fixture: known prior alpha_engine experiments, failures, and findings with research-intent queries and relevance judgments. Grounds Phase 2 exit criteria (recall@k and failure-recall@k, k=10, target 0.8). Documents mirror real alpha_engine MCP tools (run_momentum_backtest, run_factor_analysis, run_backtest, attribute_portfolio, brinson_attribution, portfolio_risk_decomposition, risk_decompose, optimize_portfolio, causal_test, ml_signal_scores) and their tested parameter/metric names.",
+  "documents": [
+    {
+      "doc_id": "exp_mom_126_top20_me",
+      "kind": "experiment",
+      "title": "Cross-sectional momentum 126d/top20 monthly backtest",
+      "tool": "run_momentum_backtest",
+      "params": {"lookback_days": 126, "top_n": 20, "rebalance": "ME", "fees": 0.0005},
+      "metrics": {"total_return": 0.473, "cagr": 0.132, "sharpe": 0.82, "max_drawdown": -0.284, "turnover": 3.4, "n_tickers": 498, "benchmark_sharpe": 0.51},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "6m", "frequency": "daily"},
+      "text": "Cross-sectional momentum backtest over S&P 500 history: each month buy the top 20 tickers by trailing 126-day return, equal weight, 5 bps fees. Sharpe 0.82 vs 0.51 equal-weight benchmark, CAGR 13.2%, max drawdown -28.4%, one-way turnover 3.4x per year. Baseline 6-month momentum result net of modest costs."
+    },
+    {
+      "doc_id": "exp_mom_21_top10_w",
+      "kind": "experiment",
+      "title": "Short-horizon momentum 21d/top10 weekly backtest",
+      "tool": "run_momentum_backtest",
+      "params": {"lookback_days": 21, "top_n": 10, "rebalance": "W", "fees": 0.0005},
+      "metrics": {"total_return": 0.19, "cagr": 0.061, "sharpe": 0.31, "max_drawdown": -0.41, "turnover": 18.7, "n_tickers": 498},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "1m", "frequency": "daily"},
+      "text": "Short-horizon momentum backtest: top 10 tickers by trailing 21-day return, rebalanced weekly. Sharpe only 0.31 with very high one-way turnover of 18.7x per year, so net results are fragile to transaction cost assumptions. Companion to the 126-day monthly baseline."
+    },
+    {
+      "doc_id": "exp_mom_252_top50_me",
+      "kind": "experiment",
+      "title": "Long-horizon momentum 252d/top50 monthly backtest",
+      "tool": "run_momentum_backtest",
+      "params": {"lookback_days": 252, "top_n": 50, "rebalance": "ME", "fees": 0.0005},
+      "metrics": {"total_return": 0.36, "cagr": 0.107, "sharpe": 0.64, "max_drawdown": -0.31, "turnover": 1.9, "n_tickers": 498},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "12m", "frequency": "daily"},
+      "text": "Long-horizon 12-month momentum backtest: top 50 tickers by trailing 252-day return, monthly rebalance. Sharpe 0.64 with low turnover 1.9x per year, so the result survives realistic costs. Broader, more diversified expression of the momentum premium."
+    },
+    {
+      "doc_id": "exp_factor_mom126d_ic",
+      "kind": "experiment",
+      "title": "Factor tearsheet: mom_126d IC and quantile backtest",
+      "tool": "run_factor_analysis",
+      "params": {"signal_name": "mom_126d", "horizon_days": 21, "q": 5, "rebalance": "ME", "sector_neutralize": false},
+      "metrics": {"ic_mean": 0.032, "icir": 0.71, "ic_tstat": 2.46, "hit_rate": 0.56, "ls_sharpe": 0.68, "ls_turnover": 2.9, "coverage": 0.93},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "21d", "frequency": "daily"},
+      "text": "Single-factor evaluation of the built-in mom_126d signal: Spearman IC mean 0.032, ICIR 0.71, t-stat 2.46, hit rate 0.56 over a 21-day horizon. Quintile long-short backtest earns Sharpe 0.68 with 2.9x turnover and 93% rebalance coverage. Includes IC decay by horizon and seasonality diagnostics."
+    },
+    {
+      "doc_id": "exp_factor_value_dsl",
+      "kind": "experiment",
+      "title": "Factor tearsheet: value DSL expression, sector-neutral",
+      "tool": "run_factor_analysis",
+      "params": {"expression": "CLOSE / @mavg(CLOSE, 1y) - 1", "horizon_days": 63, "q": 5, "rebalance": "ME", "sector_neutralize": true},
+      "metrics": {"ic_mean": 0.018, "icir": 0.44, "ic_tstat": 1.52, "hit_rate": 0.53, "ls_sharpe": 0.39, "ls_turnover": 1.4, "coverage": 0.95},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "63d", "frequency": "daily"},
+      "text": "Custom value factor defined with the expression DSL as price over trailing 1-year moving average minus one, sector-neutralized. IC mean 0.018 at 63 days, long-short Sharpe 0.39, low turnover 1.4x. Demonstrates expression-defined signals with group neutralization."
+    },
+    {
+      "doc_id": "exp_factor_rsi14_reversal",
+      "kind": "experiment",
+      "title": "Factor tearsheet: rsi_14 and reversal_5d short-term reversal",
+      "tool": "run_factor_analysis",
+      "params": {"signal_name": "rsi_14", "horizon_days": 21, "q": 5, "rebalance": "W", "sector_neutralize": false},
+      "metrics": {"ic_mean_21d": -0.021, "reversal_5d_ic_5d": 0.027, "ls_sharpe_5d": 0.52, "ls_turnover_5d": 22.4, "coverage": 0.91},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "5d", "frequency": "daily"},
+      "text": "Short-term reversal study: rsi_14 has negative 21-day IC of -0.021 while the reversal_5d signal earns positive 5-day IC of 0.027 with long-short Sharpe 0.52, but at extreme 22.4x turnover that demands a careful cost model. Labels formed at date t earn returns from t+1 with no look-ahead."
+    },
+    {
+      "doc_id": "exp_factor_vol63d",
+      "kind": "experiment",
+      "title": "Factor tearsheet: vol_63d low-volatility effect",
+      "tool": "run_factor_analysis",
+      "params": {"signal_name": "vol_63d", "horizon_days": 63, "q": 5, "rebalance": "ME", "sector_neutralize": false},
+      "metrics": {"ic_mean": -0.014, "icir": -0.38, "hit_rate": 0.47, "ls_sharpe": -0.22, "coverage": 0.94},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "63d", "frequency": "daily"},
+      "text": "Trailing 63-day volatility signal: negative IC mean of -0.014 means high-volatility names underperform forward, consistent with the low-volatility effect. Weak statistical strength (ICIR -0.38) so position sizing must stay modest."
+    },
+    {
+      "doc_id": "exp_sweep_lookback_topn",
+      "kind": "experiment",
+      "title": "Momentum parameter sweep over lookback and top_n grid",
+      "tool": "run_param_sweep",
+      "params": {"lookbacks": "21,63,126,189,252", "top_ns": "10,20,30,50", "use_gpu": true},
+      "metrics": {"best_lookback": 126, "best_top_n": 20, "best_sharpe": 0.82, "n_configs": 20},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "mixed", "frequency": "daily"},
+      "text": "Grid sweep of cross-sectional momentum over lookback 21/63/126/189/252 days and top_n 10/20/30/50 on compiled numba kernels with CUDA screening. Best in-sample config is lookback 126 top 20 at Sharpe 0.82. Winner must be rerun in float64 and validated out of sample before any claim."
+    },
+    {
+      "doc_id": "exp_backtest_15_2_mom",
+      "kind": "experiment",
+      "title": "Deterministic momentum backtest with costs and purge/embargo",
+      "tool": "run_backtest",
+      "params": {"type": "momentum", "lookback": 20, "holding": 5, "turnover": 1.0, "universe_pit": "40 liquid names@2020-01-02", "costs": {"bps": 5, "slippage": 2, "borrow": 0}, "splits": {"purge": 5, "embargo": 10}},
+      "metrics": {"sr": 0.61, "T": 1520, "skew": 0.12, "kurt": 4.8, "gross_sr": 0.94, "cost_drag": 0.33, "ic_mean": 0.021, "oos_sr": 0.44, "oos_T": 380},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "pit-40", "horizon": "5d", "frequency": "daily"},
+      "text": "spark-mcp 15.2 deterministic cross-sectional momentum backtest: trailing 20-day signal, 5-day holding, point-in-time universe, 7 bps total daily cost drag with purge 5 and embargo 10 splits. Net Sharpe 0.61 over 1520 days, gross 0.94, cost drag 0.33 Sharpe points, OOS Sharpe 0.44. Signals strictly causal, labels only from days after the signal day."
+    },
+    {
+      "doc_id": "exp_backtest_15_2_reversal",
+      "kind": "experiment",
+      "title": "Deterministic short-term reversal backtest with costs",
+      "tool": "run_backtest",
+      "params": {"type": "reversal", "lookback": 5, "holding": 5, "turnover": 1.0, "costs": {"bps": 5, "slippage": 2, "borrow": 0}, "splits": {"purge": 5, "embargo": 10}},
+      "metrics": {"sr": 0.38, "T": 1520, "skew": -0.05, "kurt": 5.6, "gross_sr": 0.71, "cost_drag": 0.33, "ic_mean": 0.016, "oos_sr": 0.22, "oos_T": 380},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "pit-40", "horizon": "5d", "frequency": "daily"},
+      "text": "spark-mcp 15.2 reversal backtest: negated trailing 5-day signal, 5-day holding, same cost and split discipline as the momentum leg. Net Sharpe 0.38, OOS 0.22, with fat tails (kurtosis 5.6). Reversal works at short horizons and fades as lookback and holding lengthen."
+    },
+    {
+      "doc_id": "exp_attr_ff5_tech",
+      "kind": "experiment",
+      "title": "FF5-plus-momentum attribution of a tech-tilted portfolio",
+      "tool": "attribute_portfolio",
+      "params": {"symbols_weights": "AAPL:0.3,MSFT:0.3,NVDA:0.2,AVGO:0.2", "factors": "ff_mkt_rf,ff_smb,ff_hml,ff_rmw,ff_cma,ff_mom"},
+      "metrics": {"beta_mkt": 1.18, "tstat_mkt": 24.3, "beta_smb": -0.22, "beta_hml": -0.31, "beta_rmw": 0.12, "beta_cma": -0.08, "beta_mom": 0.15, "alpha_annualized": 0.012, "alpha_tstat": 0.8, "r2": 0.91, "residual_vol_annualized": 0.062, "n_obs": 756},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "3y", "frequency": "daily"},
+      "text": "Factor attribution of a concentrated tech portfolio on Fama-French 5 factors plus momentum: market beta 1.18 with t-stat 24.3, negative size and value loadings, R-squared 0.91, annualized alpha 1.2% with insignificant t-stat 0.80, residual vol 6.2%. Returns are explained by factor exposures, not stock picking."
+    },
+    {
+      "doc_id": "exp_brinson_sector",
+      "kind": "experiment",
+      "title": "Brinson sector attribution vs equal-weight benchmark",
+      "tool": "brinson_attribution",
+      "params": {"portfolio_rows": "monthly tech-overweight rebalances", "benchmark_rows": "equal-weight S&P 500 names"},
+      "metrics": {"allocation": 0.004, "selection": 0.011, "interaction": -0.002, "active_total": 0.013, "cumulative_active": 0.086},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "1y", "frequency": "monthly"},
+      "text": "Multi-period Brinson-Fachler attribution of a tech-overweight portfolio against an equal-weight S&P 500 benchmark. Per-period allocation 0.4%, selection 1.1%, interaction -0.2%, active total 1.3%, cumulative active return 8.6%. Selection within sectors dominates the sector allocation call."
+    },
+    {
+      "doc_id": "exp_risk_ewma",
+      "kind": "experiment",
+      "title": "Portfolio risk decomposition with EWMA factor covariance",
+      "tool": "portfolio_risk_decomposition",
+      "params": {"symbols_weights": "AAPL:0.25,MSFT:0.25,XOM:0.2,JPM:0.3", "cov_method": "ewma", "halflife": 66, "lookback_days": 756},
+      "metrics": {"total_vol": 0.182, "common_vol": 0.141, "specific_vol": 0.115, "exposure_MOM": 0.42, "exposure_VOL": -0.18},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "3y", "frequency": "daily"},
+      "text": "Linear factor risk model decomposition with EWMA covariance at halflife 66 over a 756-day lookback: total vol 18.2%, common factor vol 14.1%, specific vol 11.5%. Portfolio carries positive momentum exposure 0.42 and negative volatility exposure. Factor returns come from per-date cross-sectional regressions on style exposures plus sector dummies."
+    },
+    {
+      "doc_id": "exp_risk_sample_nw",
+      "kind": "experiment",
+      "title": "Risk decomposition with sample covariance and Newey-West lags",
+      "tool": "portfolio_risk_decomposition",
+      "params": {"symbols_weights": "AAPL:0.25,MSFT:0.25,XOM:0.2,JPM:0.3", "cov_method": "sample", "newey_west_lags": 5, "lookback_days": 756},
+      "metrics": {"total_vol": 0.176, "common_vol": 0.136, "specific_vol": 0.112},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "3y", "frequency": "daily"},
+      "text": "Same four-name portfolio under a plain sample factor covariance with Newey-West Bartlett-kernel adjustment at 5 lags: total vol 17.6% vs 18.2% under EWMA. Shows how covariance method choice moves the common-vs-specific split; covariance is PSD-cleaned and annualized."
+    },
+    {
+      "doc_id": "exp_risk_decompose_ff5mom",
+      "kind": "experiment",
+      "title": "Book factor exposures vs daily factor store (ff5+momentum)",
+      "tool": "risk_decompose",
+      "params": {"holdings_uri": "AAPL:0.4,MSFT:0.3,NVDA:0.3", "factor_model": "ff5+momentum"},
+      "metrics": {"beta_ff_mkt_rf": 1.05, "beta_ff_smb": 0.08, "beta_ff_hml": -0.12, "beta_ff_rmw": 0.05, "beta_ff_cma": -0.03, "beta_ff_mom": 0.21, "specific_risk": 0.098},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "3y", "frequency": "daily"},
+      "text": "spark-mcp 15.2 book risk decomposition: holdings regressed on daily ff5 plus momentum factor returns over a trailing 3-year window. Market exposure 1.05, momentum 0.21, annualized specific risk 9.8%. Factor aliases resolve against marts.factors_daily daily rows."
+    },
+    {
+      "doc_id": "exp_opt_maxsharpe",
+      "kind": "experiment",
+      "title": "Max-Sharpe optimization with single-name cap",
+      "tool": "optimize_portfolio",
+      "params": {"symbols": "12 liquid S&P 500 names", "method": "max_sharpe", "max_weight": 0.2},
+      "metrics": {"expected_sharpe_insample": 1.24, "max_weight_realized": 0.2, "n_names": 12},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "1y", "frequency": "daily"},
+      "text": "PyPortfolioOpt maximum-Sharpe mean-variance optimization over 12 names with a 20% single-name cap. In-sample expected Sharpe 1.24 is overstated by estimation error in sample means; treat as an upper bound and shrink or constrain before trading. Companion HRP and Black-Litterman runs diversify better."
+    },
+    {
+      "doc_id": "exp_opt_hrp",
+      "kind": "experiment",
+      "title": "Hierarchical Risk Parity allocation over the same names",
+      "tool": "optimize_portfolio",
+      "params": {"symbols": "12 liquid S&P 500 names", "method": "hrp"},
+      "metrics": {"max_weight_realized": 0.11, "expected_vol": 0.148, "n_names": 12},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "1y", "frequency": "daily"},
+      "text": "Hierarchical Risk Parity allocation via skfolio over the same 12 names: max weight 11%, expected vol 14.8%, no mean estimates required. HRP is the robust fallback when sample means are too noisy for mean-variance optimization."
+    },
+    {
+      "doc_id": "exp_opt_bl",
+      "kind": "experiment",
+      "title": "Black-Litterman tilt with an outright outperformance view",
+      "tool": "optimize_portfolio",
+      "params": {"symbols": "12 liquid S&P 500 names", "method": "black_litterman", "views": "AAPL outperforms the basket"},
+      "metrics": {"aapl_tilt_pp": 4.0, "expected_sharpe": 0.96},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "1y", "frequency": "daily"},
+      "text": "Black-Litterman optimization from an equal-cap prior with a single view that AAPL outperforms: tilts AAPL up 4 percentage points with modest, stable weight changes elsewhere. Views default to historical means when unspecified."
+    },
+    {
+      "doc_id": "exp_causal_granger",
+      "kind": "experiment",
+      "title": "Pairwise Granger causality among mega-cap tech and energy",
+      "tool": "causal_test",
+      "params": {"targets": "AAPL,MSFT,XOM", "method": "granger", "lags": "1..5"},
+      "metrics": {"p_AAPL_to_MSFT": 0.003, "p_MSFT_to_AAPL": 0.41, "p_XOM_to_MSFT": 0.62},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "3y", "frequency": "daily"},
+      "text": "Pairwise Granger-causality F-tests on real daily returns over a trailing 3-year window, lags 1 to 5. AAPL helps predict MSFT at p 0.003 while the reverse is insignificant at p 0.41; energy shows no lead-lag with tech. PCMCI methods are refused by this tool; Granger only."
+    },
+    {
+      "doc_id": "exp_ml_blend",
+      "kind": "experiment",
+      "title": "Walk-forward ridge blend of momentum, vol, and RSI signals",
+      "tool": "ml_signal_scores",
+      "params": {"features": "mom_126d,vol_63d,rsi_14", "horizon": 21, "model": "ridge", "rebalance": "ME", "min_train_dates": 504},
+      "metrics": {"coef_mom_126d": 0.61, "coef_vol_63d": -0.24, "coef_rsi_14": -0.11, "coverage": 0.9},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "21d", "frequency": "daily"},
+      "text": "Walk-forward ML composite: ridge regression fit only on data strictly before each monthly rebalance predicts 21-day forward returns from mom_126d, vol_63d, and rsi_14 with 504 training dates. Latest coefficients load positively on momentum 0.61 and negatively on volatility and RSI. Point-in-time with no look-ahead."
+    },
+    {
+      "doc_id": "fail_costs_erase_mom",
+      "kind": "failure",
+      "title": "Costs erase short-horizon momentum edge",
+      "tool": "run_backtest",
+      "failure_class": "execution",
+      "params": {"type": "momentum", "lookback": 21, "holding": 5, "costs": {"bps": 20, "slippage": 5, "borrow": 0}},
+      "metrics": {"gross_sr": 1.08, "net_sr": -0.15, "turnover": 18.7},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "5d", "frequency": "daily"},
+      "text": "Failed experiment: weekly short-horizon momentum with 18.7x turnover goes from gross Sharpe 1.08 to net Sharpe -0.15 once 20 bps costs plus 5 bps slippage are charged. Lesson: any backtest without an explicit bps/slippage/borrow cost model and turnover report is not evidence of an edge."
+    },
+    {
+      "doc_id": "fail_survivorship_bias",
+      "kind": "failure",
+      "title": "Survivorship bias from current-snapshot universe",
+      "tool": "run_momentum_backtest",
+      "failure_class": "data",
+      "params": {"lookback_days": 126, "top_n": 20, "rebalance": "ME", "universe": "current-snapshot (wrong)"},
+      "metrics": {"cagr_snapshot": 0.148, "cagr_pit": 0.101, "bias_pp": 4.7},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-snapshot-vs-pit", "horizon": "6m", "frequency": "daily"},
+      "text": "Failed experiment: momentum backtest run on current S&P 500 constituents instead of point-in-time membership overstated CAGR by 4.7 points (14.8% vs 10.1% PIT). Lesson: historical selection must use survivorship-bias-free membership intervals (universe_members_as_of), never the current snapshot."
+    },
+    {
+      "doc_id": "fail_aqr_naive_join",
+      "kind": "failure",
+      "title": "Naive day-equality join drops all monthly factor rows",
+      "tool": "attribute_portfolio",
+      "failure_class": "data",
+      "params": {"factors": "aqr_qmj_us,aqr_bab_us,jkp_be_me", "join": "naive day equality (wrong)"},
+      "metrics": {"rows_naive_join": 0, "corr_after_month_join": 0.78},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "n/a", "horizon": "monthly", "frequency": "monthly"},
+      "text": "Failed analysis: joining month-end AQR/JKP factor rows to daily data on exact calendar day dropped nearly 100% of factor rows and silently produced an empty regression. Fixed by joining on month periods (date_trunc month) or asof, which recovers correlation 0.78 between jkp_be_me and ff_hml. Never naive-join cross-frequency data."
+    },
+    {
+      "doc_id": "fail_lookahead_labels",
+      "kind": "failure",
+      "title": "Look-ahead bias: forward labels included the signal day",
+      "tool": "run_factor_analysis",
+      "failure_class": "code",
+      "params": {"signal_name": "mom_21d", "horizon_days": 21, "labels": "included day t (wrong)"},
+      "metrics": {"ic_biased": 0.19, "ic_fixed": 0.024},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "21d", "frequency": "daily"},
+      "text": "Failed experiment: forward-return labels accidentally included the signal day t, inflating IC to 0.19; after enforcing the timing rule that labels formed at t earn returns only from t+1, IC fell to 0.024. Lesson: every factor and backtest must assert strictly causal alignment before trusting any metric."
+    },
+    {
+      "doc_id": "fail_stooq_unadjusted",
+      "kind": "failure",
+      "title": "Mixed yfinance/Stooq prices corrupt returns with unadjusted closes",
+      "tool": "get_price_history",
+      "failure_class": "data",
+      "params": {"sources": "yfinance primary, stooq fallback"},
+      "metrics": {"spurious_jump_pct": 38.0},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "mixed", "frequency": "daily"},
+      "text": "Failed ingest: Stooq fallback rows carry source stooq with unadjusted adj_close, so a split event appeared as a 38% one-day return and poisoned momentum ranks and risk estimates. Lesson: check the per-row source flag and never mix adjusted and unadjusted closes in one return series."
+    },
+    {
+      "doc_id": "fail_calendar_vs_trading_window",
+      "kind": "failure",
+      "title": "Calendar-window momentum diverges on gapped series",
+      "tool": "run_momentum_backtest",
+      "failure_class": "code",
+      "params": {"lookback_days": 126, "window": "calendar days (wrong)"},
+      "metrics": {"rank_corr_calendar_vs_trading": 0.91},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "6m", "frequency": "daily"},
+      "text": "Failed replication: reimplementing momentum with calendar-day windows instead of trailing trading-row windows changed ranks (rank correlation 0.91) and top-20 membership on gapped series. Lesson: momentum uses trailing trading-row windows by convention; the engine backtests remain authoritative on window semantics."
+    },
+    {
+      "doc_id": "fail_duckdb_writer_lock",
+      "kind": "failure",
+      "title": "Concurrent dbt build corrupts in-flight MCP reads",
+      "tool": "refresh_data",
+      "failure_class": "execution",
+      "params": {"concurrency": "alpha-engine build during MCP queries (wrong)"},
+      "metrics": {"failed_reads": 14},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "n/a", "horizon": "n/a", "frequency": "daily"},
+      "text": "Failed operations: running alpha-engine build and dbt while MCP queries were in flight hit the DuckDB single-writer rule and failed 14 reads. Lesson: Python read paths open read-only and the build is the sole writer; never run ingest or dbt while queries are in flight because reads only degrade gracefully."
+    },
+    {
+      "doc_id": "fail_overfit_sweep",
+      "kind": "failure",
+      "title": "Sweep winner collapses out of sample",
+      "tool": "run_param_sweep",
+      "failure_class": "statistical",
+      "params": {"lookbacks": "21,63,126,189,252", "top_ns": "10,20,30,50", "winner": "lookback 21 top_n 10"},
+      "metrics": {"sharpe_insample": 1.92, "sharpe_oos": 0.08},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "mixed", "frequency": "daily"},
+      "text": "Failed inference: the 20-config sweep winner (lookback 21, top 10) posted in-sample Sharpe 1.92 but only 0.08 out of sample. Lesson: grid mining overfits; always hold out an OOS window with purge and embargo splits and discount the best of many backtests before claiming a discovery."
+    },
+    {
+      "doc_id": "fail_brinson_single_date",
+      "kind": "failure",
+      "title": "Brinson attribution fails with fewer than two shared rebalance dates",
+      "tool": "brinson_attribution",
+      "failure_class": "code",
+      "params": {"portfolio_rows": "1 rebalance date", "benchmark_rows": "1 rebalance date"},
+      "metrics": {"error": "ValueError: need at least two shared rebalance dates"},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "1m", "frequency": "monthly"},
+      "text": "Failed run: Brinson attribution raised ValueError because portfolio and benchmark shared only one rebalance date, so no return period exists. Lesson: periods run between consecutive shared rebalance dates; align both weight schedules to at least two common dates before attributing."
+    },
+    {
+      "doc_id": "fail_factor_thin_cross",
+      "kind": "failure",
+      "title": "IC collapses to NaN on thin cross-sections",
+      "tool": "run_factor_analysis",
+      "failure_class": "statistical",
+      "params": {"signal_name": "mom_21d", "horizon_days": 21, "min_names": 5},
+      "metrics": {"ic_valid_dates_pct": 12.0},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "narrow-20-names", "horizon": "21d", "frequency": "daily"},
+      "text": "Failed analysis: running the factor tearsheet on a 20-name narrow universe left only 12% of dates with the minimum 5 names for a meaningful IC, so the IC series was mostly NaN. Lesson: check rebalance coverage and cross-sectional counts first; thin universes cannot support IC inference."
+    },
+    {
+      "doc_id": "fail_pcmci_refused",
+      "kind": "failure",
+      "title": "PCMCI causal method refused; Granger required",
+      "tool": "causal_test",
+      "failure_class": "code",
+      "params": {"method": "pcmci-plus (refused)"},
+      "metrics": {"error": "ValueError: pcmci methods not supported"},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "3y", "frequency": "daily"},
+      "text": "Failed run: requesting a pcmci-plus causal test raised ValueError because only Granger F-tests are supported. Lesson: the causal tool contract is Granger-only on daily returns with lags 1..5; plan lead-lag studies within that method and window."
+    },
+    {
+      "doc_id": "fail_gpu_float32",
+      "kind": "failure",
+      "title": "CUDA float32 screening ranks differ from float64 exact run",
+      "tool": "run_param_sweep",
+      "failure_class": "execution",
+      "params": {"use_gpu": true, "precision": "float32 screening"},
+      "metrics": {"rank_flips_top5": 2},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "mixed", "frequency": "daily"},
+      "text": "Failed shortcut: trusting CUDA float32 screening ranks directly flipped 2 of the top 5 sweep configs versus the exact float64 rerun. Lesson: GPU screening is for triage only; always rerun the winner with exact precision before recording metrics."
+    },
+    {
+      "doc_id": "find_mom_6_12_premia",
+      "kind": "finding",
+      "title": "6-12 month momentum earns positive IC net of 5 bps costs",
+      "tool": "",
+      "params": {},
+      "metrics": {"ic_range": "0.02-0.035", "net_of_bps": 5},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "liquid-sp500", "horizon": "6-12m", "frequency": "daily"},
+      "text": "Validated finding: 6-12 month cross-sectional momentum on liquid US equities earns positive information coefficients of 0.02 to 0.035 and survives 5 bps transaction costs at monthly turnover. Supported by the 126-day and 252-day backtests and the mom_126d factor tearsheet; contradicted only when costs exceed 15 bps or universes are thin."
+    },
+    {
+      "doc_id": "find_turnover_kills_short_mom",
+      "kind": "finding",
+      "title": "Turnover above 10x per year erases short-horizon momentum",
+      "tool": "",
+      "params": {},
+      "metrics": {"turnover_threshold": 10.0, "cost_threshold_bps": 10},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "1m", "frequency": "daily"},
+      "text": "Validated finding: short-horizon momentum strategies turning over more than 10x per year lose their entire edge once costs exceed about 10 bps per side. Supported by the weekly 21-day backtest and the cost-erasure failure; short-horizon signals must be evaluated net of explicit bps, slippage, and borrow."
+    },
+    {
+      "doc_id": "find_month_period_join",
+      "kind": "finding",
+      "title": "Cross-frequency factor joins must use month periods or asof",
+      "tool": "",
+      "params": {},
+      "metrics": {"corr_jkp_be_me_vs_ff_hml": 0.78},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "n/a", "horizon": "monthly", "frequency": "monthly"},
+      "text": "Methodological finding: monthly factor rows such as AQR and JKP must be joined to daily data via month periods (date_trunc month) or asof, never naive calendar-day equality, which silently drops the factor leg. Month-period joins recover correlation 0.78 between jkp_be_me and ff_hml."
+    },
+    {
+      "doc_id": "find_ewma_halflife66",
+      "kind": "finding",
+      "title": "EWMA halflife 66 balances responsiveness and stability for factor covariance",
+      "tool": "",
+      "params": {},
+      "metrics": {"halflife_days": 66, "lookback_days": 756},
+      "scope": {"asset_class": "equity", "market": "US", "universe": "sp500-names", "horizon": "3y", "frequency": "daily"},
+      "text": "Methodological finding: EWMA factor covariance with halflife 66 over a 756-day lookback balances responsiveness to regime change against estimation stability for US equity risk models. Sample covariance with Newey-West lags is the documented fallback when autocorrelation adjustment is required."
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "q01_momentum_6m_backtest",
+      "query_text": "What prior momentum backtests exist for 6-month lookback on US equities, and what did they return net of costs?",
+      "intent": {"topic": "cross-sectional momentum", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "6m", "frequency": "daily", "concepts": ["momentum", "backtest", "sharpe", "turnover", "transaction costs"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["validated_findings", "prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_mom_126_top20_me", "grade": 2, "rationale": "Exact 126-day monthly momentum backtest."}, {"doc_id": "find_mom_6_12_premia", "grade": 2, "rationale": "States the net-of-costs 6-12m premium."}, {"doc_id": "exp_sweep_lookback_topn", "grade": 1, "rationale": "Grid evidence that (126,20) is the best config."}, {"doc_id": "exp_factor_mom126d_ic", "grade": 1, "rationale": "IC-side corroboration of the same signal."}],
+      "must_recall_failures": ["fail_costs_erase_mom", "fail_survivorship_bias"]
+    },
+    {
+      "query_id": "q02_weekly_momentum_turnover",
+      "query_text": "I want to run weekly short-horizon momentum; what turnover and cost pitfalls are known?",
+      "intent": {"topic": "short-horizon momentum", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "1m", "frequency": "daily", "concepts": ["momentum", "weekly rebalance", "turnover", "slippage"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_mom_21_top10_w", "grade": 2, "rationale": "Weekly 21-day backtest with 18.7x turnover."}, {"doc_id": "find_turnover_kills_short_mom", "grade": 2, "rationale": "Turnover threshold finding for short momentum."}, {"doc_id": "fail_costs_erase_mom", "grade": 2, "rationale": "Direct cost-erasure failure on this design."}],
+      "must_recall_failures": ["fail_costs_erase_mom", "fail_overfit_sweep"]
+    },
+    {
+      "query_id": "q03_sweep_best_config",
+      "query_text": "Which lookback and top_n won the momentum parameter sweep, and can I trust the winner?",
+      "intent": {"topic": "momentum parameter sweep", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "mixed", "frequency": "daily", "concepts": ["param sweep", "lookback", "overfitting", "out-of-sample"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_sweep_lookback_topn", "grade": 2, "rationale": "The sweep run and its (126,20) winner."}, {"doc_id": "fail_overfit_sweep", "grade": 2, "rationale": "Winner collapsed OOS; trust warning."}, {"doc_id": "exp_mom_126_top20_me", "grade": 1, "rationale": "Standalone rerun of the winning config."}],
+      "must_recall_failures": ["fail_overfit_sweep", "fail_gpu_float32"]
+    },
+    {
+      "query_id": "q04_backtest_costs_purge",
+      "query_text": "How do I run a cost-aware momentum backtest with purge and embargo splits?",
+      "intent": {"topic": "deterministic backtest protocol", "asset_class": "equity", "markets": ["US"], "universe": "pit-40", "horizon": "5d", "frequency": "daily", "concepts": ["cost model", "purge", "embargo", "OOS sharpe", "point-in-time"], "requested_period": ["2018-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures", "relevant_skills"]},
+      "relevant": [{"doc_id": "exp_backtest_15_2_mom", "grade": 2, "rationale": "Canonical cost/purge/embargo momentum run."}, {"doc_id": "exp_mom_126_top20_me", "grade": 1, "rationale": "Simpler fee-based momentum baseline."}, {"doc_id": "fail_costs_erase_mom", "grade": 1, "rationale": "What happens without the cost model."}],
+      "must_recall_failures": ["fail_costs_erase_mom", "fail_lookahead_labels"]
+    },
+    {
+      "query_id": "q05_reversal_strategy",
+      "query_text": "Does short-term reversal work, and at which lookback and holding?",
+      "intent": {"topic": "short-term reversal", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "5d", "frequency": "daily", "concepts": ["reversal", "rsi", "mean reversion", "holding period"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "validated_findings", "failures"]},
+      "relevant": [{"doc_id": "exp_backtest_15_2_reversal", "grade": 2, "rationale": "Reversal leg with lookback/holding 5."}, {"doc_id": "exp_factor_rsi14_reversal", "grade": 2, "rationale": "RSI/reversal IC evidence and turnover."}, {"doc_id": "find_turnover_kills_short_mom", "grade": 1, "rationale": "Turnover caveat applies to reversal too."}],
+      "must_recall_failures": ["fail_costs_erase_mom", "fail_calendar_vs_trading_window"]
+    },
+    {
+      "query_id": "q06_momentum_12m",
+      "query_text": "What is known about 12-month momentum with a broad top-50 portfolio?",
+      "intent": {"topic": "long-horizon momentum", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "12m", "frequency": "daily", "concepts": ["momentum", "diversification", "turnover"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "validated_findings", "failures"]},
+      "relevant": [{"doc_id": "exp_mom_252_top50_me", "grade": 2, "rationale": "Exact 252-day top-50 run."}, {"doc_id": "find_mom_6_12_premia", "grade": 2, "rationale": "Premium finding covers 12m."}, {"doc_id": "exp_factor_mom126d_ic", "grade": 1, "rationale": "Adjacent-horizon IC corroboration."}],
+      "must_recall_failures": ["fail_survivorship_bias"]
+    },
+    {
+      "query_id": "q07_value_factor_dsl",
+      "query_text": "Has anyone tested a price-to-trailing-average value factor with sector neutralization?",
+      "intent": {"topic": "value factor", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "63d", "frequency": "daily", "concepts": ["value", "expression DSL", "sector neutralization", "IC"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_factor_value_dsl", "grade": 2, "rationale": "Exact DSL value run, sector-neutral."}, {"doc_id": "exp_factor_mom126d_ic", "grade": 1, "rationale": "Reference tearsheet for comparison."}],
+      "must_recall_failures": ["fail_aqr_naive_join", "fail_factor_thin_cross"]
+    },
+    {
+      "query_id": "q08_rsi_reversal_ic",
+      "query_text": "What IC does RSI-14 predict at 21 days, and is the sign tradeable?",
+      "intent": {"topic": "RSI reversal IC", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "21d", "frequency": "daily", "concepts": ["rsi", "IC", "reversal", "quantile backtest"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_factor_rsi14_reversal", "grade": 2, "rationale": "RSI-14 21-day IC of -0.021."}, {"doc_id": "exp_backtest_15_2_reversal", "grade": 1, "rationale": "Cost-aware reversal confirmation."}],
+      "must_recall_failures": ["fail_lookahead_labels", "fail_costs_erase_mom"]
+    },
+    {
+      "query_id": "q09_lowvol_factor",
+      "query_text": "Is there evidence for a low-volatility effect in trailing 63-day volatility sorts?",
+      "intent": {"topic": "low-volatility anomaly", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "63d", "frequency": "daily", "concepts": ["volatility", "low-vol anomaly", "IC", "quantile sort"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_factor_vol63d", "grade": 2, "rationale": "vol_63d tearsheet with negative IC."}, {"doc_id": "exp_risk_ewma", "grade": 1, "rationale": "Risk model carries a VOL exposure channel."}],
+      "must_recall_failures": ["fail_factor_thin_cross", "fail_stooq_unadjusted"]
+    },
+    {
+      "query_id": "q10_quantile_ls_turnover",
+      "query_text": "How profitable is the mom_126d quintile long-short after turnover, and how is it built?",
+      "intent": {"topic": "quantile long-short construction", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "21d", "frequency": "daily", "concepts": ["quantile", "long-short", "turnover", "coverage"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_factor_mom126d_ic", "grade": 2, "rationale": "Quintile LS Sharpe 0.68 with turnover."}, {"doc_id": "exp_mom_126_top20_me", "grade": 1, "rationale": "Long-only sibling of the same signal."}],
+      "must_recall_failures": ["fail_costs_erase_mom", "fail_lookahead_labels"]
+    },
+    {
+      "query_id": "q11_sector_neutral_factor",
+      "query_text": "Which factor runs used sector neutralization, and did it help IC?",
+      "intent": {"topic": "sector neutralization", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "63d", "frequency": "daily", "concepts": ["sector neutralization", "group neutralize", "IC"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_factor_value_dsl", "grade": 2, "rationale": "Only sector-neutralized tearsheet."}, {"doc_id": "exp_factor_mom126d_ic", "grade": 1, "rationale": "Non-neutral baseline for comparison."}],
+      "must_recall_failures": ["fail_factor_thin_cross"]
+    },
+    {
+      "query_id": "q12_ic_decay_horizon",
+      "query_text": "How fast does momentum IC decay with forecast horizon?",
+      "intent": {"topic": "IC decay", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "mixed", "frequency": "daily", "concepts": ["IC decay", "horizon", "forecast"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_factor_mom126d_ic", "grade": 2, "rationale": "Carries IC decay by horizon diagnostics."}, {"doc_id": "exp_ml_blend", "grade": 1, "rationale": "Blends signals across horizons."}],
+      "must_recall_failures": ["fail_lookahead_labels"]
+    },
+    {
+      "query_id": "q13_ml_signal_blend",
+      "query_text": "Can I blend momentum, volatility, and RSI into one composite score without look-ahead?",
+      "intent": {"topic": "signal blending", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "21d", "frequency": "daily", "concepts": ["ridge", "walk-forward", "composite", "point-in-time"], "requested_period": ["2018-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_ml_blend", "grade": 2, "rationale": "Walk-forward ridge composite run."}, {"doc_id": "exp_factor_mom126d_ic", "grade": 1, "rationale": "Strongest single input signal."}],
+      "must_recall_failures": ["fail_overfit_sweep", "fail_lookahead_labels"]
+    },
+    {
+      "query_id": "q14_ff5_attribution_tech",
+      "query_text": "What are the Fama-French factor exposures and alpha of our tech-tilted portfolio?",
+      "intent": {"topic": "factor attribution", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "3y", "frequency": "daily", "concepts": ["Fama-French", "beta", "alpha", "R-squared"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_attr_ff5_tech", "grade": 2, "rationale": "FF5+momentum attribution with betas and alpha."}, {"doc_id": "exp_risk_decompose_ff5mom", "grade": 1, "rationale": "Adjacent ff5+momentum exposure cut."}],
+      "must_recall_failures": ["fail_survivorship_bias", "fail_aqr_naive_join"]
+    },
+    {
+      "query_id": "q15_brinson_allocation",
+      "query_text": "Did our outperformance come from sector allocation or stock selection?",
+      "intent": {"topic": "Brinson attribution", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "1y", "frequency": "monthly", "concepts": ["Brinson", "allocation", "selection", "interaction", "benchmark"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_brinson_sector", "grade": 2, "rationale": "Brinson run: selection beat allocation."}, {"doc_id": "exp_attr_ff5_tech", "grade": 1, "rationale": "Factor-side view of the same tilt."}],
+      "must_recall_failures": ["fail_brinson_single_date"]
+    },
+    {
+      "query_id": "q16_alpha_significance",
+      "query_text": "Is the portfolio alpha statistically significant after factor adjustment?",
+      "intent": {"topic": "alpha significance", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "3y", "frequency": "daily", "concepts": ["alpha", "t-stat", "factor adjustment", "residual"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_attr_ff5_tech", "grade": 2, "rationale": "Alpha 1.2% with t-stat 0.80: insignificant."}, {"doc_id": "exp_backtest_15_2_mom", "grade": 1, "rationale": "OOS discipline for significance claims."}],
+      "must_recall_failures": ["fail_overfit_sweep"]
+    },
+    {
+      "query_id": "q17_monthly_factor_join",
+      "query_text": "How do I join monthly AQR and JKP factors to daily returns for attribution without losing rows?",
+      "intent": {"topic": "cross-frequency factor join", "asset_class": "equity", "markets": ["US"], "universe": "n/a", "horizon": "monthly", "frequency": "monthly", "concepts": ["AQR", "JKP", "month period", "asof join", "attribution"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures", "validated_findings"]},
+      "relevant": [{"doc_id": "find_month_period_join", "grade": 2, "rationale": "States the month-period join rule."}, {"doc_id": "fail_aqr_naive_join", "grade": 2, "rationale": "The naive-join failure this avoids."}, {"doc_id": "exp_attr_ff5_tech", "grade": 1, "rationale": "Daily-factor attribution for contrast."}],
+      "must_recall_failures": ["fail_aqr_naive_join"]
+    },
+    {
+      "query_id": "q18_risk_decomposition_ewma",
+      "query_text": "What is the total, common, and specific volatility of the four-name portfolio under EWMA?",
+      "intent": {"topic": "portfolio risk decomposition", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "3y", "frequency": "daily", "concepts": ["risk model", "EWMA", "common risk", "specific risk", "exposures"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_risk_ewma", "grade": 2, "rationale": "EWMA decomposition with vol split."}, {"doc_id": "find_ewma_halflife66", "grade": 2, "rationale": "Justifies halflife 66 choice."}, {"doc_id": "exp_risk_sample_nw", "grade": 1, "rationale": "Alternative covariance for comparison."}],
+      "must_recall_failures": ["fail_stooq_unadjusted"]
+    },
+    {
+      "query_id": "q19_covariance_newey_west",
+      "query_text": "Should I use sample or EWMA factor covariance, and when does Newey-West matter?",
+      "intent": {"topic": "factor covariance estimation", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "3y", "frequency": "daily", "concepts": ["covariance", "Newey-West", "autocorrelation", "PSD"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_risk_sample_nw", "grade": 2, "rationale": "Sample+Newey-West run with comparison."}, {"doc_id": "exp_risk_ewma", "grade": 2, "rationale": "EWMA baseline at halflife 66."}],
+      "must_recall_failures": ["fail_factor_thin_cross"]
+    },
+    {
+      "query_id": "q20_book_exposures_ff5mom",
+      "query_text": "What are the book-level ff5-plus-momentum exposures and specific risk of the tech book?",
+      "intent": {"topic": "book risk decomposition", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "3y", "frequency": "daily", "concepts": ["exposures", "specific risk", "holdings", "factor model"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_risk_decompose_ff5mom", "grade": 2, "rationale": "Exact ff5+momentum book cut."}, {"doc_id": "exp_attr_ff5_tech", "grade": 1, "rationale": "Return-side attribution of a sibling book."}],
+      "must_recall_failures": ["fail_aqr_naive_join"]
+    },
+    {
+      "query_id": "q21_specific_risk",
+      "query_text": "How much of portfolio volatility is idiosyncratic vs explained by factors?",
+      "intent": {"topic": "idiosyncratic risk", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "3y", "frequency": "daily", "concepts": ["specific risk", "idiosyncratic", "residual vol"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_risk_ewma", "grade": 2, "rationale": "Specific vol 11.5% vs common 14.1%."}, {"doc_id": "exp_risk_decompose_ff5mom", "grade": 1, "rationale": "Specific risk 9.8% on the tech book."}],
+      "must_recall_failures": ["fail_stooq_unadjusted"]
+    },
+    {
+      "query_id": "q22_sector_risk_exposure",
+      "query_text": "How do sector bets show up in risk and attribution together?",
+      "intent": {"topic": "sector exposure", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "1y", "frequency": "daily", "concepts": ["sector", "dummies", "allocation", "risk"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_risk_ewma", "grade": 2, "rationale": "Risk model uses sector dummies."}, {"doc_id": "exp_brinson_sector", "grade": 2, "rationale": "Brinson isolates sector allocation."}],
+      "must_recall_failures": ["fail_survivorship_bias"]
+    },
+    {
+      "query_id": "q23_maxsharpe_caps",
+      "query_text": "What max-Sharpe weights result with a 20% single-name cap, and should I believe the expected Sharpe?",
+      "intent": {"topic": "mean-variance optimization", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "1y", "frequency": "daily", "concepts": ["max Sharpe", "weight cap", "estimation error", "MVO"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_opt_maxsharpe", "grade": 2, "rationale": "Capped max-Sharpe run with caveat."}, {"doc_id": "exp_opt_hrp", "grade": 1, "rationale": "Robust HRP alternative."}],
+      "must_recall_failures": ["fail_overfit_sweep"]
+    },
+    {
+      "query_id": "q24_hrp_allocation",
+      "query_text": "When sample means are noisy, what does HRP allocate and why is it safer?",
+      "intent": {"topic": "HRP allocation", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "1y", "frequency": "daily", "concepts": ["HRP", "diversification", "covariance", "robust"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_opt_hrp", "grade": 2, "rationale": "HRP run over the 12 names."}, {"doc_id": "exp_opt_maxsharpe", "grade": 1, "rationale": "MVO contrast showing estimation risk."}],
+      "must_recall_failures": ["fail_stooq_unadjusted"]
+    },
+    {
+      "query_id": "q25_black_litterman_views",
+      "query_text": "How do I express a single-stock outperformance view in Black-Litterman, and how big is the tilt?",
+      "intent": {"topic": "Black-Litterman views", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "1y", "frequency": "daily", "concepts": ["Black-Litterman", "views", "prior", "tilt"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_opt_bl", "grade": 2, "rationale": "BL run with a single AAPL view."}, {"doc_id": "exp_opt_maxsharpe", "grade": 1, "rationale": "Unconstrained MVO contrast."}],
+      "must_recall_failures": ["fail_overfit_sweep"]
+    },
+    {
+      "query_id": "q26_granger_lead_lag",
+      "query_text": "Which mega-cap leads which: is there a lead-lag between AAPL and MSFT daily returns?",
+      "intent": {"topic": "lead-lag causality", "asset_class": "equity", "markets": ["US"], "universe": "sp500-names", "horizon": "3y", "frequency": "daily", "concepts": ["Granger", "lead-lag", "p-value", "lags"], "requested_period": ["2020-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_causal_granger", "grade": 2, "rationale": "Granger tests over AAPL/MSFT/XOM."}, {"doc_id": "fail_pcmci_refused", "grade": 1, "rationale": "Method boundary for this question."}],
+      "must_recall_failures": ["fail_pcmci_refused"]
+    },
+    {
+      "query_id": "q27_pit_universe",
+      "query_text": "How do I get survivorship-bias-free S&P 500 membership for a historical backtest?",
+      "intent": {"topic": "point-in-time universe", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "mixed", "frequency": "daily", "concepts": ["survivorship bias", "membership", "point-in-time", "as-of"], "requested_period": ["1996-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "fail_survivorship_bias", "grade": 2, "rationale": "Quantifies the 4.7pp bias."}, {"doc_id": "exp_backtest_15_2_mom", "grade": 2, "rationale": "Uses a PIT universe correctly."}, {"doc_id": "exp_mom_126_top20_me", "grade": 1, "rationale": "PIT-based baseline backtest."}],
+      "must_recall_failures": ["fail_survivorship_bias"]
+    },
+    {
+      "query_id": "q28_cost_model_alpha",
+      "query_text": "Show me prior work where the transaction cost model decided whether alpha survived.",
+      "intent": {"topic": "cost-aware evaluation", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "mixed", "frequency": "daily", "concepts": ["bps", "slippage", "borrow", "gross vs net"], "requested_period": ["2015-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures", "validated_findings"]},
+      "relevant": [{"doc_id": "fail_costs_erase_mom", "grade": 2, "rationale": "Gross 1.08 to net -0.15 case study."}, {"doc_id": "exp_backtest_15_2_mom", "grade": 2, "rationale": "Explicit 0.33 cost-drag accounting."}, {"doc_id": "find_turnover_kills_short_mom", "grade": 1, "rationale": "Generalizes the cost lesson."}],
+      "must_recall_failures": ["fail_costs_erase_mom"]
+    },
+    {
+      "query_id": "q29_concurrent_build_reads",
+      "query_text": "Can I refresh data or run dbt while backtests and MCP queries are running?",
+      "intent": {"topic": "engine operations", "asset_class": "equity", "markets": ["US"], "universe": "n/a", "horizon": "n/a", "frequency": "daily", "concepts": ["DuckDB", "single writer", "concurrency", "ingest"], "requested_period": ["2024-01-01", "2026-09-19"], "needed_memory": ["failures", "prior_experiments"]},
+      "relevant": [{"doc_id": "fail_duckdb_writer_lock", "grade": 2, "rationale": "Build-during-reads failure."}, {"doc_id": "exp_sweep_lookback_topn", "grade": 1, "rationale": "Heavy compute that must not overlap builds."}],
+      "must_recall_failures": ["fail_duckdb_writer_lock"]
+    },
+    {
+      "query_id": "q30_gpu_sweep_precision",
+      "query_text": "Are GPU sweep results exact, or do I need to rerun the winner on CPU?",
+      "intent": {"topic": "sweep precision", "asset_class": "equity", "markets": ["US"], "universe": "sp500-pit", "horizon": "mixed", "frequency": "daily", "concepts": ["CUDA", "float32", "float64", "screening", "rerun"], "requested_period": ["2024-01-01", "2026-09-19"], "needed_memory": ["prior_experiments", "failures"]},
+      "relevant": [{"doc_id": "exp_sweep_lookback_topn", "grade": 2, "rationale": "CUDA-screened sweep run."}, {"doc_id": "fail_gpu_float32", "grade": 2, "rationale": "Rank flips vs exact rerun."}],
+      "must_recall_failures": ["fail_gpu_float32", "fail_overfit_sweep"]
+    }
+  ]
+}

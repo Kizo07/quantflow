@@ -1,0 +1,268 @@
+{
+ "generated_from": "deerflow.knowledge.hashing (reference implementation). Regenerate with tools intent and copy to BOTH repos together; never hand-edit one side.",
+ "format": "each item: {name, func, args(kwargs), expected}",
+ "vectors": [
+  {
+   "name": "family_basic",
+   "func": "experiment_family_hash",
+   "args": {
+    "design": {
+     "hypothesis": "12-1 momentum survives costs",
+     "methodology": {
+      "universe": "sp500-pit",
+      "frequency": "daily",
+      "horizon": "12-1",
+      "transaction_cost_model": {
+       "model": "bps",
+       "bps": 5.0
+      },
+      "pit": {
+       "point_in_time": true
+      }
+     }
+    }
+   },
+   "expected": "ee5d72fc472c04f3cb902707b648fe3e40562e55e45ad5593ede7acdc3544467"
+  },
+  {
+   "name": "family_whitespace_collapsed",
+   "func": "experiment_family_hash",
+   "args": {
+    "design": {
+     "hypothesis": "12-1 momentum survives costs",
+     "methodology": {
+      "universe": "sp500-pit",
+      "frequency": "daily",
+      "horizon": "12-1",
+      "transaction_cost_model": {
+       "model": "bps",
+       "bps": 5.0
+      },
+      "pit": {
+       "point_in_time": true
+      }
+     }
+    }
+   },
+   "expected": "ee5d72fc472c04f3cb902707b648fe3e40562e55e45ad5593ede7acdc3544467"
+  },
+  {
+   "name": "family_case_differs",
+   "func": "experiment_family_hash",
+   "args": {
+    "design": {
+     "hypothesis": "12-1 MOMENTUM survives costs",
+     "methodology": {
+      "universe": "sp500-pit",
+      "frequency": "daily",
+      "horizon": "12-1",
+      "transaction_cost_model": {
+       "model": "bps",
+       "bps": 5.0
+      },
+      "pit": {
+       "point_in_time": true
+      }
+     }
+    }
+   },
+   "expected": "ddee226cc91d985a6fd08a984d5baba18231ccfac2015fc9c52622d7930232ff"
+  },
+  {
+   "name": "family_nfc_composed",
+   "func": "experiment_family_hash",
+   "args": {
+    "design": {
+     "hypothesis": "caf\u00e9 momentum",
+     "methodology": {}
+    }
+   },
+   "expected": "3177431b2aaa85b3c898b59eaa720e6974b3bb1adaaa594094f8626d6ce232e4"
+  },
+  {
+   "name": "family_nfc_decomposed",
+   "func": "experiment_family_hash",
+   "args": {
+    "design": {
+     "hypothesis": "caf\u00e9 momentum",
+     "methodology": {}
+    }
+   },
+   "expected": "3177431b2aaa85b3c898b59eaa720e6974b3bb1adaaa594094f8626d6ce232e4"
+  },
+  {
+   "name": "family_null_significant",
+   "func": "experiment_family_hash",
+   "args": {
+    "design": {
+     "hypothesis": "h",
+     "methodology": {
+      "a": null
+     }
+    }
+   },
+   "expected": "31542d3dfbe1abcd99f790e2d65f44b7f2a4757fcf33e7b62d11a4ddd63fcdd9"
+  },
+  {
+   "name": "family_neg_zero",
+   "func": "experiment_family_hash",
+   "args": {
+    "design": {
+     "hypothesis": "h",
+     "methodology": {
+      "x": -0.0
+     }
+    }
+   },
+   "expected": "4961680eab6e231f8ba4022a7e8ac9c6dd23eee82f6a76a23814a400b319ceb9"
+  },
+  {
+   "name": "family_bool_vs_int",
+   "func": "experiment_family_hash",
+   "args": {
+    "design": {
+     "hypothesis": "h",
+     "methodology": {
+      "x": true
+     }
+    }
+   },
+   "expected": "6af6cb146a307f2c8d37d42d6ea67d8843fcb787b48529c65b1ea0e6706e1d99"
+  },
+  {
+   "name": "family_int_one",
+   "func": "experiment_family_hash",
+   "args": {
+    "design": {
+     "hypothesis": "h",
+     "methodology": {
+      "x": 1
+     }
+    }
+   },
+   "expected": "487ec9f65db6b6f429f171f8c30d3b37f874dece3c3518a9e09699a9c97a20c7"
+  },
+  {
+   "name": "family_list_order",
+   "func": "experiment_family_hash",
+   "args": {
+    "design": {
+     "hypothesis": "h",
+     "methodology": {
+      "xs": [
+       1,
+       2,
+       3
+      ]
+     }
+    }
+   },
+   "expected": "c3e644bf9e2eeb486408ab3be1a01bc452ea28e00dc779b375a55fbca25d6f3d"
+  },
+  {
+   "name": "execution_basic",
+   "func": "execution_hash",
+   "args": {
+    "design": {
+     "hypothesis": "12-1 momentum survives costs",
+     "methodology": {
+      "universe": "sp500-pit",
+      "frequency": "daily",
+      "horizon": "12-1",
+      "transaction_cost_model": {
+       "model": "bps",
+       "bps": 5.0
+      },
+      "pit": {
+       "point_in_time": true
+      }
+     }
+    },
+    "code": {
+     "git_commit": "cccccccccccccccccccccccccccccccccccccccc",
+     "dirty": false
+    },
+    "data": {
+     "datasets": [
+      "prices@abc:2024-01-01"
+     ]
+    },
+    "parameters": {
+     "lookback": 252,
+     "seed": 7
+    },
+    "environment": {
+     "python": "3.12",
+     "lock_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+   },
+   "expected": "6402054096eff15bc8301b69ebc4e65664016a5fc7632c54337ae357a787fc50"
+  },
+  {
+   "name": "execution_param_variant",
+   "func": "execution_hash",
+   "args": {
+    "design": {
+     "hypothesis": "12-1 momentum survives costs",
+     "methodology": {
+      "universe": "sp500-pit",
+      "frequency": "daily",
+      "horizon": "12-1",
+      "transaction_cost_model": {
+       "model": "bps",
+       "bps": 5.0
+      },
+      "pit": {
+       "point_in_time": true
+      }
+     }
+    },
+    "code": {
+     "git_commit": "cccccccccccccccccccccccccccccccccccccccc",
+     "dirty": false
+    },
+    "data": {
+     "datasets": [
+      "prices@abc:2024-01-01"
+     ]
+    },
+    "parameters": {
+     "lookback": 21,
+     "seed": 7
+    },
+    "environment": {
+     "python": "3.12",
+     "lock_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+   },
+   "expected": "1d99eef9cc01defc3493b8ca1af531e2b3dcb46356e21cfe5fd1e24cbdcb4652"
+  },
+  {
+   "name": "idempotency_basic",
+   "func": "make_idempotency_key",
+   "args": {
+    "run_id": "run-1",
+    "sequence": 3,
+    "payload": {
+     "execution_hash": "x"
+    }
+   },
+   "expected": "b459da33d1fbdb613f9c8db74460882ef6a380b1ffcccb5aee948e56c1b9c42e"
+  },
+  {
+   "name": "canonical_ascii_escape",
+   "func": "canonical_json",
+   "args": {
+    "value": {
+     "b": "caf\u00e9",
+     "a": [
+      1,
+      null,
+      true
+     ]
+    }
+   },
+   "expected": "{\"a\":[1,null,true],\"b\":\"caf\\u00e9\"}"
+  }
+ ]
+}

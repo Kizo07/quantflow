@@ -22,7 +22,9 @@ Design invariants:
 - Fail-open: if the gate itself cannot inspect the file (sandbox hiccup,
   binary content, or sandboxes like AIO/E2B that report read failures as
   ``"Error: ..."`` strings instead of raising), it lets the tool run and
-  produce its own error.
+  produce its own error. Paths outside the sandbox families (host paths)
+  fail open quietly at debug level — the tool denies those itself, so no
+  warning is warranted.
 """
 
 import asyncio
@@ -230,6 +232,13 @@ class ReadBeforeWriteMiddleware(AgentMiddleware):
             return None
         except SandboxAuthorizationError:
             raise
+        except PermissionError:
+            # Path outside the sandbox tool families (e.g. a host path like a
+            # report-forge project file): the tool layer denies the write
+            # itself, so there is no protection gap to warn about — let it
+            # through quietly to the tool's own denial.
+            logger.debug("read-before-write gate skipping out-of-sandbox path %r; tool enforces its own denial", path)
+            return None
         except Exception:
             logger.warning("read-before-write gate could not inspect %r; allowing the write (fail-open)", path, exc_info=True)
             return None

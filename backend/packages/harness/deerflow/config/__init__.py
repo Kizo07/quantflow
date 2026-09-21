@@ -1,3 +1,5 @@
+from deerflow.knowledge.config import KnowledgeConfig, get_knowledge_config
+
 from .app_config import get_app_config
 from .extensions_config import ExtensionsConfig, get_extensions_config
 from .loop_detection_config import LoopDetectionConfig
@@ -25,6 +27,8 @@ __all__ = [
     "LoopDetectionConfig",
     "MemoryConfig",
     "get_memory_config",
+    "KnowledgeConfig",
+    "get_knowledge_config",
     "get_tracing_config",
     "get_explicitly_enabled_tracing_providers",
     "get_enabled_tracing_providers",

@@ -359,34 +359,34 @@ def test_knowledge_bootstrap_works_with_experiments_only():
 # -- lookup pure functions --------------------------------------------------
 
 
-def test_knowledge_search_happy_path_and_validation():
+def test_ledger_search_happy_path_and_validation():
     backend = FakeRetrieval(docs=[make_doc(), make_doc("E1", kind="experiment")])
-    page = kb_lookup.knowledge_search("momentum", kinds="finding", filters={"status": "validated"}, backend=backend)
+    page = kb_lookup.ledger_search("momentum", kinds="finding", filters={"status": "validated"}, backend=backend)
     assert page["count"] == 1
     assert page["documents"][0]["id"] == "F17"
     assert page["query"] == "momentum"
     with pytest.raises(KnowledgeValidationError):
-        kb_lookup.knowledge_search("  ", backend=backend)
+        kb_lookup.ledger_search("  ", backend=backend)
     with pytest.raises(KnowledgeValidationError):
-        kb_lookup.knowledge_search("x", kinds=["skill"], backend=backend)
+        kb_lookup.ledger_search("x", kinds=["skill"], backend=backend)
     with pytest.raises(KnowledgeValidationError):
-        kb_lookup.knowledge_search("x", filters={"bogus": "y"}, backend=backend)
+        kb_lookup.ledger_search("x", filters={"bogus": "y"}, backend=backend)
     with pytest.raises(KnowledgeValidationError):
-        kb_lookup.knowledge_search("x", limit=500, backend=backend)
+        kb_lookup.ledger_search("x", limit=500, backend=backend)
     with pytest.raises(KnowledgeValidationError):
-        kb_lookup.knowledge_search("x", filters={"project_id": "nope"}, backend=backend)
+        kb_lookup.ledger_search("x", filters={"project_id": "nope"}, backend=backend)
 
 
-def test_knowledge_get_reports_per_id_misses():
+def test_ledger_get_reports_per_id_misses():
     backend = FakeRetrieval(docs=[make_doc()])
-    payload = kb_lookup.knowledge_get("F17, F404", include_evidence=True, backend=backend)
+    payload = kb_lookup.ledger_get("F17, F404", include_evidence=True, backend=backend)
     assert [doc["id"] for doc in payload["documents"]] == ["F17"]
     assert payload["errors"] == [{"id": "F404", "error": "not_found"}]
     assert payload["include_evidence"] is True
     with pytest.raises(KnowledgeValidationError):
-        kb_lookup.knowledge_get(" , ", backend=backend)
+        kb_lookup.ledger_get(" , ", backend=backend)
     with pytest.raises(KnowledgeValidationError):
-        kb_lookup.knowledge_get([f"F{i}" for i in range(60)], backend=backend)
+        kb_lookup.ledger_get([f"F{i}" for i in range(60)], backend=backend)
 
 
 def test_experiment_get_by_id_and_execution_hash():
@@ -493,8 +493,8 @@ def test_tool_wrappers_report_unbound_backends():
     # Mirrors tests/test_memory_tools.py: exercise the wrapper via .func with
     # an explicit runtime (bare .invoke demands the injected runtime schema).
     runtime = make_runtime()
-    assert "not bound" in json.loads(kb_lookup.knowledge_search_tool.func(runtime, "x"))["error"]
-    assert "not bound" in json.loads(kb_lookup.knowledge_get_tool.func(runtime, "F17"))["error"]
+    assert "not bound" in json.loads(kb_lookup.ledger_search_tool.func(runtime, "x"))["error"]
+    assert "not bound" in json.loads(kb_lookup.ledger_get_tool.func(runtime, "F17"))["error"]
     assert "not bound" in json.loads(kb_lookup.experiment_get_tool.func(runtime, EXP_ID))["error"]
     assert "not bound" in json.loads(kb_lookup.artifact_manifest_tool.func(runtime, "x"))["error"]
     assert "not bound" in json.loads(kb_lookup.artifact_open_tool.func(runtime, "x", "head:1"))["error"]
@@ -504,15 +504,15 @@ def test_tool_wrappers_report_unbound_backends():
 def test_tool_wrappers_happy_path(tmp_path):
     text_record = bind_all(tmp_path)
     runtime = make_runtime(thread_id="t1", agent_name="lead", project_id=PROJECT_ID)
-    search = json.loads(kb_lookup.knowledge_search_tool.func(runtime, "momentum", kinds="finding"))
+    search = json.loads(kb_lookup.ledger_search_tool.func(runtime, "momentum", kinds="finding"))
     assert search["count"] == 1
     # The run's project scope merges under explicit filters.
     assert search["filters"] == {"project_id": PROJECT_ID}
-    scoped = json.loads(kb_lookup.knowledge_search_tool.func(runtime, "momentum", filters_json=json.dumps({"status": "validated"})))
+    scoped = json.loads(kb_lookup.ledger_search_tool.func(runtime, "momentum", filters_json=json.dumps({"status": "validated"})))
     assert scoped["filters"] == {"status": "validated", "project_id": PROJECT_ID}
-    bad_filters = json.loads(kb_lookup.knowledge_search_tool.func(runtime, "x", filters_json="{oops"))
+    bad_filters = json.loads(kb_lookup.ledger_search_tool.func(runtime, "x", filters_json="{oops"))
     assert "error" in bad_filters
-    got = json.loads(kb_lookup.knowledge_get_tool.func(runtime, "F17,F404", include_evidence=True))
+    got = json.loads(kb_lookup.ledger_get_tool.func(runtime, "F17,F404", include_evidence=True))
     assert [doc["id"] for doc in got["documents"]] == ["F17"]
     assert got["errors"] == [{"id": "F404", "error": "not_found"}]
     exp = json.loads(kb_lookup.experiment_get_tool.func(runtime, EXEC_HASH))
@@ -531,8 +531,8 @@ def test_tool_wrappers_happy_path(tmp_path):
 
 def test_get_knowledge_tools_registry():
     assert [tool.name for tool in kb_lookup.get_knowledge_tools()] == [
-        "knowledge_search",
-        "knowledge_get",
+        "ledger_search",
+        "ledger_get",
         "experiment_get",
         "artifact_manifest",
         "artifact_open",

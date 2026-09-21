@@ -90,7 +90,7 @@ class KnowledgeBootstrapMiddleware(AgentMiddleware[KnowledgeBootstrapMiddlewareS
     Failure policy: any bootstrap error (unbound stores, retrieval
     outage, invalid intent) logs a warning and returns ``None`` so the
     run proceeds without the packet; the agent retains the
-    ``knowledge_*``/``experiment_get``/``artifact_*`` tools for mid-run
+    ``ledger_*``/``experiment_get``/``artifact_*`` tools for mid-run
     recall.
     """
 

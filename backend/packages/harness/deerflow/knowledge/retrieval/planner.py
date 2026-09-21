@@ -767,7 +767,7 @@ def lexical_query_text(query_text: str, intent: ResearchIntent | Mapping[str, An
     Planner-direct callers pass this to the lexical and failure channels
     instead of the raw query: concepts (``reversal``, ``Brinson``) carry
     vocabulary the natural-language question often lacks, and the
-    service path (``knowledge_search``) already folds them the same way
+    service path (``ledger_search``) already folds them the same way
     via its ``concept`` filter. Concepts already present as query
     substrings are skipped; a missing/empty intent returns the text
     unchanged.

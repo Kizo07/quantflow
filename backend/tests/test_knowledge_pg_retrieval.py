@@ -48,7 +48,7 @@ from deerflow.knowledge.retrieval.planner import (
 )
 from deerflow.knowledge.schema.experiments import AssumptionRow, ExperimentRow
 from deerflow.knowledge.schema.findings import FindingRow
-from deerflow.knowledge.tools.lookup import KnowledgeBackends, knowledge_get, knowledge_search
+from deerflow.knowledge.tools.lookup import KnowledgeBackends, ledger_get, ledger_search
 from deerflow.knowledge.write_api import KnowledgeError, KnowledgeValidationError
 from deerflow.persistence.base import Base
 
@@ -576,9 +576,9 @@ class TestRetrievalService:
 
     def test_tool_functions_run_over_the_service(self, store: dict) -> None:
         service = pg.KnowledgeRetrievalService(store["factory"])
-        payload = knowledge_search("borrow costs", kinds="failure", backend=service)
+        payload = ledger_search("borrow costs", kinds="failure", backend=service)
         assert payload["count"] == 2
-        fetched = knowledge_get([str(store["experiment_id"]), str(uuid.uuid4())], backend=service)
+        fetched = ledger_get([str(store["experiment_id"]), str(uuid.uuid4())], backend=service)
         assert len(fetched["documents"]) == 1
         assert fetched["errors"] == [{"id": fetched["errors"][0]["id"], "error": "not_found"}]
 

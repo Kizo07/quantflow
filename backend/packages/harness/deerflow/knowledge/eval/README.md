@@ -134,9 +134,9 @@ fixed-budget context packet). The seam is the `RetrievalFn` protocol in
 from runner import EvalQuery, evaluate, load_fixture
 
 def knowledge_retriever(query: EvalQuery, k: int) -> list[str]:
-    """Phase 2 adapter: research intent -> knowledge_search -> doc IDs."""
+    """Phase 2 adapter: research intent -> ledger_search -> doc IDs."""
     packet = knowledge_bootstrap(query.intent)          # Phase 2 agent tool
-    hits = knowledge_search(                            # Phase 2 agent tool
+    hits = ledger_search(                            # Phase 2 agent tool
         query_text=query.query_text,
         filters={"universe": query.intent["universe"],
                  "horizon": query.intent["horizon"]},
@@ -149,7 +149,7 @@ def knowledge_retriever(query: EvalQuery, k: int) -> list[str]:
 
 fixture = load_fixture("eval_fixture.json")
 report = evaluate(fixture, knowledge_retriever, k=10,
-                  retriever_name="knowledge_search", target=0.8)
+                  retriever_name="ledger_search", target=0.8)
 print(f"recall={report.mean_recall:.3f} "
       f"failure-recall={report.mean_failure_recall:.3f} "
       f"passed={report.passed}")
@@ -164,7 +164,7 @@ Checklist for the Phase 2 owner:
    directory's contract: `doc_id`s, query IDs, and metric definitions are
    frozen for comparability).
 3. Run `python runner.py` equivalents via `evaluate(...)` with
-   `retriever_name="knowledge_search"`; the Phase 2 exit criterion is
+   `retriever_name="ledger_search"`; the Phase 2 exit criterion is
    `passed == True` at `k=10`, `target=0.8` for **both** means.
 4. Add a `make`-style target that runs this eval (Phase 0 exit: the target
    exists and reports the failing baseline; Phase 2 exit: it turns green).

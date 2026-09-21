@@ -58,8 +58,8 @@ and evidence as shared, queryable state instead of chat memory. First-class
 experiments with family/execution identity hashes, SHA-256
 content-addressed artifacts (S3 API, MinIO for local dev), dataset
 vintages, assumptions, and hybrid retrieval (structured + lexical +
-vector + failure channels, RRF fusion) behind `knowledge_search` /
-`knowledge_get` tools with bootstrap middleware. Sectioned exit gate:
+vector + failure channels, RRF fusion) behind `ledger_search` /
+`ledger_get` tools with bootstrap middleware. Sectioned exit gate:
 recall@10 ≥ 0.83, failure-recall@10 ≥ 0.82 on the committed eval fixture.
 Harness only — knowledge *content* stays local and gitignored.
 

@@ -1078,7 +1078,7 @@ def format_context_packet(packet: ContextPacket | Mapping[str, Any]) -> str:
             lines.append(f"  - {failure.get('channel')}: {failure.get('error', '')[:200]}")
         lines.append("")
     if truncated:
-        lines.append("(packet truncated to budget; use knowledge_search/experiment_get for depth)")
+        lines.append("(packet truncated to budget; use ledger_search/experiment_get for depth)")
     return "\n".join(lines).rstrip() + "\n"
 
 

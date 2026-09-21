@@ -1,7 +1,7 @@
 """Agent lookup tools for the Research Knowledge Plane (Phase 2: shared recall).
 
-Implements the KB mid-run read tools — ``knowledge_search``,
-``knowledge_get``, ``experiment_get``, ``artifact_manifest`` and
+Implements the KB mid-run read tools — ``ledger_search``,
+``ledger_get``, ``experiment_get``, ``artifact_manifest`` and
 ``artifact_open`` — over small storage-boundary protocols that the
 integration step binds to PostgreSQL and the object store. This module
 performs no I/O of its own; every function takes an explicit backend
@@ -67,27 +67,27 @@ __all__ = [
     "bind_knowledge_backends",
     "get_knowledge_backends",
     "reset_knowledge_backends",
-    "knowledge_search",
-    "knowledge_get",
+    "ledger_search",
+    "ledger_get",
     "experiment_get",
     "artifact_manifest",
     "artifact_open",
     "parse_locator",
-    "knowledge_search_tool",
-    "knowledge_get_tool",
+    "ledger_search_tool",
+    "ledger_get_tool",
     "experiment_get_tool",
     "artifact_manifest_tool",
     "artifact_open_tool",
     "get_knowledge_tools",
 ]
 
-#: Default page size for ``knowledge_search`` when the caller passes no limit.
+#: Default page size for ``ledger_search`` when the caller passes no limit.
 DEFAULT_LIMIT = 10
-#: Hard ceiling for ``knowledge_search`` limits; larger requests are rejected.
+#: Hard ceiling for ``ledger_search`` limits; larger requests are rejected.
 MAX_LIMIT = 100
-#: Maximum ids accepted by a single ``knowledge_get`` call.
+#: Maximum ids accepted by a single ``ledger_get`` call.
 MAX_IDS_PER_GET = 50
-#: Maximum query characters accepted by ``knowledge_search``.
+#: Maximum query characters accepted by ``ledger_search``.
 MAX_QUERY_CHARS = 2000
 #: Maximum bytes returned by a single ``artifact_open`` call.
 MAX_OPEN_BYTES = 262_144
@@ -106,7 +106,7 @@ _READ_CHUNK_SIZE = 65_536
 #: skills resolve through the bootstrap skill catalog, not mid-run search.
 RETRIEVAL_KINDS = frozenset({"finding", "experiment", "failure", "conflict", "assumption", "dossier", "artifact"})
 
-#: Closed vocabulary of structured ``knowledge_search`` filter keys.
+#: Closed vocabulary of structured ``ledger_search`` filter keys.
 #: ``project_id`` scopes to one research project; ``status`` filters the
 #: lifecycle state (``validated``/``candidate``/``superseded``/
 #: ``rejected``); the remaining keys constrain research scope. Unknown keys
@@ -141,7 +141,7 @@ class RetrievalDocument:
         kind: One of :data:`RETRIEVAL_KINDS`.
         title: Short human-readable title.
         summary: L0/L1 abstract text; full evidence opens via
-            :func:`knowledge_get` / :func:`experiment_get` /
+            :func:`ledger_get` / :func:`experiment_get` /
             :func:`artifact_open`.
         score: Backend rank score (higher is better); ``None`` when the
             backend does not score (e.g. direct id lookup).
@@ -383,7 +383,7 @@ class KnowledgeBackends:
 
     The integration step populates this once real PG/object-store bindings
     exist; until then the wrappers report ``{"error": ...}`` instead of
-    raising. Pure functions (:func:`knowledge_search`, ...) always take
+    raising. Pure functions (:func:`ledger_search`, ...) always take
     explicit backends and never consult this registry.
     """
 
@@ -500,7 +500,7 @@ def _require_pagination(limit: Any, offset: Any) -> tuple[int, int]:
 
 
 def _require_ids(ids: Any) -> list[str]:
-    """Validate a knowledge_get id list (comma-separated string or sequence)."""
+    """Validate a ledger_get id list (comma-separated string or sequence)."""
     if isinstance(ids, str):
         ids = [part.strip() for part in ids.split(",")]
     if not isinstance(ids, Sequence) or isinstance(ids, (bytes, bytearray)):
@@ -513,7 +513,7 @@ def _require_ids(ids: Any) -> list[str]:
     return normalized
 
 
-def knowledge_search(
+def ledger_search(
     query: str,
     *,
     kinds: Sequence[str] | str | None = None,
@@ -562,7 +562,7 @@ def knowledge_search(
     return payload
 
 
-def knowledge_get(
+def ledger_get(
     ids: Sequence[str] | str,
     *,
     include_evidence: bool = False,
@@ -914,8 +914,8 @@ def _tool_error(exc: BaseException, *, log_message: str) -> str:
     return json.dumps({"error": str(exc)})
 
 
-@tool("knowledge_search", parse_docstring=True)
-def knowledge_search_tool(
+@tool("ledger_search", parse_docstring=True)
+def ledger_search_tool(
     runtime: Runtime,
     query: str,
     kinds: str | None = None,
@@ -959,7 +959,7 @@ def knowledge_search_tool(
             if not isinstance(decoded, dict):
                 return json.dumps({"error": "filters_json must decode to a JSON object."})
             filters = decoded
-        payload = knowledge_search(
+        payload = ledger_search(
             query,
             kinds=kinds,
             filters=_scoped_filters(runtime, filters),
@@ -969,11 +969,11 @@ def knowledge_search_tool(
         )
         return json.dumps(payload, ensure_ascii=False)
     except Exception as exc:
-        return _tool_error(exc, log_message="knowledge_search_tool failed")
+        return _tool_error(exc, log_message="ledger_search_tool failed")
 
 
-@tool("knowledge_get", parse_docstring=True)
-def knowledge_get_tool(
+@tool("ledger_get", parse_docstring=True)
+def ledger_get_tool(
     runtime: Runtime,
     ids: str,
     include_evidence: bool = False,
@@ -981,7 +981,7 @@ def knowledge_get_tool(
     """Fetch KB documents by id, optionally with evidence rows.
 
     Use this to open specific findings, conflicts, assumptions, or dossiers
-    surfaced by knowledge_search or the bootstrap packet. Cite a finding in
+    surfaced by ledger_search or the bootstrap packet. Cite a finding in
     a final conclusion only after opening it here.
 
     Args:
@@ -997,10 +997,10 @@ def knowledge_get_tool(
         backend = get_knowledge_backends().retrieval
         if backend is None:
             return json.dumps({"error": "knowledge retrieval backend is not bound"})
-        payload = knowledge_get(ids, include_evidence=include_evidence, backend=backend)
+        payload = ledger_get(ids, include_evidence=include_evidence, backend=backend)
         return json.dumps(payload, ensure_ascii=False)
     except Exception as exc:
-        return _tool_error(exc, log_message="knowledge_get_tool failed")
+        return _tool_error(exc, log_message="ledger_get_tool failed")
 
 
 @tool("experiment_get", parse_docstring=True)
@@ -1091,8 +1091,8 @@ def get_knowledge_tools() -> list:
     packet planner.
     """
     return [
-        knowledge_search_tool,
-        knowledge_get_tool,
+        ledger_search_tool,
+        ledger_get_tool,
         experiment_get_tool,
         artifact_manifest_tool,
         artifact_open_tool,

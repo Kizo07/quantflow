@@ -733,6 +733,10 @@ models:
 # Optional knowledge capability. The feature is disabled by default. Provider
 # connection and retrieval settings belong to the matching entry in `tools:`
 # below (for example, the RAGFlow `knowledge_search` tool), not here.
+# NOTE: `knowledge_base:` (this section) is the RAG-provider capability
+# toggle (RAGFlow/LightRAG `knowledge_search`); the research evidence
+# ledger lives under the separate `knowledge:` section (PG-backed
+# `ledger_search`/`ledger_get` tools). The two keys are disjoint.
 knowledge_base:
   enabled: false
   # Custom-agent chat only. Keeps the selector hidden unless the effective
@@ -2034,6 +2038,10 @@ summarization:
 # Evidence-backed research ledger (experiments, failures, assumptions,
 # content-addressed artifacts) on top of the harness PostgreSQL persistence.
 # Phase 1 covers the synchronous evidence-commit path + experiment search.
+# NOTE: `knowledge:` (this section) is the PG-backed evidence ledger
+# (`ledger_search`/`ledger_get` tools); the RAG-provider capability toggle
+# (RAGFlow/LightRAG `knowledge_search`) lives under the separate
+# `knowledge_base:` section. The two keys are disjoint.
 knowledge:
   # Master switch for the Knowledge API (default: true).
   # Override at read time with DEER_FLOW_KNOWLEDGE_ENABLED=0/1.

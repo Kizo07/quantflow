@@ -153,7 +153,7 @@ __all__ = [
 ]
 
 #: Summary ceiling for ``RetrievalDocument.summary`` (full text stays one
-#: ``knowledge_get`` away; truncation is flagged in the payload).
+#: ``ledger_get`` away; truncation is flagged in the payload).
 SUMMARY_CHARS = 4000
 
 #: Methodology keys promoted to candidate scope (KB scope fields).
@@ -281,7 +281,7 @@ def finding_row_to_candidate(row: FindingRow) -> Candidate:
 
     Kind is ``"failure"`` for ``finding_type == "failure"`` rows, else
     ``"finding"``. ``evidence`` is empty at Phase 2 (``finding_evidence``
-    edges land in Phase 3); the open path is ``knowledge_get``.
+    edges land in Phase 3); the open path is ``ledger_get``.
     """
     return Candidate(
         id=str(row.id),

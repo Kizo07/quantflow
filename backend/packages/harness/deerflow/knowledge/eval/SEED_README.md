@@ -146,7 +146,7 @@ evidence = build_evidence_map(bundle, experiment_ids=None)  # or post-commit UUI
 def knowledge_retriever(query, k): ...  # Phase 2 adapter -> doc IDs
 
 report, packets = evaluate_with_packet_checks(
-    fixture, knowledge_retriever, evidence, k=10, retriever_name="knowledge_search")
+    fixture, knowledge_retriever, evidence, k=10, retriever_name="ledger_search")
 passed, reasons = phase2_exit_verdict(report, packets, target=0.8)
 ```
 

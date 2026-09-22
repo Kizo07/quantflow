@@ -12,8 +12,10 @@ Storage boundary: this module performs no I/O of its own. Embedding
 *computation* goes through :class:`EmbeddingProvider`; embedding *persistence*
 goes through :class:`EmbeddingVectorStore` (bound to PostgreSQL/pgvector by
 the integration step — see the Protocol docstrings for the column mapping).
-The :func:`backfill_findings_embeddings` helper drives finding-id -> vector
-upserts across those two boundaries.
+The :func:`backfill_findings_embeddings` and
+:func:`backfill_experiments_embeddings` helpers drive finding-id and
+experiment-id -> vector upserts across those two boundaries (Phase 3
+generalizes the plane from findings to experiments).
 
 Canonical dimension: :data:`EMBEDDING_DIM` (768). Every vector this package
 produces, validates, or stores is 768 floats; providers reporting any other
@@ -77,6 +79,7 @@ __all__ = [
     "EmbeddingProvider",
     "DeterministicEmbeddingProvider",
     "FindingTextSource",
+    "ExperimentTextSource",
     "EmbeddingVectorStore",
     "BackfillFailure",
     "BackfillResult",
@@ -85,6 +88,7 @@ __all__ = [
     "register_provider_factory",
     "load_provider",
     "backfill_findings_embeddings",
+    "backfill_experiments_embeddings",
 ]
 
 
@@ -447,16 +451,34 @@ class FindingTextSource(Protocol):
 
 
 @runtime_checkable
-class EmbeddingVectorStore(Protocol):
-    """Write boundary: persist vectors beside their findings (pgvector).
+class ExperimentTextSource(Protocol):
+    """Read boundary: canonical embeddable text per experiment id.
 
-    PG binding sketch (Phase 2 ``finding`` table): ``upsert_embedding``
-    runs one parameterized ``UPDATE finding SET embedding = $2::vector,
-    embedding_model = $3, embedding_updated_at = now() WHERE id = $1``
-    (exact search first; HNSW index added later per the KB). The integration
-    step must reject vectors whose length is not :data:`EMBEDDING_DIM`
-    (pgvector does this natively for ``VECTOR(768)``) and keep vector
-    indexing out of the transaction that proves a finding exists.
+    PG binding sketch (Phase 3 ``experiment`` table): render
+    ``hypothesis`` + ``method_summary`` (+ scope line) with
+    :func:`render_embeddable_text` for the row; return ``None`` when the
+    experiment does not exist or has no embeddable content.
+    """
+
+    def get_experiment_text(self, experiment_id: str) -> str | None:
+        """Return the embeddable text for ``experiment_id``, or None when missing."""
+        ...
+
+
+@runtime_checkable
+class EmbeddingVectorStore(Protocol):
+    """Write boundary: persist vectors beside their findings/experiments (pgvector).
+
+    PG binding sketch (Phase 2 ``finding`` table, Phase 3 ``experiment``
+    table): ``upsert_embedding`` runs one parameterized
+    ``UPDATE <table> SET embedding = $2::vector, embedding_model = $3,
+    embedding_updated_at = now() WHERE id = $1`` (exact search first;
+    HNSW index added later per the KB). The integration step must reject
+    vectors whose length is not :data:`EMBEDDING_DIM` (pgvector does this
+    natively for ``VECTOR(768)``) and keep vector indexing out of the
+    transaction that proves a finding/experiment exists. The id parameter
+    carries a finding UUID for finding backfills and an experiment UUID
+    for experiment backfills.
     """
 
     def get_embedding_model(self, finding_id: str) -> str | None:
@@ -470,7 +492,11 @@ class EmbeddingVectorStore(Protocol):
 
 @dataclass(frozen=True)
 class BackfillFailure:
-    """One finding id that could not be embedded or upserted (collect mode)."""
+    """One object id that could not be embedded or upserted (collect mode).
+
+    ``finding_id`` carries the finding UUID for finding backfills and the
+    experiment UUID for experiment backfills (shared result shape).
+    """
 
     finding_id: str
     error: str
@@ -482,7 +508,12 @@ class BackfillFailure:
 
 @dataclass(frozen=True)
 class BackfillResult:
-    """Outcome of :func:`backfill_findings_embeddings` (all id lists in input order)."""
+    """Outcome of the backfill helpers (all id lists in input order).
+
+    Shared by :func:`backfill_findings_embeddings` and
+    :func:`backfill_experiments_embeddings`; the id tuples carry finding
+    UUIDs for the former and experiment UUIDs for the latter.
+    """
 
     total: int = 0
     embedded: int = 0
@@ -507,16 +538,156 @@ class BackfillResult:
         }
 
 
-def _require_finding_id(value: object) -> str:
-    """Validate a finding id (UUID string, canonical lowercase form)."""
+def _require_object_id(name: str, value: object) -> str:
+    """Validate an object id (UUID string, canonical lowercase form)."""
     import uuid as _uuid
 
     if not isinstance(value, str):
-        raise KnowledgeValidationError(f"finding_id must be a UUID string, got {type(value).__name__}.")
+        raise KnowledgeValidationError(f"{name} must be a UUID string, got {type(value).__name__}.")
     try:
         return str(_uuid.UUID(value.strip()))
     except ValueError:
-        raise KnowledgeValidationError(f"finding_id must be a valid UUID, got {value!r}.") from None
+        raise KnowledgeValidationError(f"{name} must be a valid UUID, got {value!r}.") from None
+
+
+def _backfill_embeddings(
+    provider: EmbeddingProvider,
+    fetch_text: Callable[[str], str | None],
+    store: EmbeddingVectorStore,
+    object_ids: Sequence[str],
+    *,
+    kind: str,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    skip_up_to_date: bool = True,
+    on_error: str = "collect",
+) -> BackfillResult:
+    """Shared backfill core: (object-id -> vector) upserts for indexing workers.
+
+    For each unique object id, in input order: optionally skip when the
+    stored vector already carries this provider's ``model_id``; otherwise
+    fetch the canonical text, embed in ``batch_size`` chunks (input order
+    preserved), and upsert each validated vector. Re-running with the same
+    provider is idempotent (everything already stamped is skipped); switching
+    models re-embeds every row, which is the intended model-migration path.
+
+    Args:
+        provider: Embedding computation boundary. Its dimension must equal
+            :data:`EMBEDDING_DIM` — anything else is refused before any
+            store call so a misconfigured model can never poison the
+            ``VECTOR(768)`` column.
+        fetch_text: Read boundary supplying canonical embeddable text per id.
+        store: Write boundary persisting vectors per id.
+        object_ids: Object UUID strings (duplicates collapse, order kept).
+        kind: Object noun for messages and id labels (``"finding"`` or
+            ``"experiment"``).
+        batch_size: Objects embedded per provider call (1..MAX_BATCH_SIZE).
+        skip_up_to_date: When True (default), skip ids whose stored vector
+            already carries ``provider.model_id``.
+        on_error: ``"collect"`` records per-id failures and continues;
+            ``"raise"`` propagates the first provider/store error.
+
+    Returns:
+        A :class:`BackfillResult` with counts and per-id outcomes.
+
+    Raises:
+        KnowledgeValidationError: On invalid ids, batch size, or ``on_error``.
+        EmbeddingProviderError: On dimension mismatch, or on the first
+            provider/store failure when ``on_error="raise"``.
+    """
+    size = _require_batch_size(batch_size)
+    if on_error not in {"collect", "raise"}:
+        raise KnowledgeValidationError(f"on_error must be 'collect' or 'raise', got {on_error!r}.")
+    ids_name = f"{kind}_ids"
+    if isinstance(object_ids, (str, bytes, bytearray)):
+        raise KnowledgeValidationError(f"{ids_name} must be a sequence of UUID strings, got {type(object_ids).__name__}.")
+    try:
+        raw_ids = list(object_ids)
+    except TypeError:
+        raise KnowledgeValidationError(f"{ids_name} must be a sequence of UUID strings, got {type(object_ids).__name__}.") from None
+    unique_ids = list(dict.fromkeys(_require_object_id(f"{kind}_id", item) for item in raw_ids))
+
+    model_id = provider.model_id
+    dimension = provider.dimension
+    if dimension != EMBEDDING_DIM:
+        raise EmbeddingProviderError(f"Refusing backfill: provider {model_id!r} emits {dimension}-d vectors, but the canonical store column is VECTOR({EMBEDDING_DIM}).")
+
+    skipped: list[str] = []
+    missing: list[str] = []
+    failures: list[BackfillFailure] = []
+    pending: list[tuple[str, str]] = []  # (object_id, text) pairs to embed, in order.
+
+    def _record(object_id: str, action: str, exc: BaseException) -> None:
+        if on_error == "raise":
+            if isinstance(exc, (KnowledgeError,)):
+                raise exc
+            raise EmbeddingProviderError(f"{action} for {kind} {object_id} failed: {exc}") from exc
+        failures.append(BackfillFailure(finding_id=object_id, error=f"{exc}"))
+
+    for object_id in unique_ids:
+        if skip_up_to_date:
+            try:
+                if store.get_embedding_model(object_id) == model_id:
+                    skipped.append(object_id)
+                    continue
+            except Exception as exc:
+                _record(object_id, "embedding-model lookup", exc)
+                continue
+        try:
+            text = fetch_text(object_id)
+        except Exception as exc:
+            _record(object_id, f"{kind}-text lookup", exc)
+            continue
+        if text is None:
+            missing.append(object_id)
+            continue
+        try:
+            pending.append((object_id, _require_text(f"{kind} {object_id} text", text)))
+        except KnowledgeValidationError as exc:
+            _record(object_id, f"{kind}-text validation", exc)
+
+    upserted: list[str] = []
+    embedded_count = 0
+    for start in range(0, len(pending), size):
+        chunk = pending[start : start + size]
+        chunk_ids = [object_id for object_id, _ in chunk]
+        try:
+            raw_vectors = provider.embed_batch([text for _, text in chunk])
+        except Exception as exc:
+            for object_id in chunk_ids:
+                _record(object_id, "embed_batch", exc)
+            continue
+        if not isinstance(raw_vectors, Sequence) or isinstance(raw_vectors, (str, bytes, bytearray)) or len(list(raw_vectors)) != len(chunk):
+            for object_id in chunk_ids:
+                _record(object_id, "embed_batch", EmbeddingProviderError(f"provider {model_id!r} returned a malformed batch."))
+            continue
+        vectors: list[list[float] | None] = []
+        for offset, vector in enumerate(raw_vectors):
+            try:
+                vectors.append(_check_vector(vector, dimension=EMBEDDING_DIM, model_id=model_id, index=start + offset))
+            except EmbeddingProviderError as exc:
+                _record(chunk_ids[offset], "vector validation", exc)
+                vectors.append(None)
+        embedded_count += sum(1 for vector in vectors if vector is not None)
+        for object_id, vector in zip(chunk_ids, vectors, strict=True):
+            if vector is None:
+                continue
+            try:
+                store.upsert_embedding(object_id, vector, model_id=model_id)
+            except Exception as exc:
+                _record(object_id, "upsert_embedding", exc)
+                continue
+            upserted.append(object_id)
+
+    return BackfillResult(
+        total=len(unique_ids),
+        embedded=embedded_count,
+        upserted=len(upserted),
+        skipped_up_to_date=len(skipped),
+        upserted_ids=tuple(upserted),
+        skipped_ids=tuple(skipped),
+        missing_ids=tuple(missing),
+        failures=tuple(failures),
+    )
 
 
 def backfill_findings_embeddings(
@@ -560,96 +731,70 @@ def backfill_findings_embeddings(
         EmbeddingProviderError: On dimension mismatch, or on the first
             provider/store failure when ``on_error="raise"``.
     """
-    size = _require_batch_size(batch_size)
-    if on_error not in {"collect", "raise"}:
-        raise KnowledgeValidationError(f"on_error must be 'collect' or 'raise', got {on_error!r}.")
-    if isinstance(finding_ids, (str, bytes, bytearray)):
-        raise KnowledgeValidationError(f"finding_ids must be a sequence of UUID strings, got {type(finding_ids).__name__}.")
-    try:
-        raw_ids = list(finding_ids)
-    except TypeError:
-        raise KnowledgeValidationError(f"finding_ids must be a sequence of UUID strings, got {type(finding_ids).__name__}.") from None
-    unique_ids = list(dict.fromkeys(_require_finding_id(item) for item in raw_ids))
+    return _backfill_embeddings(
+        provider,
+        texts.get_finding_text,
+        store,
+        finding_ids,
+        kind="finding",
+        batch_size=batch_size,
+        skip_up_to_date=skip_up_to_date,
+        on_error=on_error,
+    )
 
-    model_id = provider.model_id
-    dimension = provider.dimension
-    if dimension != EMBEDDING_DIM:
-        raise EmbeddingProviderError(f"Refusing backfill: provider {model_id!r} emits {dimension}-d vectors, but the canonical store column is VECTOR({EMBEDDING_DIM}).")
 
-    skipped: list[str] = []
-    missing: list[str] = []
-    failures: list[BackfillFailure] = []
-    pending: list[tuple[str, str]] = []  # (finding_id, text) pairs to embed, in order.
+def backfill_experiments_embeddings(
+    provider: EmbeddingProvider,
+    texts: ExperimentTextSource,
+    store: EmbeddingVectorStore,
+    experiment_ids: Sequence[str],
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    skip_up_to_date: bool = True,
+    on_error: str = "collect",
+) -> BackfillResult:
+    """Backfill (experiment-id -> vector) upserts for Phase 3 indexing workers.
 
-    def _record(finding_id: str, action: str, exc: BaseException) -> None:
-        if on_error == "raise":
-            if isinstance(exc, (KnowledgeError,)):
-                raise exc
-            raise EmbeddingProviderError(f"{action} for finding {finding_id} failed: {exc}") from exc
-        failures.append(BackfillFailure(finding_id=finding_id, error=f"{exc}"))
+    Experiment twin of :func:`backfill_findings_embeddings` sharing the same
+    private core: for each unique experiment id, in input order, optionally
+    skip when the stored vector already carries this provider's
+    ``model_id``; otherwise fetch the canonical text, embed in
+    ``batch_size`` chunks (input order preserved), and upsert each validated
+    vector. Re-running with the same provider is idempotent; switching
+    models re-embeds every row, which is the intended model-migration path.
 
-    for finding_id in unique_ids:
-        if skip_up_to_date:
-            try:
-                if store.get_embedding_model(finding_id) == model_id:
-                    skipped.append(finding_id)
-                    continue
-            except Exception as exc:
-                _record(finding_id, "embedding-model lookup", exc)
-                continue
-        try:
-            text = texts.get_finding_text(finding_id)
-        except Exception as exc:
-            _record(finding_id, "finding-text lookup", exc)
-            continue
-        if text is None:
-            missing.append(finding_id)
-            continue
-        try:
-            pending.append((finding_id, _require_text(f"finding {finding_id} text", text)))
-        except KnowledgeValidationError as exc:
-            _record(finding_id, "finding-text validation", exc)
+    Args:
+        provider: Embedding computation boundary. Its dimension must equal
+            :data:`EMBEDDING_DIM` — anything else is refused before any
+            store call so a misconfigured model can never poison the
+            ``VECTOR(768)`` column.
+        texts: Read boundary supplying canonical embeddable text per id.
+        store: Write boundary persisting vectors per id (the id parameter
+            carries the experiment UUID).
+        experiment_ids: Experiment UUID strings (duplicates collapse, order kept).
+        batch_size: Experiments embedded per provider call (1..MAX_BATCH_SIZE).
+        skip_up_to_date: When True (default), skip ids whose stored vector
+            already carries ``provider.model_id``.
+        on_error: ``"collect"`` records per-id failures and continues;
+            ``"raise"`` propagates the first provider/store error.
 
-    upserted: list[str] = []
-    embedded_count = 0
-    for start in range(0, len(pending), size):
-        chunk = pending[start : start + size]
-        chunk_ids = [finding_id for finding_id, _ in chunk]
-        try:
-            raw_vectors = provider.embed_batch([text for _, text in chunk])
-        except Exception as exc:
-            for finding_id in chunk_ids:
-                _record(finding_id, "embed_batch", exc)
-            continue
-        if not isinstance(raw_vectors, Sequence) or isinstance(raw_vectors, (str, bytes, bytearray)) or len(list(raw_vectors)) != len(chunk):
-            for finding_id in chunk_ids:
-                _record(finding_id, "embed_batch", EmbeddingProviderError(f"provider {model_id!r} returned a malformed batch."))
-            continue
-        vectors: list[list[float] | None] = []
-        for offset, vector in enumerate(raw_vectors):
-            try:
-                vectors.append(_check_vector(vector, dimension=EMBEDDING_DIM, model_id=model_id, index=start + offset))
-            except EmbeddingProviderError as exc:
-                _record(chunk_ids[offset], "vector validation", exc)
-                vectors.append(None)
-        embedded_count += sum(1 for vector in vectors if vector is not None)
-        for finding_id, vector in zip(chunk_ids, vectors, strict=True):
-            if vector is None:
-                continue
-            try:
-                store.upsert_embedding(finding_id, vector, model_id=model_id)
-            except Exception as exc:
-                _record(finding_id, "upsert_embedding", exc)
-                continue
-            upserted.append(finding_id)
+    Returns:
+        A :class:`BackfillResult` with counts and per-id outcomes (the id
+        tuples and ``BackfillFailure.finding_id`` fields carry experiment
+        UUIDs for this helper).
 
-    return BackfillResult(
-        total=len(unique_ids),
-        embedded=embedded_count,
-        upserted=len(upserted),
-        skipped_up_to_date=len(skipped),
-        upserted_ids=tuple(upserted),
-        skipped_ids=tuple(skipped),
-        missing_ids=tuple(missing),
-        failures=tuple(failures),
+    Raises:
+        KnowledgeValidationError: On invalid ids, batch size, or ``on_error``.
+        EmbeddingProviderError: On dimension mismatch, or on the first
+            provider/store failure when ``on_error="raise"``.
+    """
+    return _backfill_embeddings(
+        provider,
+        texts.get_experiment_text,
+        store,
+        experiment_ids,
+        kind="experiment",
+        batch_size=batch_size,
+        skip_up_to_date=skip_up_to_date,
+        on_error=on_error,
     )

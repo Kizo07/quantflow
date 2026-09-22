@@ -1,9 +1,9 @@
-"""Standalone tests for the embedding provider interface + backfill helper (Phase 2).
+"""Standalone tests for the embedding provider interface + backfill helpers.
 
 Runs with no database, no model weights, and no integration wiring: the
 deterministic fake supplies vectors and in-memory fakes implement the
-``FindingTextSource`` / ``EmbeddingVectorStore`` boundaries from
-``embeddings.py``.
+``FindingTextSource`` / ``ExperimentTextSource`` / ``EmbeddingVectorStore``
+boundaries from ``embeddings.py`` (Phase 2 findings, Phase 3 experiments).
 
 Run from anywhere (the bootstrap below locates the harness package)::
 
@@ -27,6 +27,10 @@ FINDING_1 = "11111111-1111-1111-1111-111111111111"
 FINDING_2 = "22222222-2222-2222-2222-222222222222"
 FINDING_3 = "33333333-3333-3333-3333-333333333333"
 
+EXPERIMENT_1 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+EXPERIMENT_2 = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+EXPERIMENT_3 = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+
 
 def make_provider(**kwargs):
     return E.DeterministicEmbeddingProvider(**kwargs)
@@ -42,6 +46,18 @@ class FakeTexts:
     def get_finding_text(self, finding_id):
         self.calls.append(finding_id)
         return self.mapping.get(finding_id)
+
+
+class FakeExperimentTexts:
+    """In-memory ExperimentTextSource."""
+
+    def __init__(self, mapping):
+        self.mapping = dict(mapping)
+        self.calls = []
+
+    def get_experiment_text(self, experiment_id):
+        self.calls.append(experiment_id)
+        return self.mapping.get(experiment_id)
 
 
 class FakeVectorStore:
@@ -239,3 +255,68 @@ def test_backfill_collect_vs_raise_on_store_failure():
     assert collected.to_dict()["failures"][0]["error"] == "pgvector down"
     with pytest.raises(E.EmbeddingProviderError):
         E.backfill_findings_embeddings(provider, texts, FailingStore(), [FINDING_1], on_error="raise")
+
+
+def test_experiment_text_source_protocol_conformance():
+    assert isinstance(FakeExperimentTexts({}), E.ExperimentTextSource)
+    assert isinstance(FakeTexts({}), E.FindingTextSource)
+    assert isinstance(FakeVectorStore(), E.EmbeddingVectorStore)
+
+
+def test_backfill_experiments_upserts_and_is_idempotent():
+    provider = make_provider()
+    texts = FakeExperimentTexts({EXPERIMENT_1: "first experiment text", EXPERIMENT_2: "second experiment text"})
+    store = FakeVectorStore()
+    result = E.backfill_experiments_embeddings(provider, texts, store, [EXPERIMENT_1, EXPERIMENT_2], batch_size=1)
+    assert (result.total, result.embedded, result.upserted, result.skipped_up_to_date) == (2, 2, 2, 0)
+    assert result.failures == () and result.missing_ids == ()
+    assert result.upserted_ids == (EXPERIMENT_1, EXPERIMENT_2)
+    assert store.models == {EXPERIMENT_1: E.FAKE_MODEL_ID, EXPERIMENT_2: E.FAKE_MODEL_ID}
+    assert all(len(v) == 768 for v in store.vectors.values())
+    assert store.vectors[EXPERIMENT_1] == provider.embed_one("first experiment text")
+
+    rerun = E.backfill_experiments_embeddings(provider, texts, store, [EXPERIMENT_1, EXPERIMENT_2])
+    assert (rerun.upserted, rerun.skipped_up_to_date) == (0, 2)
+    assert rerun.skipped_ids == (EXPERIMENT_1, EXPERIMENT_2)
+
+
+def test_backfill_experiments_missing_duplicates_and_bad_ids():
+    provider = make_provider()
+    texts = FakeExperimentTexts({EXPERIMENT_1: "only experiment"})
+    store = FakeVectorStore()
+    result = E.backfill_experiments_embeddings(provider, texts, store, [EXPERIMENT_1, EXPERIMENT_1, EXPERIMENT_3])
+    assert result.total == 2  # duplicates collapse
+    assert result.upserted_ids == (EXPERIMENT_1,)
+    assert result.missing_ids == (EXPERIMENT_3,)
+    with pytest.raises(KnowledgeValidationError):
+        E.backfill_experiments_embeddings(provider, texts, store, ["not-a-uuid"])
+    with pytest.raises(KnowledgeValidationError):
+        E.backfill_experiments_embeddings(provider, texts, store, "not-a-sequence")
+    with pytest.raises(KnowledgeValidationError):
+        E.backfill_experiments_embeddings(provider, texts, store, [EXPERIMENT_1], on_error="ignore")
+    with pytest.raises(KnowledgeValidationError):
+        E.backfill_experiments_embeddings(provider, texts, store, [EXPERIMENT_1], batch_size=0)
+
+
+def test_backfill_experiments_refuses_dimension_mismatch_without_store_calls():
+    provider = make_provider(dimension=128)
+    texts = FakeExperimentTexts({EXPERIMENT_1: "text"})
+    store = FakeVectorStore()
+    with pytest.raises(E.EmbeddingProviderError):
+        E.backfill_experiments_embeddings(provider, texts, store, [EXPERIMENT_1])
+    assert store.upserts == [] and texts.calls == []
+
+
+def test_backfill_experiments_collect_vs_raise_on_store_failure():
+    class FailingStore(FakeVectorStore):
+        def upsert_embedding(self, finding_id, vector, *, model_id):
+            raise RuntimeError("pgvector down")
+
+    provider = make_provider()
+    texts = FakeExperimentTexts({EXPERIMENT_1: "text one", EXPERIMENT_2: "text two"})
+    collected = E.backfill_experiments_embeddings(provider, texts, FailingStore(), [EXPERIMENT_1, EXPERIMENT_2])
+    assert collected.upserted == 0
+    assert [f.finding_id for f in collected.failures] == [EXPERIMENT_1, EXPERIMENT_2]
+    assert collected.to_dict()["failures"][0]["error"] == "pgvector down"
+    with pytest.raises(E.EmbeddingProviderError):
+        E.backfill_experiments_embeddings(provider, texts, FailingStore(), [EXPERIMENT_1], on_error="raise")

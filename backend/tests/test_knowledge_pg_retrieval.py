@@ -424,6 +424,106 @@ class TestVectorStore:
         query_vector = DeterministicEmbeddingProvider().embed_one("momentum")
         assert backend.vector_search(query_vector, ScopeFilter(), kinds=["experiment", "assumption"], limit=10) == []
 
+    def test_portable_cosine_finds_nearest_experiment(self, store: dict) -> None:
+        provider = DeterministicEmbeddingProvider()
+        finding_texts = pg.SQLFindingTextSource(store["factory"])
+        finding_vectors = pg.SQLEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        backfill_findings_embeddings(provider, finding_texts, finding_vectors, [str(store["finding_id"])])
+        experiment_texts = pg.SQLExperimentTextSource(store["factory"])
+        experiment_vectors = pg.SQLExperimentEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        experiment_text = experiment_texts.get_experiment_text(str(store["experiment_id"]))
+        assert experiment_text is not None
+        [experiment_vector] = provider.embed_batch([experiment_text])
+        experiment_vectors.upsert_embedding(str(store["experiment_id"]), experiment_vector, model_id=provider.model_id)
+        backend = pg.SQLVectorSearchStore(store["factory"])
+        found = backend.vector_search(experiment_vector, ScopeFilter(), kinds=["finding", "experiment"], limit=10)
+        assert [item.id for item in found] == [str(store["experiment_id"]), str(store["finding_id"])]
+        experiments_only = backend.vector_search(experiment_vector, ScopeFilter(), kinds=["experiment"], limit=10)
+        assert [item.id for item in experiments_only] == [str(store["experiment_id"])]
+
+    def test_failure_kind_draws_from_both_tables(self, store: dict) -> None:
+        provider = DeterministicEmbeddingProvider()
+        finding_texts = pg.SQLFindingTextSource(store["factory"])
+        finding_vectors = pg.SQLEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        backfill_findings_embeddings(provider, finding_texts, finding_vectors, [str(store["finding_id"]), str(store["failure_finding_id"])])
+        experiment_texts = pg.SQLExperimentTextSource(store["factory"])
+        experiment_vectors = pg.SQLExperimentEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        for key in ("experiment_id", "failure_experiment_id"):
+            text = experiment_texts.get_experiment_text(str(store[key]))
+            assert text is not None
+            [vector] = provider.embed_batch([text])
+            experiment_vectors.upsert_embedding(str(store[key]), vector, model_id=provider.model_id)
+        backend = pg.SQLVectorSearchStore(store["factory"])
+        query_text = experiment_texts.get_experiment_text(str(store["failure_experiment_id"]))
+        assert query_text is not None
+        [query_vector] = provider.embed_batch([query_text])
+        found = backend.vector_search(query_vector, ScopeFilter(), kinds=["failure"], limit=10)
+        assert [item.id for item in found] == [str(store["failure_experiment_id"]), str(store["failure_finding_id"])]
+        assert all(item.kind == "failure" for item in found)
+
+    def test_unembedded_experiments_never_match(self, store: dict) -> None:
+        provider = DeterministicEmbeddingProvider()
+        finding_texts = pg.SQLFindingTextSource(store["factory"])
+        finding_vectors = pg.SQLEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        backfill_findings_embeddings(provider, finding_texts, finding_vectors, [str(store["finding_id"])])
+        backend = pg.SQLVectorSearchStore(store["factory"])
+        experiment_text = pg.SQLExperimentTextSource(store["factory"]).get_experiment_text(str(store["experiment_id"]))
+        assert experiment_text is not None
+        [query_vector] = provider.embed_batch([experiment_text])
+        # The NULL experiment row stays invisible even for its own text;
+        # the embedded finding still matches the shared query.
+        assert backend.vector_search(query_vector, ScopeFilter(), kinds=["experiment"], limit=10) == []
+        found = backend.vector_search(query_vector, ScopeFilter(), kinds=["finding", "experiment"], limit=10)
+        assert [item.id for item in found] == [str(store["finding_id"])]
+
+    def test_scope_screening_applies_to_experiments(self, store: dict) -> None:
+        provider = DeterministicEmbeddingProvider()
+        experiment_texts = pg.SQLExperimentTextSource(store["factory"])
+        experiment_vectors = pg.SQLExperimentEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        text = experiment_texts.get_experiment_text(str(store["experiment_id"]))
+        assert text is not None
+        [query_vector] = provider.embed_batch([text])
+        experiment_vectors.upsert_embedding(str(store["experiment_id"]), query_vector, model_id=provider.model_id)
+        backend = pg.SQLVectorSearchStore(store["factory"])
+        assert backend.vector_search(query_vector, _scope(), kinds=["experiment"], limit=10) != []
+        assert backend.vector_search(query_vector, _scope(asset_class="credit"), kinds=["experiment"], limit=10) == []
+
+    def test_malformed_experiment_embedding_is_skipped(self, store: dict, caplog: pytest.LogCaptureFixture) -> None:
+        provider = DeterministicEmbeddingProvider()
+        experiment_texts = pg.SQLExperimentTextSource(store["factory"])
+        experiment_vectors = pg.SQLExperimentEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        text = experiment_texts.get_experiment_text(str(store["failure_experiment_id"]))
+        assert text is not None
+        [query_vector] = provider.embed_batch([text])
+        experiment_vectors.upsert_embedding(str(store["failure_experiment_id"]), query_vector, model_id=provider.model_id)
+        with store["factory"]() as session:
+            row = session.get(ExperimentRow, store["experiment_id"])
+            assert row is not None
+            row.embedding = "not-a-vector"  # type: ignore[assignment]
+            session.commit()
+        backend = pg.SQLVectorSearchStore(store["factory"])
+        with caplog.at_level("WARNING", logger="deerflow.knowledge.pg_retrieval"):
+            found = backend.vector_search(query_vector, ScopeFilter(), kinds=["experiment", "failure"], limit=10)
+        assert [item.id for item in found] == [str(store["failure_experiment_id"])]
+        assert "malformed stored embedding" in caplog.text
+
+    def test_limit_trims_merged_tables(self, store: dict) -> None:
+        provider = DeterministicEmbeddingProvider()
+        finding_texts = pg.SQLFindingTextSource(store["factory"])
+        finding_vectors = pg.SQLEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        backfill_findings_embeddings(provider, finding_texts, finding_vectors, [str(store["finding_id"]), str(store["failure_finding_id"])])
+        experiment_texts = pg.SQLExperimentTextSource(store["factory"])
+        experiment_vectors = pg.SQLExperimentEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        for key in ("experiment_id", "failure_experiment_id"):
+            text = experiment_texts.get_experiment_text(str(store[key]))
+            assert text is not None
+            [vector] = provider.embed_batch([text])
+            experiment_vectors.upsert_embedding(str(store[key]), vector, model_id=provider.model_id)
+        backend = pg.SQLVectorSearchStore(store["factory"])
+        query_vector = provider.embed_one("momentum backtest sharpe")
+        assert len(backend.vector_search(query_vector, ScopeFilter(), kinds=["finding", "experiment", "failure"], limit=2)) == 2
+        assert len(backend.vector_search(query_vector, ScopeFilter(), kinds=["finding", "experiment", "failure"], limit=10)) == 4
+
 
 class TestFailureStore:
     def test_only_failures_ranked_by_relevance(self, store: dict) -> None:
@@ -498,6 +598,44 @@ class TestEmbeddingPlane:
         second = backfill_findings_embeddings(provider, texts, vectors, ids)
         assert (second.upserted, second.skipped_up_to_date) == (0, 1)
 
+    def test_experiment_text_source_round_trip(self, store: dict) -> None:
+        texts = pg.SQLExperimentTextSource(store["factory"])
+        expected = render_embeddable_text(
+            title="Cross-sectional momentum 126-day backtest",
+            body="Cross-sectional momentum 126-day backtest quintile long-short momentum backtest sharpe turnover mom_126d success",
+        )
+        assert texts.get_experiment_text(str(store["experiment_id"])) == expected
+        assert texts.get_experiment_text(str(uuid.uuid4())) is None
+        with pytest.raises(KnowledgeValidationError):
+            texts.get_experiment_text("nope")
+
+    def test_experiment_vector_store_round_trip_and_model_report(self, store: dict) -> None:
+        provider = DeterministicEmbeddingProvider()
+        vectors = pg.SQLExperimentEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        experiment_id = str(store["experiment_id"])
+        assert vectors.get_embedding_model(experiment_id) is None
+        [vector] = provider.embed_batch(["momentum"])
+        vectors.upsert_embedding(experiment_id, vector, model_id=provider.model_id)
+        assert vectors.get_embedding_model(experiment_id) == provider.model_id
+        assert vectors.get_embedding_model(str(uuid.uuid4())) is None
+
+    def test_experiment_vector_store_refuses_bad_writes(self, store: dict) -> None:
+        vectors = pg.SQLExperimentEmbeddingVectorStore(store["factory"], model_id=FAKE_MODEL_ID)
+        experiment_id = str(store["experiment_id"])
+        with pytest.raises(KnowledgeValidationError):
+            vectors.upsert_embedding(experiment_id, [0.1, 0.2], model_id=FAKE_MODEL_ID)
+        [vector] = DeterministicEmbeddingProvider().embed_batch(["momentum"])
+        with pytest.raises(KnowledgeValidationError):
+            vectors.upsert_embedding(experiment_id, vector, model_id="other-model/v1")
+        with pytest.raises(KnowledgeError):
+            vectors.upsert_embedding(str(uuid.uuid4()), vector, model_id=FAKE_MODEL_ID)
+        with pytest.raises(KnowledgeValidationError):
+            vectors.upsert_embedding("nope", vector, model_id=FAKE_MODEL_ID)
+        with pytest.raises(KnowledgeValidationError):
+            vectors.get_embedding_model("nope")
+        with pytest.raises(KnowledgeValidationError):
+            pg.SQLExperimentEmbeddingVectorStore(store["factory"], model_id="  ")
+
     def test_refresh_search_documents_sqlite(self, store: dict) -> None:
         assert pg.refresh_finding_search_documents(store["factory"]) == 2
         with store["factory"]() as session:
@@ -568,6 +706,28 @@ class TestRetrievalService:
         page = service.search("momentum backtest", kinds=("finding", "experiment"), filters={}, limit=10, offset=0)
         assert page.total and page.total >= 1
 
+    def test_search_with_test_fake_provider_covers_experiments(self, store: dict) -> None:
+        provider = DeterministicEmbeddingProvider()
+        backfill_findings_embeddings(
+            provider,
+            pg.SQLFindingTextSource(store["factory"]),
+            pg.SQLEmbeddingVectorStore(store["factory"], model_id=provider.model_id),
+            [str(store["finding_id"]), str(store["failure_finding_id"])],
+        )
+        experiment_texts = pg.SQLExperimentTextSource(store["factory"])
+        experiment_vectors = pg.SQLExperimentEmbeddingVectorStore(store["factory"], model_id=provider.model_id)
+        for key in ("experiment_id", "failure_experiment_id"):
+            text = experiment_texts.get_experiment_text(str(store[key]))
+            assert text is not None
+            [vector] = provider.embed_batch([text])
+            experiment_vectors.upsert_embedding(str(store[key]), vector, model_id=provider.model_id)
+        service = pg.KnowledgeRetrievalService(store["factory"], embedding_provider=provider)
+        page = service.search("momentum backtest", kinds=("finding", "experiment"), filters={}, limit=10, offset=0)
+        by_id = {doc.id: doc for doc in page.documents}
+        assert str(store["experiment_id"]) in by_id
+        assert "vector" in by_id[str(store["experiment_id"])].payload["channels"]
+        assert "vector" in by_id[str(store["finding_id"])].payload["channels"]
+
     def test_search_without_provider_skips_vector(self, store: dict) -> None:
         service = pg.KnowledgeRetrievalService(store["factory"])
         assert service.embedding_provider is None
@@ -607,6 +767,12 @@ class TestPostgresCompilation:
         dialect = postgresql.dialect()
         sql = str(pg._finding_vector_statement("[0.1,0.2]").compile(dialect=dialect))
         assert "<=>" in sql and "VECTOR(768)" in sql and "embedding IS NOT NULL" in sql
+
+    def test_experiment_vector_statement_renders_pgvector_operator(self) -> None:
+        dialect = postgresql.dialect()
+        sql = str(pg._experiment_vector_statement("[0.1,0.2]").compile(dialect=dialect))
+        assert "<=>" in sql and "VECTOR(768)" in sql and "embedding IS NOT NULL" in sql
+        assert "experiment" in sql and "started_at" in sql
 
     def test_reindex_update_renders_tsvector(self) -> None:
         dialect = postgresql.dialect()

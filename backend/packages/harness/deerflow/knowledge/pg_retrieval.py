@@ -20,6 +20,8 @@ retrieval plane defines to the real KB tables (migrations
 * :class:`SQLFindingTextSource` / :class:`SQLEmbeddingVectorStore` →
   :class:`deerflow.knowledge.embeddings.FindingTextSource` /
   :class:`deerflow.knowledge.embeddings.EmbeddingVectorStore`
+* :class:`SQLExperimentTextSource` / :class:`SQLExperimentEmbeddingVectorStore` →
+  the experiment text/vector boundaries (Phase 3 experiment embeddings)
 
 Canonical store is PostgreSQL; SQLite works for dev/test with identical
 filter semantics (ranking differs only where the portable fallback must:
@@ -63,13 +65,15 @@ Dialect behavior:
   LIKE fallback scores ``title + text`` with
   :func:`deerflow.knowledge.retrieval.planner.like_fallback_idf_scores`
   (IDF-weighted token overlap, BM25-lite) and keeps only positive scores.
-* Vector: Phase 2 embeddings exist on ``finding`` rows only, so the vector
-  channel searches findings (exact scan first per the KB — HNSW only after
-  benchmarking). PostgreSQL orders by the ``<=>`` cosine-distance operator
-  with the query vector sent as ``CAST(:qv AS VECTOR(768))`` text, so no
-  ``pgvector`` Python package is needed; SQLite scores the JSON fallback
-  with the brute-force :func:`cosine_similarity <deerflow.knowledge.retrieval.planner.cosine_similarity>`
-  kernel.
+* Vector: Phase 3 embeds ``finding`` and ``experiment`` rows alike, so
+  the vector channel searches both tables (exact scan first per the KB —
+  HNSW only after benchmarking) and merges the two row sets in Python
+  before screening. PostgreSQL orders by the ``<=>`` cosine-distance
+  operator with the query vector sent as ``CAST(:qv AS VECTOR(768))``
+  text, so no ``pgvector`` Python package is needed; SQLite scores the
+  JSON fallback with the brute-force :func:`cosine_similarity <deerflow.knowledge.retrieval.planner.cosine_similarity>`
+  kernel. Rows without embeddings (NULL, not yet backfilled) never match
+  on any dialect.
 * Query text reaches PostgreSQL FTS only through ``plainto_tsquery`` with
   bound parameters, so FTS query-syntax injection is impossible by
   construction.
@@ -144,6 +148,8 @@ __all__ = [
     "SQLExperimentLookupStore",
     "SQLFindingTextSource",
     "SQLEmbeddingVectorStore",
+    "SQLExperimentTextSource",
+    "SQLExperimentEmbeddingVectorStore",
     "KnowledgeRetrievalService",
     "finding_row_to_candidate",
     "experiment_row_to_candidate",
@@ -481,11 +487,19 @@ def _assumption_fts_statement(query_text: str):
 
 
 def _finding_vector_statement(literal: str):
-    """Build the PostgreSQL exact cosine select (``<=>`` over ``VECTOR(768)``)."""
+    """Build the PostgreSQL exact cosine select over findings (``<=>`` over ``VECTOR(768)``)."""
     from sqlalchemy import Text
 
     probe = FindingRow.embedding.op("<=>")(bindparam("qv", value=literal, type_=Text()).cast(NativeVector(EMBEDDING_DIM)))
     return select(FindingRow, probe.label("vec_distance")).where(FindingRow.embedding.is_not(None)).order_by(probe.asc(), FindingRow.recorded_at.desc().nulls_last(), FindingRow.id.asc())
+
+
+def _experiment_vector_statement(literal: str):
+    """Build the PostgreSQL exact cosine select over experiments (``<=>`` over ``VECTOR(768)``)."""
+    from sqlalchemy import Text
+
+    probe = ExperimentRow.embedding.op("<=>")(bindparam("qv", value=literal, type_=Text()).cast(NativeVector(EMBEDDING_DIM)))
+    return select(ExperimentRow, probe.label("vec_distance")).where(ExperimentRow.embedding.is_not(None)).order_by(probe.asc(), ExperimentRow.started_at.desc().nulls_last(), ExperimentRow.id.asc())
 
 
 def _finding_reindex_update(target_ids):
@@ -612,7 +626,7 @@ def _vector_literal(vector: Sequence[float]) -> str:
     """
     values = list(vector)
     if len(values) != EMBEDDING_DIM:
-        raise KnowledgeValidationError(f"query_embedding has dimension {len(values)}, expected {EMBEDDING_DIM} (the finding VECTOR column width).")
+        raise KnowledgeValidationError(f"query_embedding has dimension {len(values)}, expected {EMBEDDING_DIM} (the KB VECTOR column width).")
     parts: list[str] = []
     for component in values:
         if not isinstance(component, (int, float)) or isinstance(component, bool) or not math.isfinite(component):
@@ -622,13 +636,15 @@ def _vector_literal(vector: Sequence[float]) -> str:
 
 
 class SQLVectorSearchStore(_ChannelStoreBase):
-    """``VectorSearchStore`` over finding embeddings (exact scan first).
+    """``VectorSearchStore`` over finding + experiment embeddings (exact scan first).
 
-    Phase 2 embeddings exist on ``finding`` rows only, so only the
-    ``finding``/``failure`` kinds can match; other requested kinds simply
-    contribute no rows. PostgreSQL orders by the ``<=>`` cosine-distance
-    operator with the query vector bound as ``CAST(:qv AS VECTOR(768))``
-    text (no ``pgvector`` Python package required); every other dialect
+    Phase 3 embeds both tables, so the ``finding``/``experiment``/``failure``
+    kinds can all match (``failure`` draws from both tables: failed
+    experiments map to kind ``"failure"``, as do failure findings); other
+    requested kinds simply contribute no rows. PostgreSQL orders each table
+    by the ``<=>`` cosine-distance operator with the query vector bound as
+    ``CAST(:qv AS VECTOR(768))`` text (no ``pgvector`` Python package
+    required) and merges the two row sets in Python; every other dialect
     scores the JSON fallback with the brute-force cosine kernel. Rows
     without embeddings (NULL, not yet backfilled) never match on any
     dialect; malformed stored vectors are skipped with a warning so one
@@ -636,7 +652,7 @@ class SQLVectorSearchStore(_ChannelStoreBase):
     """
 
     def vector_search(self, query_embedding: Sequence[float], scope: ScopeFilter, *, kinds: Sequence[str], limit: int) -> list[Candidate]:
-        """Return up to ``limit`` embedded findings nearest the query, best-first."""
+        """Return up to ``limit`` embedded findings/experiments nearest the query, best-first."""
         literal = _vector_literal(query_embedding)
         with self._sessions() as session:
             if _dialect_name(session) == "postgresql":
@@ -644,38 +660,56 @@ class SQLVectorSearchStore(_ChannelStoreBase):
             return self._search_portable(session, query_embedding, scope, kinds, limit)
 
     def _search_portable(self, session: Session, query_embedding: Sequence[float], scope: ScopeFilter, kinds: Sequence[str], limit: int) -> list[Candidate]:
-        """Brute-force cosine search over the SQLite JSON fallback."""
+        """Brute-force cosine search over the SQLite JSON fallback (both tables)."""
         wanted = frozenset(kinds)
-        if not self._wants(kinds, _FINDING_PLANNER_KINDS):
+        want_findings = self._wants(kinds, _FINDING_PLANNER_KINDS)
+        want_experiments = self._wants(kinds, _EXPERIMENT_PLANNER_KINDS)
+        if not want_findings and not want_experiments:
             return []
         query = tuple(float(component) for component in query_embedding)
         scored: list[tuple[float, Candidate]] = []
-        for row in session.scalars(select(FindingRow).where(FindingRow.embedding.is_not(None))):
-            candidate = finding_row_to_candidate(row)
-            if candidate.kind not in wanted:
-                continue
-            stored = row.embedding
-            if not isinstance(stored, Sequence) or isinstance(stored, (str, bytes)) or not stored:
-                logger.warning("SQLVectorSearchStore: skipping finding %s with malformed stored embedding", row.id)
-                continue
-            try:
-                score = cosine_similarity(query, tuple(float(component) for component in stored))
-            except (KnowledgeValidationError, ValueError, TypeError):
-                logger.warning("SQLVectorSearchStore: skipping finding %s with malformed stored embedding", row.id)
-                continue
-            scored.append((score, candidate))
+        if want_findings:
+            for row in session.scalars(select(FindingRow).where(FindingRow.embedding.is_not(None))):
+                candidate = finding_row_to_candidate(row)
+                if candidate.kind not in wanted:
+                    continue
+                score = self._portable_score(query, row.embedding, label=f"finding {row.id}")
+                if score is not None:
+                    scored.append((score, candidate))
+        if want_experiments:
+            for row in session.scalars(select(ExperimentRow).where(ExperimentRow.embedding.is_not(None))):
+                candidate = experiment_row_to_candidate(row)
+                if candidate.kind not in wanted:
+                    continue
+                score = self._portable_score(query, row.embedding, label=f"experiment {row.id}")
+                if score is not None:
+                    scored.append((score, candidate))
         survivors = _screen([item for _, item in scored], scope)
         survivor_ids = {item.id for item in survivors}
         kept = [(score, item) for score, item in scored if item.id in survivor_ids]
         by_id = {item.id: score for score, item in kept}
         return _stable_order([item for _, item in kept], score_fn=lambda item: by_id[item.id])[:limit]
 
+    @staticmethod
+    def _portable_score(query: tuple[float, ...], stored: Any, *, label: str) -> float | None:
+        """Score one stored vector, returning None (with a warning) when malformed."""
+        if not isinstance(stored, Sequence) or isinstance(stored, (str, bytes)) or not stored:
+            logger.warning("SQLVectorSearchStore: skipping %s with malformed stored embedding", label)
+            return None
+        try:
+            return cosine_similarity(query, tuple(float(component) for component in stored))
+        except (KnowledgeValidationError, ValueError, TypeError):
+            logger.warning("SQLVectorSearchStore: skipping %s with malformed stored embedding", label)
+            return None
+
     def _search_postgres(self, session: Session, literal: str, scope: ScopeFilter, kinds: Sequence[str], limit: int) -> list[Candidate]:
-        """Exact cosine search with the ``<=>`` operator (NULLs excluded)."""
+        """Exact cosine search with the ``<=>`` operator (NULLs excluded, both tables)."""
         wanted = frozenset(kinds)
-        if not self._wants(kinds, _FINDING_PLANNER_KINDS):
-            return []
-        rows = [(float(distance), finding_row_to_candidate(row)) for row, distance in session.execute(_finding_vector_statement(literal))]
+        rows: list[tuple[float, Candidate]] = []
+        if self._wants(kinds, _FINDING_PLANNER_KINDS):
+            rows.extend((float(distance), finding_row_to_candidate(row)) for row, distance in session.execute(_finding_vector_statement(literal)))
+        if self._wants(kinds, _EXPERIMENT_PLANNER_KINDS):
+            rows.extend((float(distance), experiment_row_to_candidate(row)) for row, distance in session.execute(_experiment_vector_statement(literal)))
         rows = [(distance, item) for distance, item in rows if item.kind in wanted]
         survivors = _screen([item for _, item in rows], scope)
         survivor_ids = {item.id for item in survivors}
@@ -871,6 +905,124 @@ class SQLEmbeddingVectorStore:
             row = session.get(FindingRow, key)
             if row is None:
                 raise KnowledgeError(f"Finding not found: {finding_id}")
+            row.embedding = checked
+            session.commit()
+
+
+class SQLExperimentTextSource:
+    """Experiment text source: canonical embeddable text per experiment id.
+
+    Renders the hypothesis (title) plus the full lexical surface
+    (:func:`_experiment_text` — hypothesis, parameters summary, outcome /
+    failure class) with :func:`render_embeddable_text` so backfills embed
+    exactly what the retrieval surface ranks.
+    """
+
+    def __init__(self, session_factory: Callable[[], Session]) -> None:
+        """Bind the source to a zero-argument session factory."""
+        self._sessions = session_factory
+
+    def get_experiment_text(self, experiment_id: str) -> str | None:
+        """Return the embeddable text for ``experiment_id``, or None when missing.
+
+        Raises:
+            KnowledgeValidationError: When ``experiment_id`` is not a UUID.
+        """
+        try:
+            key = uuid.UUID(experiment_id.strip() if isinstance(experiment_id, str) else "")
+        except (ValueError, AttributeError):
+            raise KnowledgeValidationError(f"experiment_id must be a valid UUID, got {experiment_id!r}.") from None
+        with self._sessions() as session:
+            row = session.get(ExperimentRow, key)
+            if row is None:
+                return None
+            return render_embeddable_text(title=row.hypothesis or "", body=_experiment_text(row) or "")
+
+
+class SQLExperimentEmbeddingVectorStore:
+    """Experiment vector store: persist experiment vectors beside their rows.
+
+    Writes go to ``experiment.embedding`` (native ``VECTOR(768)`` on
+    PostgreSQL, JSON fallback on SQLite). Every upserted vector is
+    fail-closed-validated (exactly :data:`EMBEDDING_DIM` finite floats);
+    unknown experiment ids raise :class:`KnowledgeError` so backfills record
+    them as failures instead of silently dropping them.
+
+    Model identity mirrors :class:`SQLEmbeddingVectorStore`: the Phase 3
+    schema carries no per-row model stamp, so this store operates in
+    single-model mode — :meth:`get_embedding_model` reports the configured
+    ``model_id`` whenever a vector is present. Switching embedding models
+    must therefore backfill with ``skip_up_to_date=False``.
+    """
+
+    def __init__(self, session_factory: Callable[[], Session], *, model_id: str = FAKE_MODEL_ID) -> None:
+        """Bind the store to a session factory plus its single model id.
+
+        Raises:
+            KnowledgeValidationError: When ``model_id`` is empty.
+        """
+        if not isinstance(model_id, str) or not model_id.strip():
+            raise KnowledgeValidationError("model_id must be a non-empty string.")
+        self._sessions = session_factory
+        self._model_id = model_id.strip()
+
+    @property
+    def model_id(self) -> str:
+        """The model id this store writes and reports."""
+        return self._model_id
+
+    def get_embedding_model(self, experiment_id: str) -> str | None:
+        """Return the model id of the stored vector, or None when unembedded.
+
+        Unknown experiment ids also return None (the backfill reports them as
+        missing once the text source likewise misses).
+
+        Raises:
+            KnowledgeValidationError: When ``experiment_id`` is not a UUID.
+        """
+        try:
+            key = uuid.UUID(experiment_id.strip() if isinstance(experiment_id, str) else "")
+        except (ValueError, AttributeError):
+            raise KnowledgeValidationError(f"experiment_id must be a valid UUID, got {experiment_id!r}.") from None
+        with self._sessions() as session:
+            row = session.get(ExperimentRow, key)
+            if row is None or row.embedding is None:
+                return None
+            return self._model_id
+
+    def upsert_embedding(self, experiment_id: str, vector: Sequence[float], *, model_id: str) -> None:
+        """Persist ``vector`` for ``experiment_id`` (validated, single-model).
+
+        Args:
+            experiment_id: Experiment UUID string.
+            vector: Exactly :data:`EMBEDDING_DIM` finite floats.
+            model_id: Must equal this store's :attr:`model_id` (vectors
+                from any other model are refused, never silently stored).
+
+        Raises:
+            KnowledgeValidationError: On a bad id, a malformed vector, or
+                a model-id mismatch.
+            KnowledgeError: When the experiment does not exist.
+        """
+        try:
+            key = uuid.UUID(experiment_id.strip() if isinstance(experiment_id, str) else "")
+        except (ValueError, AttributeError):
+            raise KnowledgeValidationError(f"experiment_id must be a valid UUID, got {experiment_id!r}.") from None
+        if not isinstance(model_id, str) or model_id.strip() != self._model_id:
+            raise KnowledgeValidationError(f"model_id {model_id!r} does not match this store's model {self._model_id!r}; refusing to mix models in one column.")
+        values = list(vector) if isinstance(vector, Sequence) and not isinstance(vector, (str, bytes)) else None
+        if values is None or len(values) != EMBEDDING_DIM:
+            got = "non-sequence" if values is None else f"dimension {len(values)}"
+            raise KnowledgeValidationError(f"vector for experiment {experiment_id} has {got}, expected {EMBEDDING_DIM} (the experiment VECTOR column width).")
+        checked: list[float] = []
+        for position, entry in enumerate(values):
+            if not isinstance(entry, (int, float)) or isinstance(entry, bool) or not math.isfinite(entry):
+                raise KnowledgeValidationError(f"vector for experiment {experiment_id} entry {position} is not a finite float (got {entry!r}).")
+            checked.append(float(entry))
+        with self._sessions() as session:
+            row = session.get(ExperimentRow, key)
+            if row is None:
+                raise KnowledgeError(f"Experiment not found: {experiment_id}")
             row.embedding = checked
             session.commit()
 

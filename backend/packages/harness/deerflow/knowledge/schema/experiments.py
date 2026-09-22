@@ -15,6 +15,13 @@ run reproducible. Two signatures separate concerns:
 (role-qualified edges). ``assumption`` records the explicit assumptions
 an experiment depends on (category, sensitivity, tested flag, status)
 instead of burying them in prose.
+
+Phase 3 adds the nullable ``embedding`` retrieval column (768
+dimensions, mirroring ``FindingRow``): native ``VECTOR(768)``
+(pgvector) on PostgreSQL, plain ``JSON`` holding a list of floats on
+SQLite with exact round-trip. It is populated asynchronously by
+embedding workers (NULL until indexed); Phase 3 runs exact search and
+defers any approximate index.
 """
 
 from __future__ import annotations
@@ -25,6 +32,7 @@ from datetime import datetime
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
 
+from deerflow.knowledge.schema.findings import embedding_vector
 from deerflow.knowledge.schema.types import (
     ASSUMPTION_CATEGORIES,
     ASSUMPTION_SENSITIVITIES,
@@ -87,6 +95,10 @@ class ExperimentRow(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    # Phase 3 retrieval column: native ``VECTOR(768)`` on PostgreSQL, JSON
+    # fallback on SQLite (see :class:`.findings.EmbeddingVector`). Nullable:
+    # rows stay retrievable while unembedded (NULL until backfilled).
+    embedding: Mapped[list[float] | None] = mapped_column(embedding_vector(), nullable=True)
 
     __table_args__ = (
         sa.UniqueConstraint("execution_hash", name="uq_experiment_execution_hash"),

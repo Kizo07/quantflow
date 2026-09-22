@@ -47,10 +47,12 @@ from deerflow.knowledge.schema.experiments import (
 )
 from deerflow.knowledge.schema.research import AgentRunRow, ResearchProjectRow
 from deerflow.persistence.base import Base
+from deerflow.persistence.migrations import _helpers as migration_helpers
 
 # Digit-prefixed migration modules are not importable with a plain import
 # statement; importlib handles the dotted name fine.
 migration = importlib.import_module("deerflow.persistence.migrations.versions.0022_knowledge_phase1")
+migration_0028 = importlib.import_module("deerflow.persistence.migrations.versions.0028_knowledge_experiment_embeddings")
 
 KB_TABLES: tuple[str, ...] = (
     "research_project",
@@ -140,23 +142,32 @@ def _seed_graph() -> dict[str, object]:
     }
 
 
-def _run_migration(engine: sa.Engine, direction: str) -> None:
-    """Execute the migration's upgrade/downgrade against *engine*.
+def _run_migration(engine: sa.Engine, direction: str, module=None) -> None:
+    """Execute a migration module's upgrade/downgrade against *engine*.
 
-    Rebinds the migration module's ``op`` proxy to an ``Operations``
-    bound to this connection (public API only; no private patching).
+    Rebinds the module's ``op`` proxy to an ``Operations`` bound to this
+    connection (public API only; no private patching). Defaults to the
+    0022 revision under test; pass ``migration_0028`` for the Phase 3
+    experiment-embedding column.
     """
+    target = module if module is not None else migration
     with engine.begin() as connection:
         context = MigrationContext.configure(connection, opts={"render_as_batch": True})
-        original_op = migration.op
-        migration.op = Operations(context)
+        ops = Operations(context)
+        original_op = target.op
+        original_helpers_op = migration_helpers.op
+        target.op = ops
+        # Column revisions (0028) act through ``_helpers.safe_*``; their
+        # module holds its own ``op`` proxy, so bind it as well.
+        migration_helpers.op = ops
         try:
             if direction == "upgrade":
-                migration.upgrade()
+                target.upgrade()
             else:
-                migration.downgrade()
+                target.downgrade()
         finally:
-            migration.op = original_op
+            target.op = original_op
+            migration_helpers.op = original_helpers_op
 
 
 class TestRevisionChain:
@@ -165,14 +176,14 @@ class TestRevisionChain:
         assert migration.down_revision == "0019_thread_incarnations"
 
     def test_single_head_is_new_revision(self) -> None:
-        # Phase 2 landed revision 0023 on top of this one, and the upstream
-        # merge added 0027 on top of that; the head pin follows the chain
-        # tip (single head, no branches).
+        # Phase 2 landed revision 0023 on top of this one, the upstream
+        # merge added 0027 on top of that, and Phase 3 added 0028; the
+        # head pin follows the chain tip (single head, no branches).
         migrations_dir = Path(migration.__file__).resolve().parent.parent
         config = Config()
         config.set_main_option("script_location", migrations_dir.as_posix())
         script = ScriptDirectory.from_config(config)
-        assert script.get_heads() == ["0027_merge_knowledge_upstream"]
+        assert script.get_heads() == ["0028_knowledge_experiment_embeddings"]
 
 
 class TestModels:
@@ -521,6 +532,9 @@ class TestMigration:
         engine = _engine(tmp_path, "mig-orm.db")
         try:
             _run_migration(engine, "upgrade")
+            # The ORM carries the Phase 3 ``experiment.embedding`` column,
+            # so the migrated schema needs revision 0028 on top of 0022.
+            _run_migration(engine, "upgrade", migration_0028)
             graph = _seed_graph()
             with Session(engine, expire_on_commit=False) as session:
                 session.add_all(

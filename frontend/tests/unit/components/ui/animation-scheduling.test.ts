@@ -19,25 +19,15 @@ describe("decorative animation scheduling", () => {
     );
   });
 
-  it("scopes and coalesces Magic Bento spotlight pointer work", () => {
+  it("honors reduced motion for hero decoration and word rotation", () => {
     const source = readFileSync(
-      join(
-        frontendRoot,
-        "src/components/landing/sections/whats-new-section.tsx",
-      ),
+      join(frontendRoot, "src/components/landing/hero.tsx"),
       "utf8",
     );
 
-    expect(source).toContain("useRenderActivity");
-    expect(source).toContain("enableSpotlight={false}");
-    expect(source).toContain('import("@/components/ui/magic-bento")');
-    expect(source).toContain("ssr: false");
-    expect(source).toContain(
-      "useRenderActivity(bentoContainerRef, false, false)",
-    );
-    expect(source).toContain("disableAnimations={reducedMotion}");
-    expect(source).toContain('container.addEventListener("pointermove"');
-    expect(source).toContain("pendingPointerFrame");
+    expect(source).toContain("usePrefersReducedMotion");
+    expect(source).toContain("{!reducedMotion && (");
+    expect(source).toContain("if (reducedMotion) return;");
   });
 
   it("does not load the skills animation before its section is visible", () => {

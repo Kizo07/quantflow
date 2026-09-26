@@ -6,10 +6,12 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import { AuroraText } from "@/components/ui/aurora-text";
 import { Button } from "@/components/ui/button";
 import { FlickeringGrid } from "@/components/ui/flickering-grid";
-import { useRenderActivity } from "@/core/dom/render-activity";
+import {
+  usePrefersReducedMotion,
+  useRenderActivity,
+} from "@/core/dom/render-activity";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
@@ -17,23 +19,23 @@ const Galaxy = dynamic(() => import("@/components/ui/galaxy"), { ssr: false });
 
 const HERO_WORDS = [
   "Deep Research",
-  "Collect Data",
-  "Analyze Data",
-  "Generate Webpages",
-  "Vibe Coding",
-  "Generate Slides",
-  "Generate Images",
-  "Generate Podcasts",
-  "Generate Videos",
-  "Generate Songs",
-  "Organize Emails",
-  "Do Anything",
+  "Screen Markets",
+  "Score Signals",
+  "Run Backtests",
+  "Debate Bull vs Bear",
+  "Build Portfolios",
+  "Attribute Returns",
+  "Publish Reports",
+  "Read Filings",
+  "Track Catalysts",
   "Learn Anything",
+  "Do Anything",
 ];
 
 export function Hero({ className }: { className?: string }) {
   const galaxyContainerRef = useRef<HTMLDivElement>(null);
   const renderGalaxy = useRenderActivity(galaxyContainerRef);
+  const reducedMotion = usePrefersReducedMotion();
 
   return (
     <div
@@ -57,14 +59,16 @@ export function Hero({ className }: { className?: string }) {
           />
         )}
       </div>
-      <FlickeringGrid
-        className="absolute inset-0 z-0 mask-[url(/images/quantflow-wordmark.svg)] mask-size-[100vw] mask-center mask-no-repeat md:mask-size-[72vh]"
-        squareSize={4}
-        gridGap={4}
-        color={"white"}
-        maxOpacity={0.3}
-        flickerChance={0.25}
-      />
+      {!reducedMotion && (
+        <FlickeringGrid
+          className="absolute inset-0 z-0 mask-[url(/images/quantflow-wordmark.svg)] mask-size-[100vw] mask-center mask-no-repeat md:mask-size-[72vh]"
+          squareSize={4}
+          gridGap={4}
+          color={"white"}
+          maxOpacity={0.3}
+          flickerChance={0.25}
+        />
+      )}
       <div className="container-md relative z-10 mx-auto flex min-h-[92svh] flex-col items-center justify-center px-4 pt-20 pb-14">
         <h1 className="text-center text-5xl leading-tight font-bold break-words md:text-6xl">
           QuantFlow
@@ -86,13 +90,14 @@ export function Hero({ className }: { className?: string }) {
           </a>
         )}
         <p className="text-muted-foreground mt-8 max-w-4xl text-center text-base leading-7 text-shadow-sm sm:text-xl md:text-2xl">
-          An open-source SuperAgent harness that researches, codes, and creates.
-          With the help of sandboxes, memories, tools, skills and subagents, it
-          handles different levels of tasks that could take minutes to hours.
+          A quantitative-research SuperAgent: it screens markets, debates bull
+          versus bear, backtests ideas, and publishes sourced reports. With the
+          help of sandboxes, memories, tools, skills and subagents, it handles
+          different levels of tasks that could take minutes to hours.
         </p>
         <Link href="/workspace">
           <Button className="mt-8 h-11 px-5" size="lg">
-            <span className="text-md">Get Started with 2.0</span>
+            <span className="text-md">Get Started with QuantFlow</span>
             <ChevronRightIcon className="size-4" />
           </Button>
         </Link>
@@ -109,14 +114,24 @@ function HeroWordRotate({
   duration?: number;
 }) {
   const [index, setIndex] = useState(0);
+  const reducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
+    if (reducedMotion) return;
     const interval = setInterval(() => {
       setIndex((prevIndex) => (prevIndex + 1) % words.length);
     }, duration);
 
     return () => clearInterval(interval);
-  }, [words, duration]);
+  }, [words, duration, reducedMotion]);
+
+  if (reducedMotion) {
+    return (
+      <span className="text-km-gold max-w-full [overflow-wrap:anywhere] whitespace-normal">
+        {words[0]}
+      </span>
+    );
+  }
 
   return (
     <div className="relative max-w-full min-w-0 overflow-hidden py-2">
@@ -129,13 +144,9 @@ function HeroWordRotate({
           exit={{ opacity: 0, y: 50, filter: "blur(16px)" }}
           transition={{ duration: 0.3, ease: "easeOut" }}
         >
-          <AuroraText
-            className="max-w-full [overflow-wrap:anywhere] whitespace-normal"
-            speed={3}
-            colors={["#f1d59c", "#e3ac55", "#cf9440"]}
-          >
+          <span className="text-km-gold max-w-full [overflow-wrap:anywhere] whitespace-normal">
             {words[index]}
-          </AuroraText>
+          </span>
         </motion.div>
       </AnimatePresence>
     </div>

@@ -48,7 +48,9 @@ export function CaseStudySection({ className }: { className?: string }) {
   ];
   return (
     <Section
+      id="case-studies"
       className={className}
+      kicker="In the wild"
       title="Case Studies"
       subtitle="See how QuantFlow is used in the wild"
     >

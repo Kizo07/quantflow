@@ -16,8 +16,12 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "QuantFlow",
   description:
-    "QuantFlow — a personal SuperAgent workspace that researches, codes, and creates. Built on the open-source DeerFlow harness.",
+    "QuantFlow — a personal SuperAgent workspace that researches, codes, and creates. Built on an open-source super-agent harness.",
 };
+
+// Pre-paint theme shim (mirrors the website site.js contract): resolve the
+// persisted mode before first paint so a future light landing never flashes.
+const themeInitScript = `(function(){try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark"){t="dark"}document.documentElement.setAttribute("data-theme",t);var m=document.querySelector('meta[name="theme-color"]');if(m){m.setAttribute("content",t==="dark"?"#020609":"#f5faff")}}catch(e){}})();`;
 
 export default function RootLayout({
   children,
@@ -28,6 +32,13 @@ export default function RootLayout({
       suppressContentEditableWarning
       suppressHydrationWarning
     >
+      <head>
+        <meta name="theme-color" content="#020609" />
+        {/* Site ships its own dark mode; keep Dark Reader from rewriting the
+            DOM and tripping React hydration mismatches. */}
+        <meta name="darkreader-lock" />
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body className={`${inter.variable} ${plexMono.variable}`}>
         <ThemeProvider attribute="class" enableSystem disableTransitionOnChange>
           {children}

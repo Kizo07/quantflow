@@ -89,6 +89,22 @@
   --font-mono:
     var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, Consolas,
     monospace;
+  --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  /* QuantFlow "Cyan Ledger" website palette in Tailwind v4 form.
+     Light (ice) values here; `.dark` below overrides with midnight values. */
+  --color-km-bg: #f5faff;
+  --color-km-bg-soft: #ecf4fa;
+  --color-km-surface: #ffffff;
+  --color-km-surface-2: #e5f0f8;
+  --color-km-text: #102d42;
+  --color-km-muted: #445e72;
+  --color-km-faint: #5f7b8f;
+  --color-km-cyan: #006d9f;
+  --color-km-cyan-bright: #009ed9;
+  --color-km-gold: #b57d2e;
+  --color-km-gold-bright: #cf9440;
+  --color-km-line: rgba(17, 93, 133, 0.17);
 
   --animate-fade-in: fade-in 1.1s;
   @keyframes fade-in {
@@ -290,6 +306,18 @@ html.dark .shiki span {
 }
 
 .dark {
+  --color-km-bg: #020609;
+  --color-km-bg-soft: #050c12;
+  --color-km-surface: #07131d;
+  --color-km-surface-2: #0b1c28;
+  --color-km-text: #edf7fc;
+  --color-km-muted: #a1b4c4;
+  --color-km-faint: #819aaa;
+  --color-km-cyan: #08bfff;
+  --color-km-cyan-bright: #36ceff;
+  --color-km-gold: #e3ac55;
+  --color-km-gold-bright: #f1d59c;
+  --color-km-line: rgba(86, 183, 229, 0.17);
   --background: #020609;
   --foreground: #edf7fc;
   --card: #07131d;
@@ -405,6 +433,13 @@ html.dark .shiki span {
 
   .ambilight:after {
     filter: blur(60px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ambilight:before,
+    .ambilight:after {
+      animation: none;
+    }
   }
 
   .golden-text {

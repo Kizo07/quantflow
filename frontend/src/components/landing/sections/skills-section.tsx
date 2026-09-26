@@ -19,7 +19,9 @@ export function SkillsSection({ className }: { className?: string }) {
 
   return (
     <Section
-      className={cn("h-[calc(100vh-64px)] w-full bg-white/2", className)}
+      id="skills"
+      className={cn("h-[calc(100vh-64px)] w-full", className)}
+      kicker="Harness · Skills"
       title="Agent Skills"
       subtitle={
         <div>

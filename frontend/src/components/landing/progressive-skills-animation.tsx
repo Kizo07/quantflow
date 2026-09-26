@@ -405,11 +405,11 @@ export default function ProgressiveSkillsAnimation() {
                   item.done
                     ? "text-green-500"
                     : item.dragging
-                      ? "translate-x-8 scale-105 text-blue-400"
+                      ? "text-km-cyan-bright translate-x-8 scale-105"
                       : item.active
                         ? "text-white"
                         : item.highlight
-                          ? "text-purple-400"
+                          ? "text-km-cyan"
                           : "text-zinc-600"
                 }`}
                 style={{ paddingLeft: `${item.indent * 24}px` }}
@@ -429,7 +429,7 @@ export default function ProgressiveSkillsAnimation() {
                       item.done
                         ? "text-green-500"
                         : item.highlight
-                          ? "text-purple-400"
+                          ? "text-km-cyan"
                           : ""
                     }
                   />
@@ -440,7 +440,7 @@ export default function ProgressiveSkillsAnimation() {
                       item.done
                         ? "text-green-500"
                         : item.highlight
-                          ? "text-purple-400"
+                          ? "text-km-cyan"
                           : ""
                     }
                   />
@@ -448,7 +448,7 @@ export default function ProgressiveSkillsAnimation() {
                 <span>{item.name}</span>
                 {item.done && <Check size={16} className="text-green-500" />}
                 {item.highlight && !item.done && (
-                  <Sparkles size={16} className="text-purple-400" />
+                  <Sparkles size={16} className="text-km-cyan" />
                 )}
               </motion.div>
             ))}
@@ -478,7 +478,7 @@ export default function ProgressiveSkillsAnimation() {
                   animate={{ opacity: 1, y: 0 }}
                   className="flex justify-end"
                 >
-                  <div className="max-w-[90%] rounded-2xl rounded-tr-sm bg-blue-600 px-5 py-3">
+                  <div className="bg-km-cyan text-primary-foreground max-w-[90%] rounded-2xl rounded-tr-sm px-5 py-3">
                     <p className="text-base">
                       Research mRNA delivery, build a landing page, deploy to
                       Vercel
@@ -508,8 +508,9 @@ export default function ProgressiveSkillsAnimation() {
                     "deploying",
                     "done",
                   ].includes(phase) && (
-                    <div className="text-base text-zinc-300">
-                      <span className="text-purple-400">✨</span> Found 3 skills
+                    <div className="flex items-center gap-2 text-base text-zinc-300">
+                      <Sparkles size={16} className="text-km-cyan" />
+                      <span>Found 3 skills</span>
                     </div>
                   )}
 
@@ -526,8 +527,9 @@ export default function ProgressiveSkillsAnimation() {
                   ].includes(phase) && (
                     <div className="mt-4">
                       <hr className="mb-3 border-zinc-700" />
-                      <div className="mb-3 text-zinc-300">
-                        🔬 Researching...
+                      <div className="mb-3 flex items-center gap-2 text-zinc-300">
+                        <Search size={16} className="text-km-cyan" />
+                        <span>Researching...</span>
                       </div>
                       <div className="mb-3 space-y-2">
                         {/* Loading SKILL.md */}
@@ -576,7 +578,10 @@ export default function ProgressiveSkillsAnimation() {
                               className="flex items-center gap-2 text-sm text-zinc-500"
                             >
                               {step.type === "search" ? (
-                                <Search size={14} className="text-blue-400" />
+                                <Search
+                                  size={14}
+                                  className="text-km-cyan-bright"
+                                />
                               ) : (
                                 <Globe size={14} className="text-green-400" />
                               )}
@@ -601,7 +606,10 @@ export default function ProgressiveSkillsAnimation() {
                               className="flex items-center gap-2 text-sm text-zinc-500"
                             >
                               {step.type === "search" ? (
-                                <Search size={14} className="text-blue-400" />
+                                <Search
+                                  size={14}
+                                  className="text-km-cyan-bright"
+                                />
                               ) : (
                                 <Globe size={14} className="text-green-400" />
                               )}
@@ -623,7 +631,10 @@ export default function ProgressiveSkillsAnimation() {
                       className="mt-4"
                     >
                       <hr className="mb-3 border-zinc-700" />
-                      <div className="mb-3 text-zinc-300">🔨 Building...</div>
+                      <div className="mb-3 flex items-center gap-2 text-zinc-300">
+                        <Play size={16} className="text-km-cyan" />
+                        <span>Building...</span>
+                      </div>
                       <div className="mb-3 flex items-center gap-2 pl-4 text-zinc-400">
                         <FileText size={16} />
                         <span>Loading frontend-design/SKILL.md...</span>
@@ -653,7 +664,10 @@ export default function ProgressiveSkillsAnimation() {
                       className="mt-4"
                     >
                       <hr className="mb-3 border-zinc-700" />
-                      <div className="mb-3 text-zinc-300">🚀 Deploying...</div>
+                      <div className="mb-3 flex items-center gap-2 text-zinc-300">
+                        <Globe size={16} className="text-km-cyan" />
+                        <span>Deploying...</span>
+                      </div>
                       <div className="mb-3 space-y-2">
                         <div className="flex items-center gap-2 pl-4 text-zinc-400">
                           <FileText size={16} />
@@ -676,8 +690,9 @@ export default function ProgressiveSkillsAnimation() {
                           animate={{ opacity: 1, scale: 1 }}
                           className="mt-4 rounded-xl border border-green-500/30 bg-green-500/10 p-4"
                         >
-                          <div className="text-lg font-medium text-green-500">
-                            ✅ Live at biotech-startup.vercel.app
+                          <div className="flex items-center gap-2 text-lg font-medium text-green-500">
+                            <Check size={18} />
+                            <span>Live at biotech-startup.vercel.app</span>
                           </div>
                         </motion.div>
                       )}

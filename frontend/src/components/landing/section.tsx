@@ -5,18 +5,31 @@ export function Section({
   title,
   subtitle,
   children,
+  id,
+  kicker,
 }: {
   className?: string;
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   children: React.ReactNode;
+  id?: string;
+  kicker?: React.ReactNode;
 }) {
   return (
     <section
-      className={cn("mx-auto flex w-full min-w-0 flex-col py-16", className)}
+      id={id}
+      className={cn(
+        "mx-auto flex w-full min-w-0 scroll-mt-20 flex-col py-16",
+        className,
+      )}
     >
       <header className="flex flex-col items-center justify-between px-4">
-        <div className="mb-4 max-w-full bg-linear-to-r from-white via-gray-200 to-gray-400 bg-clip-text text-center text-3xl font-bold break-words text-transparent sm:text-4xl md:text-5xl">
+        {kicker && (
+          <p className="text-km-cyan mb-3 font-mono text-xs font-medium tracking-[0.2em] uppercase">
+            {kicker}
+          </p>
+        )}
+        <div className="text-foreground mb-4 max-w-full text-center text-3xl font-bold break-words sm:text-4xl md:text-5xl">
           {title}
         </div>
         {subtitle && (

@@ -4,8 +4,10 @@ Revision ID: 0018_oauth_identity_pg_partial
 Revises: 0017_personal_access_tokens
 Create Date: 2026-08-29
 
-alembic_version.version_num is VARCHAR(32); revision ids in this chain must
-stay at or under that length or stamping/upgrading a database fails outright.
+alembic's native alembic_version.version_num is VARCHAR(32); revision ids
+longer than that (e.g. the 36-char 0028 revision) fit because env.py widens
+the version table to TEXT on Postgres before alembic runs (see
+migrations/_version_table.py). No length budget applies to new revision ids.
 
 Numbering note: originally generated as 0017 against the then-current main
 head (0016), same as 0017_personal_access_tokens (#5041). That one merged

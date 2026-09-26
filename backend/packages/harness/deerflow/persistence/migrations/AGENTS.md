@@ -142,6 +142,7 @@ on installs that never enabled it. The convention is:
 - `migrations/_env_filters.py::include_object` — drops LangGraph checkpointer tables and any registered extension-owned tables (`EXTENSION_TABLE_PREFIXES`) from alembic's view
 - `migrations/_env_filters.py::register_configured_extension_table_prefixes` — populates that set inside the alembic process, reading `plugins[*].table_prefix` from `config.yaml` and never importing extension code; called at import from `migrations/env.py`, because `load_extensions()` only ever runs in the Gateway
 - `migrations/_helpers.py` — `safe_add_column` / `safe_drop_column`
+- `migrations/_version_table.py::ensure_wide_version_table` — called from `env.py::do_run_migrations` before alembic runs; pre-creates `alembic_version` with `TEXT` (or widens a legacy `VARCHAR(n)` column in place) on Postgres so revision ids longer than alembic's native `VARCHAR(32)` stamp cleanly. No-op on SQLite and on existing `TEXT` tables; new revision ids carry no length budget
 - `migrations/versions/0001_baseline.py` — chain root, matches the schema `create_all` produces from `Base.metadata`
 - `migrations/versions/0002_runs_token_usage.py` — fixes issue #3682
 - `migrations/versions/0004_run_ownership.py` — `runs` multi-worker ownership + the `uq_runs_thread_active` partial unique index, with a `_dedupe_active_runs_per_thread()` pre-step so `CREATE UNIQUE INDEX` cannot fail on a field DB that already has duplicate active rows per thread

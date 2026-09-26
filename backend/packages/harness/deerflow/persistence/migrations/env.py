@@ -27,6 +27,7 @@ from deerflow.persistence.migrations._env_filters import (
     include_object,
     register_configured_extension_table_prefixes,
 )
+from deerflow.persistence.migrations._version_table import ensure_wide_version_table
 
 # Re-export under the module namespace for any consumer that addresses them
 # via ``env.LANGGRAPH_OWNED_TABLES`` / ``env.include_object``.
@@ -77,6 +78,10 @@ def do_run_migrations(connection):
         include_object=include_object,
     )
     with context.begin_transaction():
+        # Alembic's native version table is VARCHAR(32), which overflows on
+        # long revision ids (0028 is 36 chars). Pre-create/widen it to TEXT on
+        # Postgres before alembic runs; no-op on SQLite and on TEXT tables.
+        ensure_wide_version_table(connection)
         context.run_migrations()
 
 

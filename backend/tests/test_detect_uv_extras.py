@@ -28,6 +28,9 @@ def isolated_cwd(tmp_path, monkeypatch):
     monkeypatch.delenv("UV_EXTRAS", raising=False)
     monkeypatch.delenv("DEER_FLOW_CONFIG_PATH", raising=False)
     monkeypatch.delenv("DEER_FLOW_STREAM_BRIDGE_REDIS_URL", raising=False)
+    monkeypatch.delenv("DEER_FLOW_SANDBOX_OWNERSHIP_REDIS_URL", raising=False)
+    monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_DSN", raising=False)
+    monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL", raising=False)
     return tmp_path
 
 
@@ -154,6 +157,67 @@ def test_detect_from_config_postgres_via_checkpointer(tmp_path):
     cfg = tmp_path / "config.yaml"
     cfg.write_text("checkpointer:\n  type: postgres\n  connection_string: postgresql://localhost/db\n")
     assert detect.detect_from_config(cfg) == ["postgres"]
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "postgresql+psycopg://fire@/quantflow_kb?host=/run/postgresql",
+        "postgresql+asyncpg://fire@/quantflow_kb?host=/run/postgresql",
+        "postgresql://deerflow:deerflow@localhost:5432/kb",
+        "postgres://deerflow:deerflow@localhost:5432/kb",
+    ],
+    ids=["psycopg", "asyncpg", "plain", "short-scheme"],
+)
+def test_detect_from_config_postgres_via_knowledge_dsn(tmp_path, dsn):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(f"knowledge:\n  enabled: true\n  database_dsn: {dsn}\n")
+    assert detect.detect_from_config(cfg) == ["postgres"]
+
+
+def test_detect_from_config_postgres_via_quoted_knowledge_dsn(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text('knowledge:\n  database_dsn: "postgresql+psycopg://fire@/quantflow_kb?host=/run/postgresql"\n')
+    assert detect.detect_from_config(cfg) == ["postgres"]
+
+
+def test_detect_from_config_sqlite_backend_with_knowledge_pg_dsn(tmp_path):
+    """The live QuantFlow shape: app DB on SQLite, knowledge plane on Postgres.
+
+    Before the knowledge-DSN rule, this config detected no extras and a plain
+    `uv sync` stripped asyncpg/psycopg from the venv.
+    """
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "database:\n  backend: sqlite\n  sqlite_dir: .deer-flow/data\nknowledge:\n  enabled: true\n  database_dsn: postgresql+psycopg://fire@/quantflow_kb?host=/run/postgresql\n",
+    )
+    assert detect.detect_from_config(cfg) == ["postgres"]
+
+
+def test_detect_from_config_knowledge_sqlite_dsn_returns_no_extras(tmp_path):
+    """The SQLite rollback DSN must not pull the postgres drivers."""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("database:\n  backend: sqlite\nknowledge:\n  database_dsn: sqlite:////home/fire/Documents/Audit/kb/quantflow_kb.db\n")
+    assert detect.detect_from_config(cfg) == []
+
+
+def test_detect_from_config_knowledge_dsn_placeholder_returns_no_extras(tmp_path):
+    """An unresolvable `$VAR` DSN cannot prove a postgres scheme; UV_EXTRAS covers it."""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("knowledge:\n  database_dsn: $KNOWLEDGE_URL\n")
+    assert detect.detect_from_config(cfg) == []
+
+
+def test_detect_from_config_ignores_commented_knowledge_dsn(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("database:\n  backend: sqlite\n# knowledge:\n#   database_dsn: postgresql://localhost/kb\n")
+    assert detect.detect_from_config(cfg) == []
+
+
+def test_detect_from_config_knowledge_section_without_dsn_returns_no_extras(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("knowledge:\n  enabled: true\n")
+    assert detect.detect_from_config(cfg) == []
 
 
 def test_detect_from_config_sqlite_returns_no_extras(tmp_path):
@@ -436,6 +500,23 @@ def test_resolve_extras_combines_uv_extras_with_redis_url_env(isolated_cwd, monk
     assert detect.resolve_extras() == ["postgres", "redis"]
 
 
+def test_resolve_extras_detects_knowledge_dsn_env_without_config(isolated_cwd, monkeypatch):
+    monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_DSN", "postgresql+psycopg://fire@/quantflow_kb?host=/run/postgresql")
+    assert detect.resolve_extras() == ["postgres"]
+
+
+def test_resolve_extras_ignores_sqlite_knowledge_dsn_env(isolated_cwd, monkeypatch):
+    monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_DSN", "sqlite:////home/fire/Documents/Audit/kb/quantflow_kb.db")
+    assert detect.resolve_extras() == []
+
+
+def test_resolve_extras_combines_config_with_knowledge_dsn_env(isolated_cwd, monkeypatch):
+    (isolated_cwd / "config.yaml").write_text("stream_bridge:\n  type: redis\n")
+    monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_DSN", "postgresql://localhost/kb")
+    # Config-detected extras merge before runtime-env extras (not sorted across groups).
+    assert detect.resolve_extras() == ["redis", "postgres"]
+
+
 def test_resolve_extras_falls_back_to_config(isolated_cwd):
     (isolated_cwd / "config.yaml").write_text("database:\n  backend: postgres\n")
     assert detect.resolve_extras() == ["postgres"]
@@ -469,3 +550,84 @@ def test_resolve_extras_root_config_takes_precedence(isolated_cwd):
     (sub / "config.yaml").write_text("database:\n  backend: postgres\n")
     # Root config.yaml is checked first, matching the precedence in serve.sh.
     assert detect.resolve_extras() == []
+
+
+def test_detect_from_config_knowledge_st_via_embedding_model(tmp_path):
+    """A real embedding model arms the vector leg → knowledge-st extra.
+
+    Without it, serve.sh's `uv sync` strips torch/sentence-transformers on
+    every restart, killing the KB vector leg on the next boot.
+    """
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("knowledge:\n  enabled: true\n  embedding_model: sentence-transformers/all-mpnet-base-v2\n")
+    assert detect.detect_from_config(cfg) == ["knowledge-st"]
+
+
+def test_detect_from_config_knowledge_st_via_quoted_embedding_model(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text('knowledge:\n  embedding_model: "sentence-transformers/all-mpnet-base-v2"  # vector leg\n')
+    assert detect.detect_from_config(cfg) == ["knowledge-st"]
+
+
+def test_detect_from_config_embedding_model_unset_returns_no_extras(tmp_path):
+    """None/blank disables the vector channel (KnowledgeConfig.get_embedding_model)."""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("knowledge:\n  enabled: true\n")
+    assert detect.detect_from_config(cfg) == []
+
+
+@pytest.mark.parametrize("fake_id", ["test-fake", "test-fake/v1"], ids=["short", "full"])
+def test_detect_from_config_fake_embedding_model_returns_no_extras(tmp_path, fake_id):
+    """The deterministic test fake is dependency-free — never pulls knowledge-st."""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(f"knowledge:\n  embedding_model: {fake_id}\n")
+    assert detect.detect_from_config(cfg) == []
+
+
+def test_detect_from_config_embedding_model_placeholder_returns_no_extras(tmp_path):
+    """An unresolvable `$VAR` model cannot prove a real model; UV_EXTRAS covers it."""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("knowledge:\n  embedding_model: $EMBEDDING_MODEL\n")
+    assert detect.detect_from_config(cfg) == []
+
+
+def test_detect_from_config_ignores_commented_embedding_model(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "knowledge:\n  enabled: true\n  # embedding_model: sentence-transformers/all-mpnet-base-v2\n",
+    )
+    assert detect.detect_from_config(cfg) == []
+
+
+def test_detect_from_config_combines_knowledge_st_with_postgres_dsn(tmp_path):
+    """The live QuantFlow shape: PG knowledge plane + armed vector leg."""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "database:\n  backend: sqlite\nknowledge:\n  enabled: true\n  database_dsn: postgresql+psycopg://fire@/quantflow_kb?host=/run/postgresql\n  embedding_model: sentence-transformers/all-mpnet-base-v2\n",
+    )
+    assert detect.detect_from_config(cfg) == ["knowledge-st", "postgres"]
+
+
+def test_resolve_extras_detects_embedding_model_env_without_config(isolated_cwd, monkeypatch):
+    monkeypatch.setenv(
+        "DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL",
+        "sentence-transformers/all-mpnet-base-v2",
+    )
+    assert detect.resolve_extras() == ["knowledge-st"]
+
+
+@pytest.mark.parametrize("fake_id", ["test-fake", "test-fake/v1"], ids=["short", "full"])
+def test_resolve_extras_ignores_fake_embedding_model_env(isolated_cwd, monkeypatch, fake_id):
+    monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL", fake_id)
+    assert detect.resolve_extras() == []
+
+
+def test_resolve_extras_combines_config_postgres_with_embedding_model_env(isolated_cwd, monkeypatch):
+    (isolated_cwd / "config.yaml").write_text(
+        "knowledge:\n  database_dsn: postgresql+psycopg://fire@/quantflow_kb?host=/run/postgresql\n",
+    )
+    monkeypatch.setenv(
+        "DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL",
+        "sentence-transformers/all-mpnet-base-v2",
+    )
+    assert detect.resolve_extras() == ["postgres", "knowledge-st"]

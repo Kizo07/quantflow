@@ -10,6 +10,8 @@ Order of resolution:
 2. Auto-detection from config.yaml — currently maps:
    - database.backend == postgres        -> postgres
    - checkpointer.type == postgres       -> postgres
+   - knowledge.database_dsn is a postgres DSN -> postgres
+   - knowledge.embedding_model is a real model id -> knowledge-st
    - stream_bridge.type == redis         -> redis
    - tools[].name == browser_navigate    -> browser
    - sandbox.ownership.type == redis     -> redis
@@ -18,6 +20,8 @@ Order of resolution:
 3. Runtime environment toggles that enable optional backends:
    - DEER_FLOW_STREAM_BRIDGE_REDIS_URL   -> redis
    - DEER_FLOW_SANDBOX_OWNERSHIP_REDIS_URL -> redis
+   - DEER_FLOW_KNOWLEDGE_DSN is a postgres DSN -> postgres
+   - DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL is a real model id -> knowledge-st
 
 Each extra name is validated against ``^[A-Za-z][A-Za-z0-9_-]*$`` (the same
 shape uv enforces for `[project.optional-dependencies]` keys). Anything else
@@ -343,6 +347,48 @@ def models_use_providers(lines: list[str]) -> set[str]:
     return providers
 
 
+def _is_postgres_dsn(value: str | None) -> bool:
+    """True when *value* is a DSN with a Postgres scheme.
+
+    Accepts the canonical ``postgresql`` scheme, libpq's ``postgres`` short
+    scheme, and any SQLAlchemy ``+driver`` suffix (``postgresql+psycopg://``,
+    ``postgresql+asyncpg://``) -- the same rule the alembic env uses to pin
+    the Postgres search_path (see ``backend/.../migrations/env.py``). A
+    knowledge DSN with any other scheme (e.g. the ``sqlite://`` rollback) or
+    an unresolvable ``$VAR`` placeholder needs no drivers; operators covering
+    the latter set ``UV_EXTRAS=postgres`` explicitly.
+    """
+    if not value or not value.strip():
+        return False
+    scheme = value.strip().split("+", 1)[0].split(":", 1)[0].lower()
+    return scheme in {"postgresql", "postgres"}
+
+
+#: Model ids of the deterministic, dependency-free test fake — mirrors
+#: ``FAKE_MODEL_ID`` / ``load_provider`` in
+#: ``deerflow.knowledge.embeddings`` (checked case-sensitively there too).
+_FAKE_EMBEDDING_MODEL_IDS = {"test-fake", "test-fake/v1"}
+
+
+def _is_real_embedding_model(value: str | None) -> bool:
+    """True when *value* configures a real embedding model (vector leg active).
+
+    Mirrors the production rule in ``KnowledgeConfig.get_embedding_model`` +
+    ``embeddings.load_provider``: blank/None disables the vector channel and
+    the ``test-fake`` ids resolve to the dependency-free fake, so neither
+    needs the ``knowledge-st`` extra (torch/sentence-transformers). An
+    unresolvable ``$VAR`` placeholder cannot prove a real model either;
+    operators covering that set ``UV_EXTRAS=knowledge-st`` explicitly — the
+    same convention as the postgres-DSN placeholder rule above.
+    """
+    if not value or not value.strip():
+        return False
+    model = value.strip()
+    if model.startswith("$"):
+        return False
+    return model not in _FAKE_EMBEDDING_MODEL_IDS
+
+
 def detect_from_config(path: Path) -> list[str]:
     try:
         text = path.read_text(encoding="utf-8-sig", errors="replace")
@@ -354,6 +400,10 @@ def detect_from_config(path: Path) -> list[str]:
         extras.add("postgres")
     if (section_value(lines, "checkpointer", "type") or "").lower() == "postgres":
         extras.add("postgres")
+    if _is_postgres_dsn(section_value(lines, "knowledge", "database_dsn")):
+        extras.add("postgres")
+    if _is_real_embedding_model(section_value(lines, "knowledge", "embedding_model")):
+        extras.add("knowledge-st")
     if (section_value(lines, "stream_bridge", "type") or "").lower() == "redis":
         extras.add("redis")
     if (nested_section_value(lines, "sandbox.ownership", "type") or "").lower() == "redis":
@@ -377,6 +427,10 @@ def detect_from_runtime_env() -> list[str]:
         extras.add("redis")
     if os.environ.get("DEER_FLOW_SANDBOX_OWNERSHIP_REDIS_URL", "").strip():
         extras.add("redis")
+    if _is_postgres_dsn(os.environ.get("DEER_FLOW_KNOWLEDGE_DSN", "")):
+        extras.add("postgres")
+    if _is_real_embedding_model(os.environ.get("DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL", "")):
+        extras.add("knowledge-st")
     return sorted(extras)
 
 

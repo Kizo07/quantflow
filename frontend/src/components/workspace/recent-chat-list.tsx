@@ -14,7 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams, usePathname } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -46,6 +46,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { resetThreadChatAfterDelete } from "@/components/workspace/chats/use-thread-chat";
 import { getAPIClient } from "@/core/api";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { hasPermission, PERMISSIONS } from "@/core/auth/permissions";
@@ -56,6 +57,7 @@ import { useLocalSettings } from "@/core/settings";
 import { isStaticWebsiteOnly } from "@/core/static-mode";
 import { exportThread, type ThreadExportFormat } from "@/core/threads/export";
 import {
+  useDeleteThread,
   useInfiniteThreads,
   useMoveThreadToProject,
   usePinThread,
@@ -441,7 +443,7 @@ export function RecentChatList() {
         thread.thread_id === threadIdFromPath || threadPath === currentPathname;
       deleteArchivedThread({
         threadId: thread.thread_id,
-        onRemoteDeleted: isCurrentThread
+        onDeleted: isCurrentThread
           ? () => {
               resetThreadChatAfterDelete({
                 deletedThreadId: thread.thread_id,

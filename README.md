@@ -26,17 +26,20 @@ specialists on call: `quant-analyst` (owns every number), `technical-`,
 and `risk-manager`. Reader-facing output is always branded
 `QuantFlow Research`.
 
-**Market data & research engine** (alpha_engine MCP, local stdio) — 17 tools
+**Market data & research engine** (alpha_engine MCP, local stdio) — 27 tools
 catalogued in `config/quant_tools.yaml` and dealt out per desk agent
 (machine-checked by `scripts/validate_quant_tools.py`): freshness-first
 `engine_status`; S&P 500 prices, quotes, and whole-universe breadth;
 point-in-time membership (`universe_members_as_of`, mandatory for any
-historical selection); FF/AQR/JKP factor history, IC/quantile factor
+historical selection); LSE vendor candles to 2003, bond yields, and
+fundamentals; FF/AQR/JKP factor history, IC/quantile factor
 analysis, and walk-forward ML signal scores; momentum backtests with costs
-and purge/embargo plus CUDA parameter sweeps; max-Sharpe/HRP/Black-Litterman
-optimization, factor attribution, Brinson attribution, and risk
-decomposition; interactive HTML tearsheets (`render_report`) in the
-QuantFlow identity with PNG export for print.
+and purge/embargo plus CUDA parameter sweeps; spark-mcp §15.2 signal
+backtests, Granger-causality tests, and book risk decomposition;
+max-Sharpe/HRP/Black-Litterman optimization, factor attribution, Brinson
+attribution, and risk decomposition; themed one-shot chart PNGs (price,
+bars, fundamentals, scenario fans) and interactive HTML tearsheets
+(`render_report`) in the QuantFlow identity with PNG export for print.
 
 **Flagship report publishing** (report-forge MCP, host-side stdio) —
 one-source reports rendered via Quarto to HTML / PDF / DOCX: scaffold →
@@ -103,7 +106,7 @@ deliverable is needed. Data freshness first: the desk checks
 
 | Server   | Provides | Source |
 |----------|----------|--------|
-| `alpha_engine` | 17 quant tools: data, factors, backtests, portfolio, tearsheets | sibling checkout (`../alpha_engine`) |
+| `alpha_engine` | 27 quant tools: data, LSE vendor series, factors, backtests, spark §15.2, portfolio, charts, tearsheets | sibling checkout (`../alpha_engine`) |
 | `reportforge` | Quarto report pipeline, ~30 tools | host-side stdio server |
 | `kizonlp` | sentiment, classification, summarization, PDF text | host-side stdio server |
 

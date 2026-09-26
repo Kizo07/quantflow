@@ -43,9 +43,21 @@ tools:
     description: Daily OHLCV + adj_close for one symbol.
     agents: [quant-analyst, technical-analyst]
     mutate: false
+  - id: get_lse_history
+    description: Daily vendor (LSE) OHLCV candles for one symbol, full depth to 2003.
+    agents: [quant-analyst, technical-analyst]
+    mutate: false
   - id: get_latest_quotes
     description: Latest close/adj close/volume for a comma-separated list of symbols.
     agents: [quant-analyst, technical-analyst, risk-manager]
+    mutate: false
+  - id: get_lse_yields
+    description: Daily government-bond yield series (percent) by tenor code, e.g. US10Y,US2Y.
+    agents: [quant-analyst, risk-manager]
+    mutate: false
+  - id: get_lse_fundamentals
+    description: Vendor financial-statement rows (long metric/val) for one symbol; income|balance|cashflow.
+    agents: [quant-analyst]
     mutate: false
   - id: cross_section_returns
     description: Cross-section returns for the WHOLE universe (any horizon, optional date/universe filter) with Gini concentration stat. Use for market-breadth/concentration questions instead of looping get_price_history.
@@ -71,6 +83,14 @@ tools:
     description: Momentum (lookback x top_n) grid sweep; CUDA when available.
     agents: [quant-analyst]
     mutate: false
+  - id: run_backtest
+    description: spark-mcp §15.2 cross-sectional signal backtest (momentum|reversal) with costs + purge/embargo.
+    agents: [quant-analyst]
+    mutate: false
+  - id: causal_test
+    description: spark-mcp §15.2 pairwise Granger-causality F-tests over targets on real daily returns.
+    agents: [quant-analyst]
+    mutate: false
   - id: optimize_portfolio
     description: Portfolio optimization (max_sharpe | hrp | equal_weight | black_litterman).
     agents: [quant-analyst, risk-manager]
@@ -83,13 +103,33 @@ tools:
     description: Factor risk decomposition (vol, factor vs idio, concentrations).
     agents: [risk-manager, quant-analyst]
     mutate: false
-  - id: alpha_engine_brinson_attribution
-    description: Brinson attribution vs benchmark (prefixed MCP name of brinson_attribution).
+  - id: risk_decompose
+    description: spark-mcp §15.2 factor-exposure decomposition of a book (holdings/returns spec, ff5+momentum default).
+    agents: [risk-manager, quant-analyst]
+    mutate: false
+  - id: brinson_attribution
+    description: Multi-period Brinson-Fachler attribution vs a benchmark (allocation/selection/interaction).
     agents: [quant-analyst, risk-manager]
     mutate: false
   - id: render_report
     description: Interactive HTML research report/tearsheet from a report dict. Pass theme quantflow-dark/light for flagship-matched styling and png_dir to also export every exhibit to PNG for print reports.
     agents: [quant-analyst]
+    mutate: false
+  - id: chart_bars
+    description: Themed sorted-bar PNG for agent-computed numbers (betas, levels, targets); never hand-roll matplotlib.
+    agents: [quant-analyst]
+    mutate: false
+  - id: chart_fundamentals
+    description: Themed statement-bar PNG for one symbol from LSE fundamentals (latest revenue/margins).
+    agents: [quant-analyst]
+    mutate: false
+  - id: chart_fan
+    description: Themed bear/base/bull projection-fan PNG from labels + three path arrays.
+    agents: [quant-analyst]
+    mutate: false
+  - id: chart_price
+    description: Light single-PNG price chart (line+volume+RSI or OHLC candles) for quick exhibits.
+    agents: [quant-analyst, technical-analyst]
     mutate: false
   - id: refresh_data
     description: Refresh universe + price data (optionally symbol subset).

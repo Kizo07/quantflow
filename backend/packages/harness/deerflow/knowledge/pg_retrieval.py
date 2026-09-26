@@ -12,6 +12,8 @@ retrieval plane defines to the real KB tables (migrations
   :class:`deerflow.knowledge.retrieval.planner.VectorSearchStore`
 * :class:`SQLFailureSearchStore` →
   :class:`deerflow.knowledge.retrieval.planner.FailureSearchStore`
+* :class:`SQLRelationalExpansionStore` →
+  :class:`deerflow.knowledge.retrieval.planner.RelationalExpansionStore`
 * :class:`KnowledgeRetrievalService` →
   :class:`deerflow.knowledge.tools.lookup.KnowledgeRetrievalBackend`
   (adapter over :func:`deerflow.knowledge.retrieval.planner.execute_retrieval`)
@@ -51,8 +53,9 @@ by id onto one payload — first occurrence wins there):
 Filter-before-rank: every channel maps rows to candidates, screens them
 with :func:`deerflow.knowledge.retrieval.fusion.apply_hard_filters` (zero
 logic drift by construction), then ranks the survivors and trims to
-``limit``. The ``relational`` channel stays unbound at Phase 2 (no
-``knowledge_edge`` table yet); the service plans single-pass retrieval.
+``limit``. The ``relational`` channel binds at Phase 3 to the FK graph
+(:class:`SQLRelationalExpansionStore`); the service plans two-pass
+retrieval with it.
 
 Dialect behavior:
 
@@ -90,7 +93,10 @@ Sessions: every store holds a synchronous session factory and opens one
 short session per call, mirroring :mod:`deerflow.knowledge.pg_store`, so a
 single instance is safe to share across threads. :func:`open_pg_backends`
 builds the full backend bundle from a DSN through the process-wide
-sync-engine cache.
+sync-engine cache. :func:`bind_knowledge_backends_from_config` is the
+startup integration step: it reads the DSN + embedding model from
+:class:`deerflow.knowledge.config.KnowledgeConfig` and registers the
+bundle process-wide (the Gateway lifespan calls it once at startup).
 """
 
 from __future__ import annotations
@@ -105,18 +111,22 @@ from typing import Any
 from sqlalchemy import bindparam, func, select
 from sqlalchemy.orm import Session
 
+from deerflow.knowledge.config import get_knowledge_config
 from deerflow.knowledge.embeddings import (
     EMBEDDING_DIM,
     FAKE_MODEL_ID,
+    EmbeddingError,
     EmbeddingProvider,
     embed_texts,
     load_provider,
+    register_provider_factory,
     render_embeddable_text,
 )
 from deerflow.knowledge.pg_store import SQLExperimentSearchStore, row_to_record
 from deerflow.knowledge.retrieval.fusion import SCOPE_PLACEHOLDERS, apply_hard_filters
 from deerflow.knowledge.retrieval.planner import (
     DEFAULT_PER_CHANNEL_LIMIT,
+    EDGE_TYPES,
     MAX_PER_CHANNEL_LIMIT,
     MAX_TOP_K,
     Candidate,
@@ -127,13 +137,19 @@ from deerflow.knowledge.retrieval.planner import (
     like_fallback_idf_scores,
     plan_retrieval,
 )
-from deerflow.knowledge.schema.experiments import AssumptionRow, ExperimentRow
+from deerflow.knowledge.schema.experiments import (
+    AssumptionRow,
+    ExperimentArtifactRow,
+    ExperimentDatasetRow,
+    ExperimentRow,
+)
 from deerflow.knowledge.schema.findings import FindingRow, NativeVector
 from deerflow.knowledge.tools.lookup import (
     ArtifactStoreReader,
     KnowledgeBackends,
     RetrievalDocument,
     RetrievalPage,
+    bind_knowledge_backends,
 )
 from deerflow.knowledge.write_api import ExperimentRecord, KnowledgeError, KnowledgeValidationError
 
@@ -145,6 +161,7 @@ __all__ = [
     "SQLLexicalSearchStore",
     "SQLVectorSearchStore",
     "SQLFailureSearchStore",
+    "SQLRelationalExpansionStore",
     "SQLExperimentLookupStore",
     "SQLFindingTextSource",
     "SQLEmbeddingVectorStore",
@@ -156,6 +173,7 @@ __all__ = [
     "assumption_row_to_candidate",
     "refresh_finding_search_documents",
     "open_pg_backends",
+    "bind_knowledge_backends_from_config",
 ]
 
 #: Summary ceiling for ``RetrievalDocument.summary`` (full text stays one
@@ -764,6 +782,150 @@ class SQLFailureSearchStore(_ChannelStoreBase):
         return _stable_order([item for _, item in kept], score_fn=lambda item: by_id[item.id])[:limit]
 
 
+class SQLRelationalExpansionStore(_ChannelStoreBase):
+    """``RelationalExpansionStore`` over the KB foreign-key graph (one hop).
+
+    Phase 3 binds the planner's relational seam to the relations already in
+    the schema — no ``knowledge_edge`` table, no migration. Each requested
+    edge type traverses its backing relation in both directions (undirected:
+    a seed reaches its parents and its children alike), and ``related_to``
+    / ``uses`` reach laterally-linked experiments:
+
+    * ``supersedes`` — ``finding.supersedes_id`` (the seed's target plus
+      rows pointing at the seed);
+    * ``derived_from`` — ``experiment.parent_experiment_id`` (parent plus
+      children, so follow-ups and their failures surface together);
+    * ``replicates`` — ``experiment.replicated_experiment_id`` (target plus
+      replicators);
+    * ``applies_to`` — ``assumption.experiment_id`` (an experiment seed
+      reaches its assumptions, an assumption seed its experiment);
+    * ``related_to`` — shared ``experiment.experiment_family_hash``
+      (same-design siblings);
+    * ``uses`` — shared dataset versions / artifacts (experiments consuming
+      the same ``dataset_version`` or ``artifact`` rows through the
+      ``experiment_dataset`` / ``experiment_artifact`` link tables);
+    * ``supports`` / ``contradicts`` — no backing relation yet (the
+      ``finding_evidence`` / conflict structures are still unlanded), so
+      they contribute no neighbors, never an error.
+
+    Single-pass semantics: exactly one hop — neighbors of neighbors stay
+    out (the planner calls this once per retrieval and the implementation
+    never recurses). Seeds themselves are excluded (fusion already ranks
+    them; the channel budget is for new nodes). Like every channel,
+    neighbors map to candidates, screen through the fusion hard filters,
+    and trim to ``limit``; ordering is seed order first (neighbors of the
+    top seed win), then the standard recency/id tie-break. Seed ids that
+    are not UUIDs, or that match no row, simply contribute no neighbors.
+    """
+
+    def expand_neighbors(self, seed_ids: Sequence[str], scope: ScopeFilter, *, edge_types: Sequence[str], limit: int) -> list[Candidate]:
+        """Return up to ``limit`` one-hop neighbors of the seeds, best-first.
+
+        Raises:
+            KnowledgeValidationError: When any edge type falls outside the
+                :data:`EDGE_TYPES <deerflow.knowledge.retrieval.planner.EDGE_TYPES>`
+                vocabulary.
+        """
+        if isinstance(edge_types, (str, bytes)):
+            raise KnowledgeValidationError(f"edge_types must be a sequence of edge-type names, got {edge_types!r}.")
+        unknown = [edge for edge in edge_types if edge not in EDGE_TYPES]
+        if unknown:
+            raise KnowledgeValidationError(f"edge_types entries must be one of {list(EDGE_TYPES)}, got {unknown[0]!r}.")
+        wanted = frozenset(edge_types)
+        seeds: list[uuid.UUID] = []
+        for raw in seed_ids or ():
+            try:
+                seeds.append(uuid.UUID(raw.strip() if isinstance(raw, str) else ""))
+            except (ValueError, AttributeError):
+                continue
+        if not seeds or not wanted or limit < 1:
+            return []
+        seed_set = set(seeds)
+        seed_rank: dict[uuid.UUID, int] = {}
+        for position, key in enumerate(seeds):
+            seed_rank.setdefault(key, position)
+        discovered: dict[uuid.UUID, int] = {}
+
+        def _note(neighbor_id: uuid.UUID | None, rank: int) -> None:
+            """Record a neighbor unless it is a seed (keeping the best seed rank)."""
+            if neighbor_id is None or neighbor_id in seed_set:
+                return
+            if neighbor_id not in discovered or rank < discovered[neighbor_id]:
+                discovered[neighbor_id] = rank
+
+        with self._sessions() as session:
+            seed_experiments = {row.id: row for row in session.scalars(select(ExperimentRow).where(ExperimentRow.id.in_(seeds)))}
+            seed_findings = {row.id: row for row in session.scalars(select(FindingRow).where(FindingRow.id.in_(seeds)))}
+            seed_assumptions = {row.id: row for row in session.scalars(select(AssumptionRow).where(AssumptionRow.id.in_(seeds)))}
+            if "derived_from" in wanted and seed_experiments:
+                for row in seed_experiments.values():
+                    _note(row.parent_experiment_id, seed_rank[row.id])
+                children = session.execute(select(ExperimentRow.id, ExperimentRow.parent_experiment_id).where(ExperimentRow.parent_experiment_id.in_(list(seed_experiments))))
+                for child_id, parent_id in children:
+                    _note(child_id, seed_rank[parent_id])
+            if "replicates" in wanted and seed_experiments:
+                for row in seed_experiments.values():
+                    _note(row.replicated_experiment_id, seed_rank[row.id])
+                replicators = session.execute(select(ExperimentRow.id, ExperimentRow.replicated_experiment_id).where(ExperimentRow.replicated_experiment_id.in_(list(seed_experiments))))
+                for replica_id, target_id in replicators:
+                    _note(replica_id, seed_rank[target_id])
+            if "supersedes" in wanted and seed_findings:
+                for row in seed_findings.values():
+                    _note(row.supersedes_id, seed_rank[row.id])
+                superseders = session.execute(select(FindingRow.id, FindingRow.supersedes_id).where(FindingRow.supersedes_id.in_(list(seed_findings))))
+                for newer_id, older_id in superseders:
+                    _note(newer_id, seed_rank[older_id])
+            if "applies_to" in wanted:
+                if seed_experiments:
+                    linked = session.execute(select(AssumptionRow.id, AssumptionRow.experiment_id).where(AssumptionRow.experiment_id.in_(list(seed_experiments))))
+                    for assumption_id, experiment_id in linked:
+                        _note(assumption_id, seed_rank[experiment_id])
+                for row in seed_assumptions.values():
+                    _note(row.experiment_id, seed_rank[row.id])
+            if "related_to" in wanted and seed_experiments:
+                hash_rank: dict[str, int] = {}
+                for row in seed_experiments.values():
+                    family = row.experiment_family_hash
+                    if isinstance(family, str) and family:
+                        hash_rank[family] = min(hash_rank.get(family, len(seeds)), seed_rank[row.id])
+                if hash_rank:
+                    siblings = session.execute(select(ExperimentRow.id, ExperimentRow.experiment_family_hash).where(ExperimentRow.experiment_family_hash.in_(list(hash_rank))))
+                    for sibling_id, family in siblings:
+                        _note(sibling_id, hash_rank[family])
+            if "uses" in wanted and seed_experiments:
+                seed_experiment_ids = list(seed_experiments)
+                dataset_links = session.execute(select(ExperimentDatasetRow.experiment_id, ExperimentDatasetRow.dataset_version_id).where(ExperimentDatasetRow.experiment_id.in_(seed_experiment_ids)))
+                dataset_rank: dict[uuid.UUID, int] = {}
+                for experiment_id, dataset_version_id in dataset_links:
+                    dataset_rank[dataset_version_id] = min(dataset_rank.get(dataset_version_id, len(seeds)), seed_rank[experiment_id])
+                if dataset_rank:
+                    co_users = session.execute(select(ExperimentDatasetRow.experiment_id, ExperimentDatasetRow.dataset_version_id).where(ExperimentDatasetRow.dataset_version_id.in_(list(dataset_rank))))
+                    for experiment_id, dataset_version_id in co_users:
+                        _note(experiment_id, dataset_rank[dataset_version_id])
+                artifact_links = session.execute(select(ExperimentArtifactRow.experiment_id, ExperimentArtifactRow.artifact_id).where(ExperimentArtifactRow.experiment_id.in_(seed_experiment_ids)))
+                artifact_rank: dict[uuid.UUID, int] = {}
+                for experiment_id, artifact_id in artifact_links:
+                    artifact_rank[artifact_id] = min(artifact_rank.get(artifact_id, len(seeds)), seed_rank[experiment_id])
+                if artifact_rank:
+                    co_users = session.execute(select(ExperimentArtifactRow.experiment_id, ExperimentArtifactRow.artifact_id).where(ExperimentArtifactRow.artifact_id.in_(list(artifact_rank))))
+                    for experiment_id, artifact_id in co_users:
+                        _note(experiment_id, artifact_rank[artifact_id])
+            if not discovered:
+                return []
+            neighbor_ids = list(discovered)
+            neighbors: dict[uuid.UUID, Candidate] = {}
+            for row in session.scalars(select(FindingRow).where(FindingRow.id.in_(neighbor_ids))):
+                neighbors.setdefault(row.id, finding_row_to_candidate(row))
+            for row in session.scalars(select(ExperimentRow).where(ExperimentRow.id.in_(neighbor_ids))):
+                neighbors.setdefault(row.id, experiment_row_to_candidate(row))
+            for row in session.scalars(select(AssumptionRow).where(AssumptionRow.id.in_(neighbor_ids))):
+                neighbors.setdefault(row.id, assumption_row_to_candidate(row))
+        candidates = [neighbors[neighbor_id] for neighbor_id in neighbor_ids if neighbor_id in neighbors]
+        rank_by_id = {str(neighbor_id): rank for neighbor_id, rank in discovered.items()}
+        survivors = _screen(candidates, scope)
+        return _stable_order(survivors, score_fn=lambda item: -rank_by_id[item.id])[:limit]
+
+
 class SQLExperimentLookupStore(SQLExperimentSearchStore):
     """``ExperimentLookupStore``: search binding plus primary-key lookup.
 
@@ -1096,10 +1258,11 @@ class KnowledgeRetrievalService:
     the :class:`ScopeFilter`, ``project_id`` becomes the ACL enforcement
     set, ``concept`` folds into the query text for the lexical/failure
     channels, and ``status`` applies as a post-fusion exact match), runs
-    the four SQL channels single-pass (``relational=False`` — no edge
-    table at Phase 2), and renders the fused ranking as
-    :class:`RetrievalDocument` pages. :meth:`get_documents` is a
-    primary-key fetch across the three retrievable tables.
+    the four SQL channels plus the one-hop relational expansion
+    (:class:`SQLRelationalExpansionStore` over the FK graph), and renders
+    the fused ranking as :class:`RetrievalDocument` pages.
+    :meth:`get_documents` is a primary-key fetch across the three
+    retrievable tables.
 
     The vector channel runs only when an ``embedding_provider`` is bound;
     otherwise retrieval skips it with a recorded warning (identical to the
@@ -1122,6 +1285,7 @@ class KnowledgeRetrievalService:
         self._lexical = SQLLexicalSearchStore(session_factory)
         self._vector = SQLVectorSearchStore(session_factory)
         self._failures = SQLFailureSearchStore(session_factory)
+        self._relational = SQLRelationalExpansionStore(session_factory)
         self._embedding_provider = embedding_provider
 
     @property
@@ -1169,7 +1333,7 @@ class KnowledgeRetrievalService:
             per_channel_limit=min(MAX_PER_CHANNEL_LIMIT, max(DEFAULT_PER_CHANNEL_LIMIT, needed)),
             top_k=min(MAX_TOP_K, needed),
             kinds=planner_kinds,
-            relational=False,
+            relational=True,
         )
         query_embedding = self._embed_query(query_text)
         allowed = [filters["project_id"]] if filters.get("project_id") else None
@@ -1180,7 +1344,7 @@ class KnowledgeRetrievalService:
             lexical=self._lexical,
             vector=self._vector,
             failures=self._failures,
-            relational=None,
+            relational=self._relational,
             query_embedding=query_embedding,
             allowed_project_ids=allowed,
         )
@@ -1342,3 +1506,68 @@ def open_pg_backends(dsn: str, *, embedding_model: str | None = None, artifact_s
         experiments=SQLExperimentLookupStore(session_factory),
         artifacts=ArtifactStoreReader(artifact_store) if artifact_store is not None else None,
     )
+
+
+def bind_knowledge_backends_from_config(*, artifact_store: Any | None = None) -> KnowledgeBackends | None:
+    """Bind the process-wide knowledge backends from the ``knowledge:`` config section.
+
+    The startup integration step (called once from the Gateway lifespan):
+    reads the database DSN plus the embedding model from
+    :func:`deerflow.knowledge.config.get_knowledge_config`, opens the
+    backend bundle with :func:`open_pg_backends`, and registers it via
+    :func:`deerflow.knowledge.tools.lookup.bind_knowledge_backends` so the
+    ``ledger_*``/``experiment_get`` tools and the run-start bootstrap
+    middleware resolve real PG bindings.
+
+    Vector-channel behavior follows the existing ``needed_memory`` design,
+    not a feature flag: the planner arms the vector channel for the
+    ``validated_findings`` / ``prior_experiments`` needs, and the channel
+    runs whenever a query embedding is available. Availability is decided
+    here — a configured ``embedding_model`` is resolved through
+    :func:`load_provider` (the sentence-transformers factory is registered
+    for it first, unless the id is the ``test-fake`` fake or already has a
+    factory), while ``None`` leaves the provider unbound so the channel
+    skips with its standard warning. A configured model that fails to
+    load degrades the same way — a warning plus retrieval without the
+    vector channel — because an embedding outage must narrow recall,
+    never fail the whole search.
+
+    Args:
+        artifact_store: Optional artifact store to expose through an
+            :class:`ArtifactStoreReader` (None leaves artifacts unbound).
+
+    Returns:
+        The effective process-wide bindings, or None when the plane is
+        disabled or no DSN is configured (previous bindings untouched).
+
+    Raises:
+        sqlalchemy.exc.ArgumentError: When the configured DSN is not a
+            usable SQLAlchemy URL (the lifespan logs and keeps serving).
+    """
+    config = get_knowledge_config()
+    if not config.is_enabled():
+        logger.debug("bind_knowledge_backends_from_config: knowledge plane disabled; leaving backends unbound")
+        return None
+    dsn = config.get_database_dsn()
+    if not dsn:
+        logger.info("bind_knowledge_backends_from_config: no knowledge database_dsn configured; leaving backends unbound")
+        return None
+    model = config.get_embedding_model()
+    if model is not None and model not in {"test-fake", FAKE_MODEL_ID}:
+        from deerflow.knowledge import embeddings as embeddings_mod
+        from deerflow.knowledge.providers_st import SentenceTransformerEmbeddingProvider
+
+        if model not in embeddings_mod._provider_factories:
+            register_provider_factory(model, lambda: SentenceTransformerEmbeddingProvider(model))
+    try:
+        backends = open_pg_backends(dsn, embedding_model=model, artifact_store=artifact_store)
+    except EmbeddingError:
+        logger.warning(
+            "bind_knowledge_backends_from_config: embedding model %r failed to load; binding knowledge backends without the vector channel",
+            model,
+            exc_info=True,
+        )
+        backends = open_pg_backends(dsn, artifact_store=artifact_store)
+    bound = bind_knowledge_backends(retrieval=backends.retrieval, experiments=backends.experiments, artifacts=backends.artifacts)
+    logger.info("bind_knowledge_backends_from_config: knowledge backends bound (vector=%s)", "on" if model is not None and bound.retrieval is not None and bound.retrieval.embedding_provider is not None else "off")
+    return bound

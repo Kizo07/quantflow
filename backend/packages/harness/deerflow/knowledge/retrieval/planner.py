@@ -478,15 +478,17 @@ class FailureSearchStore(Protocol):
 
 @runtime_checkable
 class RelationalExpansionStore(Protocol):
-    """Read boundary for Phase 3 knowledge-edge expansion (clean seam; unbound at Phase 2).
+    """Read boundary for Phase 3 knowledge-edge expansion (bound to the FK graph).
 
-    Phase 3 binds this to the ``knowledge_edge`` table (``supports``,
-    ``contradicts``, ``derived_from``, ``replicates``, ``supersedes``,
-    ``related_to``, ``uses``, ``applies_to``) with shallow recursive SQL
-    from the seed ids, e.g.: from a strategy to its experiments, from an
-    experiment to its failures, from a finding to contradicting findings.
-    The planner calls it only when provided; ``None`` means single-pass
-    retrieval with no expansion round.
+    Phase 3 binds this to the KB relations (finding supersession,
+    experiment lineage / replication / family, assumption links, shared
+    dataset/artifact co-usage) with shallow single-hop SQL from the seed
+    ids, e.g.: from a strategy to its experiments, from an experiment to
+    its failures, from a finding to the revision that supersedes it.
+    ``supports`` / ``contradicts`` have no backing relation yet (the
+    ``finding_evidence`` / conflict structures are still unlanded) and
+    contribute no neighbors. The planner calls it only when provided;
+    ``None`` means single-pass retrieval with no expansion round.
     """
 
     def expand_neighbors(self, seed_ids: Sequence[str], scope: ScopeFilter, *, edge_types: Sequence[str], limit: int) -> list[Candidate]:

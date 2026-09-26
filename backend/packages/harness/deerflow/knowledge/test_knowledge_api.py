@@ -226,6 +226,29 @@ class TestKnowledgeConfig:
         monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_DSN", "   ")
         assert knowledge_config.KnowledgeConfig().get_database_dsn() is None
 
+    def test_embedding_model_defaults_to_none(self, monkeypatch):
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL", raising=False)
+        assert knowledge_config.KnowledgeConfig().get_embedding_model() is None
+
+    def test_embedding_model_explicit_field_beats_env(self, monkeypatch):
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL", "env-model/v1")
+        cfg = knowledge_config.KnowledgeConfig(embedding_model="field-model/v1")
+        assert cfg.get_embedding_model() == "field-model/v1"
+
+    def test_embedding_model_env_override(self, monkeypatch):
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL", "sentence-transformers/all-mpnet-base-v2")
+        assert knowledge_config.KnowledgeConfig().get_embedding_model() == "sentence-transformers/all-mpnet-base-v2"
+
+    def test_embedding_model_blank_counts_as_unset(self, monkeypatch):
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL", "   ")
+        assert knowledge_config.KnowledgeConfig().get_embedding_model() is None
+        assert knowledge_config.KnowledgeConfig(embedding_model="  ").get_embedding_model() is None
+
+    def test_embedding_model_dict_roundtrip(self, monkeypatch):
+        monkeypatch.setattr(knowledge_config, "_knowledge_config", knowledge_config.KnowledgeConfig())
+        knowledge_config.load_knowledge_config_from_dict({"embedding_model": "mpnet/v1"})
+        assert knowledge_config.get_knowledge_config().get_embedding_model() == "mpnet/v1"
+
     @pytest.mark.parametrize("token,expected", [("1", True), ("true", True), ("YES", True), ("On", True), ("0", False), ("false", False), ("no", False), ("OFF", False)])
     def test_enabled_flag_tokens(self, monkeypatch, token, expected):
         monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_ENABLED", token)

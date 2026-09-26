@@ -21,6 +21,8 @@ Resolution order for every resolvable setting:
 Environment variables:
     DEER_FLOW_KNOWLEDGE_ENABLED       "1/true/yes/on" or "0/false/no/off"
     DEER_FLOW_KNOWLEDGE_DSN            PostgreSQL DSN for canonical state
+    DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL
+                                     Embedding model id for the vector channel
     DEER_FLOW_KNOWLEDGE_S3_ENDPOINT    S3/MinIO endpoint URL (immutable evidence)
     DEER_FLOW_KNOWLEDGE_S3_BUCKET      Bucket for evidence artifacts
     DEER_FLOW_KNOWLEDGE_S3_REGION      Bucket region
@@ -32,6 +34,7 @@ from pydantic import BaseModel, Field
 
 ENV_ENABLED = "DEER_FLOW_KNOWLEDGE_ENABLED"
 ENV_DSN = "DEER_FLOW_KNOWLEDGE_DSN"
+ENV_EMBEDDING_MODEL = "DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL"
 ENV_S3_ENDPOINT = "DEER_FLOW_KNOWLEDGE_S3_ENDPOINT"
 ENV_S3_BUCKET = "DEER_FLOW_KNOWLEDGE_S3_BUCKET"
 ENV_S3_REGION = "DEER_FLOW_KNOWLEDGE_S3_REGION"
@@ -70,12 +73,13 @@ def _env_flag(name: str) -> bool | None:
 
 
 class KnowledgeConfig(BaseModel):
-    """Configuration for the Research Knowledge Plane (Phase 1 scope).
+    """Configuration for the Research Knowledge Plane (Phase 1 scope + Phase 3 retrieval).
 
     Covers the synchronous evidence-commit path (experiments, failures,
-    assumptions) and experiment search. Retrieval-plane settings (FTS /
-    pgvector / rank fusion) belong to a later phase and are deliberately
-    absent here.
+    assumptions), experiment search, and the retrieval-plane embedding
+    model that arms the vector channel. Further retrieval-plane tuning
+    (FTS / pgvector / rank fusion knobs) belongs to a later phase and is
+    deliberately absent here.
     """
 
     enabled: bool = Field(
@@ -85,6 +89,13 @@ class KnowledgeConfig(BaseModel):
     database_dsn: str | None = Field(
         default=None,
         description="PostgreSQL DSN for canonical knowledge state. Falls back to DEER_FLOW_KNOWLEDGE_DSN. None means the PG binding is not configured (integration step wires AppConfig.database).",
+    )
+    embedding_model: str | None = Field(
+        default=None,
+        description=(
+            "Embedding model id for the retrieval vector channel (resolved via load_provider; the sentence-transformers factory is registered at startup). "
+            "Falls back to DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL. None disables the vector channel entirely — no silent test-fake in the production path."
+        ),
     )
     object_store_endpoint: str | None = Field(
         default=None,
@@ -133,6 +144,17 @@ class KnowledgeConfig(BaseModel):
         if self.database_dsn:
             return self.database_dsn
         return _env_str(ENV_DSN)
+
+    def get_embedding_model(self) -> str | None:
+        """Return the effective embedding model id (explicit field, then env, then None).
+
+        None disables the retrieval vector channel; the startup binding
+        resolves any other id via :func:`load_provider
+        <deerflow.knowledge.embeddings.load_provider>`.
+        """
+        if self.embedding_model and self.embedding_model.strip():
+            return self.embedding_model.strip()
+        return _env_str(ENV_EMBEDDING_MODEL)
 
     def get_object_store_endpoint(self) -> str | None:
         """Return the effective object-store endpoint (explicit field, then env, then None)."""

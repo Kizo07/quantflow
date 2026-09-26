@@ -15,11 +15,16 @@ dialect per the schema conventions):
 * the ``KnowledgeRetrievalBackend`` service adapter (kind mapping,
   structured filters, ACL, status post-filter, pagination, id lookup);
 * PostgreSQL SQL compilation for the FTS / pgvector / reindex statements
-  (no server required) and the ``open_pg_backends`` DSN helper smoke test.
+  (no server required) and the ``open_pg_backends`` DSN helper smoke test;
+* the startup binding (``bind_knowledge_backends_from_config``: DSN +
+  embedding model from ``KnowledgeConfig``) and a read-only pass over the
+  real shared KB file (hash-pinned: the file must be bit-identical after).
 """
 
 from __future__ import annotations
 
+import hashlib
+import os
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -28,27 +33,46 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 import deerflow.knowledge.schema as kb_schema
+from deerflow.knowledge import embeddings as embeddings_mod
 from deerflow.knowledge import pg_retrieval as pg
+from deerflow.knowledge.config import (
+    KnowledgeConfig,
+    get_knowledge_config,
+    set_knowledge_config,
+)
 from deerflow.knowledge.embeddings import (
     EMBEDDING_DIM,
     FAKE_MODEL_ID,
     DeterministicEmbeddingProvider,
+    EmbeddingProviderError,
+    backfill_experiments_embeddings,
     backfill_findings_embeddings,
     render_embeddable_text,
 )
 from deerflow.knowledge.retrieval.planner import (
+    EDGE_TYPES,
     FailureSearchStore,
     LexicalSearchStore,
+    RelationalExpansionStore,
     ScopeFilter,
     StructuredLookupStore,
     VectorSearchStore,
+    execute_retrieval,
+    plan_retrieval,
 )
 from deerflow.knowledge.schema.experiments import AssumptionRow, ExperimentRow
 from deerflow.knowledge.schema.findings import FindingRow
-from deerflow.knowledge.tools.lookup import KnowledgeBackends, ledger_get, ledger_search
+from deerflow.knowledge.tools.lookup import (
+    KnowledgeBackends,
+    get_knowledge_backends,
+    ledger_get,
+    ledger_search,
+    reset_knowledge_backends,
+)
 from deerflow.knowledge.write_api import KnowledgeError, KnowledgeValidationError
 from deerflow.persistence.base import Base
 
@@ -801,3 +825,492 @@ class TestOpenBackends:
         assert backends.retrieval.embedding_provider is not None
         assert backends.retrieval.embedding_provider.model_id == FAKE_MODEL_ID
         assert backends.retrieval.embedding_provider.dimension == EMBEDDING_DIM
+
+
+class TestBindFromConfig:
+    @pytest.fixture(autouse=True)
+    def _clean_state(self, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+        """Isolate the config singleton, backend registry, and env overrides."""
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_ENABLED", raising=False)
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_DSN", raising=False)
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL", raising=False)
+        previous = get_knowledge_config()
+        try:
+            yield
+        finally:
+            reset_knowledge_backends()
+            set_knowledge_config(previous)
+
+    def test_disabled_leaves_registry_untouched(self) -> None:
+        set_knowledge_config(KnowledgeConfig(enabled=False, database_dsn="sqlite:////tmp/never.db"))
+        assert pg.bind_knowledge_backends_from_config() is None
+        assert get_knowledge_backends() == KnowledgeBackends()
+
+    def test_missing_dsn_leaves_registry_untouched(self) -> None:
+        set_knowledge_config(KnowledgeConfig())
+        assert pg.bind_knowledge_backends_from_config() is None
+        assert get_knowledge_backends() == KnowledgeBackends()
+
+    def test_binds_sqlite_without_vector(self, tmp_path: Path) -> None:
+        engine = _engine(tmp_path, "bind_no_vector.db")
+        engine.dispose()
+        set_knowledge_config(KnowledgeConfig(database_dsn=f"sqlite:///{(tmp_path / 'bind_no_vector.db').as_posix()}"))
+        bound = pg.bind_knowledge_backends_from_config()
+        assert bound is not None
+        assert isinstance(bound.retrieval, pg.KnowledgeRetrievalService)
+        assert isinstance(bound.experiments, pg.SQLExperimentLookupStore)
+        assert bound.retrieval.embedding_provider is None  # no silent test-fake
+        assert get_knowledge_backends().retrieval is bound.retrieval
+        assert get_knowledge_backends().experiments is bound.experiments
+
+    def test_binds_with_fake_model_and_runs_two_table_vector(self, store: dict, tmp_path: Path) -> None:
+        set_knowledge_config(KnowledgeConfig(database_dsn=f"sqlite:///{(tmp_path / 'kb_retrieval.db').as_posix()}", embedding_model="test-fake/v1"))
+        bound = pg.bind_knowledge_backends_from_config()
+        assert bound is not None and bound.retrieval is not None
+        assert bound.retrieval.embedding_provider is not None
+        assert bound.retrieval.embedding_provider.model_id == FAKE_MODEL_ID
+        provider = DeterministicEmbeddingProvider()
+        backfill_findings_embeddings(
+            provider,
+            pg.SQLFindingTextSource(store["factory"]),
+            pg.SQLEmbeddingVectorStore(store["factory"], model_id=provider.model_id),
+            [str(store["finding_id"]), str(store["failure_finding_id"])],
+        )
+        backfill_experiments_embeddings(
+            provider,
+            pg.SQLExperimentTextSource(store["factory"]),
+            pg.SQLExperimentEmbeddingVectorStore(store["factory"], model_id=provider.model_id),
+            [str(store["experiment_id"]), str(store["failure_experiment_id"])],
+        )
+        page = bound.retrieval.search("momentum backtest", kinds=("finding", "experiment"), filters={}, limit=10, offset=0)
+        by_id = {doc.id: doc for doc in page.documents}
+        assert str(store["finding_id"]) in by_id
+        assert str(store["experiment_id"]) in by_id
+        assert "vector" in by_id[str(store["finding_id"])].payload["channels"]
+        assert "vector" in by_id[str(store["experiment_id"])].payload["channels"]
+
+    def test_embedding_model_env_fallback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = _engine(tmp_path, "bind_env_model.db")
+        engine.dispose()
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL", "test-fake/v1")
+        set_knowledge_config(KnowledgeConfig(database_dsn=f"sqlite:///{(tmp_path / 'bind_env_model.db').as_posix()}"))
+        bound = pg.bind_knowledge_backends_from_config()
+        assert bound is not None and bound.retrieval is not None
+        assert bound.retrieval.embedding_provider is not None
+        assert bound.retrieval.embedding_provider.model_id == FAKE_MODEL_ID
+
+    def test_existing_factory_not_overwritten(self, tmp_path: Path) -> None:
+        engine = _engine(tmp_path, "bind_custom_factory.db")
+        engine.dispose()
+        sentinel = DeterministicEmbeddingProvider(model_id="custom-model/v1")
+
+        def factory():
+            return sentinel
+
+        embeddings_mod.register_provider_factory("custom-model/v1", factory)
+        try:
+            set_knowledge_config(KnowledgeConfig(database_dsn=f"sqlite:///{(tmp_path / 'bind_custom_factory.db').as_posix()}", embedding_model="custom-model/v1"))
+            bound = pg.bind_knowledge_backends_from_config()
+            assert bound is not None and bound.retrieval is not None
+            assert bound.retrieval.embedding_provider is sentinel
+            assert embeddings_mod._provider_factories["custom-model/v1"] is factory
+        finally:
+            embeddings_mod._provider_factories.pop("custom-model/v1", None)
+
+    def test_unloadable_model_degrades_without_vector(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+        engine = _engine(tmp_path, "bind_bad_model.db")
+        engine.dispose()
+
+        class _Unavailable:
+            def __init__(self, model_id: str = "missing-model-xyz") -> None:
+                raise EmbeddingProviderError(f"checkpoint {model_id!r} unavailable")
+
+        monkeypatch.setattr("deerflow.knowledge.providers_st.SentenceTransformerEmbeddingProvider", _Unavailable)
+        set_knowledge_config(KnowledgeConfig(database_dsn=f"sqlite:///{(tmp_path / 'bind_bad_model.db').as_posix()}", embedding_model="missing-model-xyz"))
+        try:
+            with caplog.at_level("WARNING", logger="deerflow.knowledge.pg_retrieval"):
+                bound = pg.bind_knowledge_backends_from_config()
+        finally:
+            embeddings_mod._provider_factories.pop("missing-model-xyz", None)
+        assert bound is not None and bound.retrieval is not None
+        assert bound.retrieval.embedding_provider is None
+        assert "without the vector channel" in caplog.text
+        page = bound.retrieval.search("momentum", kinds=("finding",), filters={}, limit=5, offset=0)
+        assert page.total == 0  # empty seed DB; lexical still runs, nothing matches
+
+
+#: Shared research KB. Tests below open it read-only only (``mode=ro`` URI);
+#: any write would fail the hash pin — and sqlite itself refuses writes.
+REAL_KB_PATH = Path("/home/fire/Documents/Audit/kb/quantflow_kb.db")
+
+
+def _file_fingerprint(path: Path) -> tuple[str, int]:
+    """Return (sha256, mtime_ns) for a read-only tamper check."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest(), os.stat(path).st_mtime_ns
+
+
+class TestRealKbReadOnly:
+    def test_finding_channels_over_real_kb_leave_file_untouched(self) -> None:
+        if not REAL_KB_PATH.exists():
+            pytest.skip(f"shared KB not present: {REAL_KB_PATH}")
+        before = _file_fingerprint(REAL_KB_PATH)
+        # Raw engine, NOT the process-wide sync-engine cache: its connect
+        # listener runs PRAGMA journal_mode=WAL, which a read-only
+        # connection cannot take. The ro URI makes writes impossible.
+        engine = sa.create_engine(f"sqlite:///file:{REAL_KB_PATH.as_posix()}?mode=ro&uri=true")
+        try:
+            factory = sessionmaker(engine, expire_on_commit=False)
+            with factory() as session:
+                finding_count = session.execute(sa.text("SELECT COUNT(*) FROM finding")).scalar()
+                assert finding_count is not None and finding_count > 0
+            plan = plan_retrieval({"topic": "momentum", "needed_memory": ["validated_findings"]}, kinds=("finding",), relational=False)
+            assert "vector" in plan.channels
+            [query_embedding] = DeterministicEmbeddingProvider().embed_batch(["momentum factor persistence"])
+            result = execute_retrieval(
+                plan,
+                query_text="momentum",
+                structured=pg.SQLStructuredLookupStore(factory),
+                lexical=pg.SQLLexicalSearchStore(factory),
+                vector=pg.SQLVectorSearchStore(factory),
+                failures=pg.SQLFailureSearchStore(factory),
+                query_embedding=query_embedding,
+            )
+            assert result.channel_counts["structured"] > 0
+            assert result.channel_counts["lexical"] > 0
+            assert result.channel_counts["vector"] > 0
+            assert "vector channel skipped" not in " ".join(result.warnings)
+            with factory() as session, pytest.raises(OperationalError):
+                session.execute(sa.text("CREATE TABLE _must_not_exist (x)"))
+                session.commit()
+        finally:
+            engine.dispose()
+        assert _file_fingerprint(REAL_KB_PATH) == before
+
+
+LINKED_FAMILY_PARENT = "c0" * 32
+LINKED_FAMILY_CHILD = "c1" * 32
+LINKED_FAMILY_REPLICA = "c2" * 32
+LINKED_FAMILY_OTHER = "c3" * 32
+LINKED_FAMILY_LONELY = "c4" * 32
+LINKED_FAMILY_RESCUE = "c5" * 32
+
+
+def _linked_methodology() -> dict:
+    return {
+        "asset_class": "equity",
+        "market": "US",
+        "universe": "sp500-pit",
+        "horizon": "6m",
+        "frequency": "daily",
+        "sample_period": ["2015-01-01", "2026-09-19"],
+    }
+
+
+@pytest.fixture
+def linked(tmp_path: Path) -> Iterator[dict]:
+    """Throwaway DB with a linked experiment/finding/assumption graph.
+
+    Graph (all edge kinds exercised):
+
+    * ``parent`` — root experiment (family P): child + rescue derive from
+      it, replica replicates it, sibling shares its family, other shares
+      its dataset version + artifact, one assumption applies to it;
+    * ``child`` — derived_from parent, outcome failure (experiment-with-a
+      failure neighbor);
+    * ``rescue`` — derived_from parent, but declares only horizon/frequency
+      scope and lexically misses the service-test query, so pass 1 cannot
+      return it and only the relational channel surfaces it;
+    * ``lonely`` — uses a dataset version nothing else touches (no
+      neighbors at all);
+    * ``finding_new`` supersedes ``finding_old``;
+    * one linked assumption (parent) and one orphan (no experiment).
+    """
+    engine = sa.create_engine(f"sqlite:///{(tmp_path / 'kb_relational.db').as_posix()}")
+    for table in KB_TABLES + ("artifact", "dataset_version"):
+        Base.metadata.tables[table].create(engine, checkfirst=True)
+    factory = sessionmaker(engine, expire_on_commit=False)
+    project_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    parent_id = uuid.uuid4()
+    child_id = uuid.uuid4()
+    replica_id = uuid.uuid4()
+    sibling_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    lonely_id = uuid.uuid4()
+    rescue_id = uuid.uuid4()
+    old_id = uuid.uuid4()
+    new_id = uuid.uuid4()
+    linked_assumption_id = uuid.uuid4()
+    orphan_assumption_id = uuid.uuid4()
+    shared_dataset_id = uuid.uuid4()
+    solo_dataset_id = uuid.uuid4()
+    shared_artifact_id = uuid.uuid4()
+    with factory() as session:
+        session.add(kb_schema.ResearchProjectRow(id=project_id, name="relational", visibility_scope={}))
+        session.add(kb_schema.AgentRunRow(id=run_id, project_id=project_id, agent_type="research", task="relational expansion", status="running"))
+
+        def _experiment(
+            key: uuid.UUID,
+            hypothesis: str,
+            family: str,
+            execution: str,
+            started: datetime,
+            *,
+            parent: uuid.UUID | None = None,
+            replicated: uuid.UUID | None = None,
+            outcome: str = "success",
+            failure_class: str | None = None,
+            methodology: dict | None = None,
+        ) -> None:
+            session.add(
+                ExperimentRow(
+                    id=key,
+                    project_id=project_id,
+                    created_by_run_id=run_id,
+                    experiment_family_hash=family,
+                    execution_hash=execution,
+                    hypothesis=hypothesis,
+                    methodology=methodology if methodology is not None else _linked_methodology(),
+                    parameters={},
+                    metrics=None,
+                    outcome=outcome,
+                    failure_class=failure_class,
+                    status="completed",
+                    parent_experiment_id=parent,
+                    replicated_experiment_id=replicated,
+                    started_at=started,
+                    completed_at=started,
+                )
+            )
+
+        _experiment(parent_id, "Cross-sectional momentum 126-day backtest", LINKED_FAMILY_PARENT, "e0" * 32, datetime(2026, 1, 10, tzinfo=UTC))
+        _experiment(
+            child_id,
+            "Momentum turnover stress test",
+            LINKED_FAMILY_CHILD,
+            "e1" * 32,
+            datetime(2026, 2, 10, tzinfo=UTC),
+            parent=parent_id,
+            outcome="failure",
+            failure_class="execution",
+        )
+        _experiment(replica_id, "Momentum 126-day independent replication", LINKED_FAMILY_REPLICA, "e2" * 32, datetime(2026, 3, 10, tzinfo=UTC), replicated=parent_id)
+        _experiment(sibling_id, "Sector-neutral momentum variant backtest", LINKED_FAMILY_PARENT, "e3" * 32, datetime(2026, 4, 10, tzinfo=UTC))
+        _experiment(other_id, "Corporate bond liquidity provision study", LINKED_FAMILY_OTHER, "e4" * 32, datetime(2026, 5, 10, tzinfo=UTC))
+        _experiment(lonely_id, "Unlinked volatility regime study", LINKED_FAMILY_LONELY, "e5" * 32, datetime(2026, 6, 10, tzinfo=UTC))
+        _experiment(
+            rescue_id,
+            "Overnight reversal microstructure examination",
+            LINKED_FAMILY_RESCUE,
+            "e6" * 32,
+            datetime(2026, 7, 10, tzinfo=UTC),
+            parent=parent_id,
+            methodology={"horizon": "6m", "frequency": "daily"},
+        )
+        session.add(
+            FindingRow(
+                id=old_id,
+                project_id=project_id,
+                canonical_key="empirical:relational-old-claim",
+                finding_type="empirical",
+                statement="Older claim about momentum persistence.",
+                scope={"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "6m", "frequency": "daily"},
+                status="candidate",
+                confidence={},
+                recorded_at=datetime(2026, 3, 1, tzinfo=UTC),
+                created_by_run_id=run_id,
+            )
+        )
+        session.add(
+            FindingRow(
+                id=new_id,
+                project_id=project_id,
+                canonical_key="empirical:relational-new-claim",
+                finding_type="empirical",
+                statement="Revised claim about momentum persistence.",
+                scope={"asset_class": "equity", "market": "US", "universe": "sp500-pit", "horizon": "6m", "frequency": "daily"},
+                status="candidate",
+                confidence={},
+                recorded_at=datetime(2026, 4, 1, tzinfo=UTC),
+                created_by_run_id=run_id,
+                supersedes_id=old_id,
+            )
+        )
+        session.add(
+            AssumptionRow(
+                id=linked_assumption_id,
+                experiment_id=parent_id,
+                statement="Closing auction volume absorbs the rebalanced notional.",
+                category="execution",
+                sensitivity="high",
+                tested=False,
+                status="active",
+            )
+        )
+        session.add(
+            AssumptionRow(
+                id=orphan_assumption_id,
+                experiment_id=None,
+                statement="Borrow is available at the quoted rate.",
+                category="market",
+                sensitivity="medium",
+                tested=False,
+                status="active",
+            )
+        )
+        session.add(kb_schema.DatasetVersionRow(id=shared_dataset_id, dataset_key="test:shared:features", provider="test"))
+        session.add(kb_schema.DatasetVersionRow(id=solo_dataset_id, dataset_key="test:solo:features", provider="test"))
+        session.add(
+            kb_schema.ArtifactRow(
+                id=shared_artifact_id,
+                sha256="ab" * 32,
+                kind="result",
+                storage_uri="artifact://test/shared",
+                created_by_run_id=run_id,
+                artifact_metadata={},
+            )
+        )
+        session.add(kb_schema.ExperimentDatasetRow(experiment_id=parent_id, dataset_version_id=shared_dataset_id, role="features"))
+        session.add(kb_schema.ExperimentDatasetRow(experiment_id=other_id, dataset_version_id=shared_dataset_id, role="features"))
+        session.add(kb_schema.ExperimentDatasetRow(experiment_id=lonely_id, dataset_version_id=solo_dataset_id, role="features"))
+        session.add(kb_schema.ExperimentArtifactRow(experiment_id=parent_id, artifact_id=shared_artifact_id, role="result"))
+        session.add(kb_schema.ExperimentArtifactRow(experiment_id=other_id, artifact_id=shared_artifact_id, role="result"))
+        session.commit()
+    try:
+        yield {
+            "factory": factory,
+            "engine": engine,
+            "parent_id": parent_id,
+            "child_id": child_id,
+            "replica_id": replica_id,
+            "sibling_id": sibling_id,
+            "other_id": other_id,
+            "lonely_id": lonely_id,
+            "rescue_id": rescue_id,
+            "old_id": old_id,
+            "new_id": new_id,
+            "linked_assumption_id": linked_assumption_id,
+            "orphan_assumption_id": orphan_assumption_id,
+        }
+    finally:
+        engine.dispose()
+
+
+class TestRelationalExpansion:
+    def test_satisfies_the_planner_protocol(self, linked: dict) -> None:
+        assert isinstance(pg.SQLRelationalExpansionStore(linked["factory"]), RelationalExpansionStore)
+
+    def test_parent_seed_reaches_every_mapped_edge_kind(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        found = backend.expand_neighbors([str(linked["parent_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50)
+        # child + rescue (derived_from), replica (replicates), sibling
+        # (related_to), other (uses, via both the shared dataset and the
+        # shared artifact — deduped to one hit), assumption (applies_to).
+        # The failed child is included: expansion has no kinds filter.
+        assert [item.id for item in found].count(str(linked["other_id"])) == 1
+        assert {item.id for item in found} == {
+            str(linked["child_id"]),
+            str(linked["rescue_id"]),
+            str(linked["replica_id"]),
+            str(linked["sibling_id"]),
+            str(linked["other_id"]),
+            str(linked["linked_assumption_id"]),
+        }
+        assert {item.id: item.kind for item in found}[str(linked["child_id"])] == "failure"
+
+    def test_finding_supersedes_edges_run_both_directions(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        forward = backend.expand_neighbors([str(linked["new_id"])], _scope(), edge_types=["supersedes"], limit=10)
+        assert [item.id for item in forward] == [str(linked["old_id"])]
+        backward = backend.expand_neighbors([str(linked["old_id"])], _scope(), edge_types=["supersedes"], limit=10)
+        assert [item.id for item in backward] == [str(linked["new_id"])]
+
+    def test_assumption_seed_reaches_its_experiment(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        found = backend.expand_neighbors([str(linked["linked_assumption_id"])], _scope(), edge_types=["applies_to"], limit=10)
+        assert [item.id for item in found] == [str(linked["parent_id"])]
+        assert backend.expand_neighbors([str(linked["orphan_assumption_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=10) == []
+
+    def test_edge_types_filter_the_traversal(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        seed = [str(linked["parent_id"])]
+        derived = backend.expand_neighbors(seed, _scope(), edge_types=["derived_from"], limit=50)
+        assert {item.id for item in derived} == {str(linked["child_id"]), str(linked["rescue_id"])}
+        uses = backend.expand_neighbors(seed, _scope(), edge_types=["uses"], limit=50)
+        assert [item.id for item in uses] == [str(linked["other_id"])]
+        # supports/contradicts have no backing relation: accepted, empty.
+        assert backend.expand_neighbors(seed, _scope(), edge_types=["supports", "contradicts"], limit=50) == []
+        assert backend.expand_neighbors(seed, _scope(), edge_types=[], limit=50) == []
+
+    def test_unknown_edge_types_are_rejected(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        with pytest.raises(KnowledgeValidationError):
+            backend.expand_neighbors([str(linked["parent_id"])], _scope(), edge_types=["cites"], limit=10)
+        with pytest.raises(KnowledgeValidationError):
+            backend.expand_neighbors([str(linked["parent_id"])], _scope(), edge_types="derived_from", limit=10)  # type: ignore[arg-type]
+
+    def test_single_pass_bound_excludes_two_hop_neighbors(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        # The child reaches only its parent: the sibling, replica, other,
+        # and assumption are two hops away and must stay out.
+        found = backend.expand_neighbors([str(linked["child_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50)
+        assert [item.id for item in found] == [str(linked["parent_id"])]
+        found = backend.expand_neighbors([str(linked["sibling_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50)
+        assert [item.id for item in found] == [str(linked["parent_id"])]
+
+    def test_empty_graph_and_unknown_seeds_return_nothing(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        assert backend.expand_neighbors([str(linked["lonely_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50) == []
+        assert backend.expand_neighbors([str(uuid.uuid4())], _scope(), edge_types=list(EDGE_TYPES), limit=50) == []
+        assert backend.expand_neighbors(["not-a-uuid"], _scope(), edge_types=list(EDGE_TYPES), limit=50) == []
+        assert backend.expand_neighbors([], _scope(), edge_types=list(EDGE_TYPES), limit=50) == []
+
+    def test_seeds_are_excluded_from_results(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        found = backend.expand_neighbors([str(linked["parent_id"]), str(linked["child_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50)
+        ids = {item.id for item in found}
+        assert str(linked["parent_id"]) not in ids
+        assert str(linked["child_id"]) not in ids
+        assert ids == {
+            str(linked["rescue_id"]),
+            str(linked["replica_id"]),
+            str(linked["sibling_id"]),
+            str(linked["other_id"]),
+            str(linked["linked_assumption_id"]),
+        }
+
+    def test_scope_screening_matches_fusion(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        # Under an asset-class mismatch only scope-neutral neighbors survive:
+        # the assumption (no scope at all) and the rescue row (declares
+        # horizon/frequency only, no asset class).
+        found = backend.expand_neighbors([str(linked["parent_id"])], _scope(asset_class="credit"), edge_types=list(EDGE_TYPES), limit=50)
+        assert {item.id for item in found} == {str(linked["linked_assumption_id"]), str(linked["rescue_id"])}
+
+    def test_limit_trims(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        found = backend.expand_neighbors([str(linked["parent_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=2)
+        assert len(found) == 2
+
+    def test_seed_order_ranks_first(self, linked: dict) -> None:
+        backend = pg.SQLRelationalExpansionStore(linked["factory"])
+        found = backend.expand_neighbors([str(linked["new_id"]), str(linked["child_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50)
+        # The finding neighbor (seed 0) outranks the experiment neighbor
+        # (seed 1) regardless of recency.
+        assert [item.id for item in found] == [str(linked["old_id"]), str(linked["parent_id"])]
+
+    def test_service_search_surfaces_expansion_only_neighbors(self, linked: dict) -> None:
+        service = pg.KnowledgeRetrievalService(linked["factory"])
+        page = service.search("momentum 126-day backtest", kinds=("experiment",), filters={"market": "US"}, limit=10, offset=0)
+        by_id = {doc.id: doc for doc in page.documents}
+        # The rescue row is invisible to pass 1 (structured prunes it: it
+        # declares scope but no market; lexical scores it 0), yet it is
+        # scope-compatible at fusion — so only the relational channel
+        # surfaces it.
+        assert str(linked["parent_id"]) in by_id
+        assert str(linked["rescue_id"]) in by_id
+        assert by_id[str(linked["rescue_id"])].payload["channels"] == ["relational"]

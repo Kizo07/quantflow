@@ -414,6 +414,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("Upload staging file cleanup skipped", exc_info=True)
 
+    # Research Knowledge Plane: bind the retrieval backends once from the
+    # `knowledge:` config section (DSN + embedding model) so the ledger
+    # tools and the run-start bootstrap middleware resolve real bindings.
+    # Unconfigured/disabled leaves them unbound (tools report {"error": ...},
+    # the middleware skips); any failure only warns — the Gateway serves
+    # without KB recall. Runs in a worker thread: provider loading blocks.
+    try:
+        from deerflow.knowledge.pg_retrieval import bind_knowledge_backends_from_config
+
+        await asyncio.to_thread(bind_knowledge_backends_from_config)
+    except Exception:
+        logger.warning("Knowledge backend binding skipped", exc_info=True)
+
     # Initialize LangGraph runtime components (StreamBridge, RunManager, checkpointer, store)
     async with langgraph_runtime(app, startup_config):
         logger.info("LangGraph runtime initialised")

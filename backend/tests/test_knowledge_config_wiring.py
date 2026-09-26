@@ -67,6 +67,7 @@ def test_app_config_knowledge_defaults() -> None:
     assert isinstance(config.knowledge, KnowledgeConfig)
     assert config.knowledge.enabled is True
     assert config.knowledge.get_database_dsn() is None
+    assert config.knowledge.get_embedding_model() is None
     assert config.knowledge.get_object_store_bucket() == "quantflow-knowledge"
     assert config.knowledge.default_page_size == 20
     assert config.knowledge.max_page_size == 100
@@ -79,6 +80,8 @@ def test_from_file_loads_knowledge_section_and_refreshes_singleton(tmp_path, mon
         {
             "knowledge": {
                 "enabled": False,
+                "database_dsn": "postgresql+psycopg://kb/db",
+                "embedding_model": "sentence-transformers/all-mpnet-base-v2",
                 "object_store_bucket": "kb-evidence",
                 "object_store_region": "eu-west-1",
                 "default_page_size": 5,
@@ -88,11 +91,15 @@ def test_from_file_loads_knowledge_section_and_refreshes_singleton(tmp_path, mon
         },
     )
     assert config.knowledge.enabled is False
+    assert config.knowledge.get_database_dsn() == "postgresql+psycopg://kb/db"
+    assert config.knowledge.get_embedding_model() == "sentence-transformers/all-mpnet-base-v2"
     assert config.knowledge.get_object_store_bucket() == "kb-evidence"
     assert config.knowledge.get_object_store_region() == "eu-west-1"
     assert config.knowledge.default_page_size == 5
     assert config.knowledge.max_page_size == 50
     singleton = get_knowledge_config()
+    assert singleton.get_database_dsn() == "postgresql+psycopg://kb/db"
+    assert singleton.get_embedding_model() == "sentence-transformers/all-mpnet-base-v2"
     assert singleton.get_object_store_bucket() == "kb-evidence"
     assert singleton.max_page_size == 50
 
@@ -122,5 +129,7 @@ def test_example_yaml_knowledge_section_validates() -> None:
     assert "knowledge" in config_data
     parsed = DirectKnowledgeConfig(**config_data["knowledge"])
     assert parsed.enabled is True
+    assert parsed.database_dsn is None
+    assert parsed.embedding_model is None
     assert parsed.default_page_size == 20
     assert parsed.max_page_size == 100

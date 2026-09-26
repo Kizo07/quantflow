@@ -2050,6 +2050,16 @@ knowledge:
   # DEER_FLOW_KNOWLEDGE_DSN. Omit to leave the PG binding unconfigured
   # (the Knowledge API then works only with an explicitly passed store).
   # database_dsn: postgresql+psycopg://deerflow:secret@localhost:5432/deerflow
+  # SQLite file DSNs work for dev/test with identical query semantics, e.g.
+  # the shared research KB (must be at migration 0028 for experiment
+  # channels; the Gateway migrates only its own database, never this file):
+  # database_dsn: sqlite:////home/fire/Documents/Audit/kb/quantflow_kb.db
+  # Embedding model id for the retrieval vector channel. Falls back to
+  # DEER_FLOW_KNOWLEDGE_EMBEDDING_MODEL. Omit to disable the vector
+  # channel (structured + lexical + failure channels still run). The
+  # planner arms the channel from needed_memory (validated_findings /
+  # prior_experiments); no separate flag exists by design.
+  # embedding_model: sentence-transformers/all-mpnet-base-v2
   # S3-compatible endpoint URL holding immutable evidence artifacts
   # (MinIO for local dev — see deploy/knowledge/docker-compose.minio.yml;
   # real S3 in prod). Falls back to DEER_FLOW_KNOWLEDGE_S3_ENDPOINT.

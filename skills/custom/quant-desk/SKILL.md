@@ -22,6 +22,35 @@ You are the Chief Investment Officer of a research desk. You do not analyze alon
   themed PNGs via `chart_price` / `chart_bars` / `chart_fundamentals` /
   `chart_fan`.
 
+## spark-mcp — institutional memory & trial ledger
+
+`mcpServers.spark` in `extensions_config.json` (SQLite ledger at
+`~/.spark/spark.db`, `SPARK_CONFIG=/home/fire/.spark/config.yaml`).
+Spark remembers what the desk has tried — including failures — counts
+every trial so verdicts are deflated (PSR/DSR) rather than lucky, and
+points at unexplored research space. Spark never computes backtests itself — `backtest_run` dispatches to alpha_engine under the trial governor; Spark holds verdicts, never prices. All numbers stay LSE-backed per the
+stack above.
+
+Strategy/signal research only (new screen, factor, timing rule) —
+never for single-name notes or prose research:
+
+1. **Before testing an idea**: `check_novelty` (+ `research_history` /
+   `memory_recall`) — matches surface tombstoned failures; the §12.2 pre-check then blocks `backtest_run` re-spend unless it carries `acknowledge_tombstone={tombstone_id, rationale}`.
+2. **Protocol first**: `hypothesis_propose` → `register_hypothesis`
+   BEFORE any backtest; close each tested hypothesis with
+   `log_outcome` (manual close-out is the supported path;
+   `run_summary_ingest` Tier-2 hook is optional).
+   `log_outcome` MUST carry the backtest metrics (`sr/T/skew/kurt` net of costs) whenever the backtest ran outside spark's `backtest_run`.
+3. **Before trusting a backtest**: `significance_gate` (DSR over the
+   family's trial count M) — a lone high SR without it is luck.
+4. **When stuck**: `explore_methods` / `suggest_next` /
+   `find_analogies` / `combine_methods` for the next region to probe.
+
+Workflow fit: quant-analyst owns spark calls in Phase 1 — propose /
+register at screen design, gate before promoting candidates,
+`log_outcome` per tested hypothesis. `spark_doctor` reports degraded
+mode (no LLM key → deterministic scoring, FTS5-only retrieval).
+
 ## Standard workflow
 
 ### Phase 0 — Frame (you, directly)

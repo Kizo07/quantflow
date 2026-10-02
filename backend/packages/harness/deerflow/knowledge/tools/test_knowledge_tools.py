@@ -540,6 +540,96 @@ def test_get_knowledge_tools_registry():
     assert [tool.name for tool in kb_bootstrap.get_knowledge_bootstrap_tool()] == ["knowledge_bootstrap"]
 
 
+# -- registration gate ------------------------------------------------------
+
+
+@pytest.fixture()
+def _knowledge_config_enabled(monkeypatch):
+    """Enable the plane for the test, restoring the previous singleton after."""
+    from deerflow.knowledge.config import KnowledgeConfig, get_knowledge_config, set_knowledge_config
+
+    monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_ENABLED", raising=False)
+    previous = get_knowledge_config()
+    set_knowledge_config(KnowledgeConfig(enabled=True))
+    try:
+        yield
+    finally:
+        set_knowledge_config(previous)
+
+
+@pytest.fixture()
+def _knowledge_config_disabled(monkeypatch):
+    from deerflow.knowledge.config import KnowledgeConfig, get_knowledge_config, set_knowledge_config
+
+    monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_ENABLED", raising=False)
+    previous = get_knowledge_config()
+    set_knowledge_config(KnowledgeConfig(enabled=False))
+    try:
+        yield
+    finally:
+        set_knowledge_config(previous)
+
+
+def test_knowledge_tools_available_needs_enabled_and_bound_backends(_knowledge_config_enabled):
+    assert kb_lookup.knowledge_tools_available() is False
+    kb_lookup.bind_knowledge_backends(retrieval=FakeRetrieval(docs=[make_doc()]))
+    assert kb_lookup.knowledge_tools_available() is True
+
+
+def test_knowledge_tools_available_experiments_only_counts(_knowledge_config_enabled):
+    kb_lookup.bind_knowledge_backends(experiments=FakeExperimentLookup(records=[make_experiment()]))
+    assert kb_lookup.knowledge_tools_available() is True
+
+
+def test_knowledge_tools_available_artifacts_only_does_not_count(tmp_path, _knowledge_config_enabled):
+    reader, _, _ = make_tmp_artifacts(tmp_path)
+    kb_lookup.bind_knowledge_backends(artifacts=reader)
+    assert kb_lookup.knowledge_tools_available() is False
+
+
+def test_knowledge_tools_available_disabled_plane_is_unavailable(_knowledge_config_disabled):
+    kb_lookup.bind_knowledge_backends(retrieval=FakeRetrieval(docs=[make_doc()]))
+    assert kb_lookup.knowledge_tools_available() is False
+
+
+def test_factory_registers_knowledge_tools_when_available(tmp_path, _knowledge_config_enabled):
+    from deerflow.agents.factory import _assemble_from_features
+    from deerflow.agents.features import RuntimeFeatures
+    from deerflow.knowledge.tools.middleware import KnowledgeBootstrapMiddleware
+
+    bind_all(tmp_path)
+    chain, extra_tools = _assemble_from_features(RuntimeFeatures(knowledge=True), name="test-agent")
+    assert any(isinstance(item, KnowledgeBootstrapMiddleware) for item in chain)
+    assert [tool.name for tool in extra_tools if tool.name in {"ledger_search", "ledger_get", "experiment_get", "artifact_manifest", "artifact_open"}] == [
+        "ledger_search",
+        "ledger_get",
+        "experiment_get",
+        "artifact_manifest",
+        "artifact_open",
+    ]
+
+
+def test_factory_skips_knowledge_tools_when_unbound(_knowledge_config_enabled):
+    from deerflow.agents.factory import _assemble_from_features
+    from deerflow.agents.features import RuntimeFeatures
+    from deerflow.knowledge.tools.middleware import KnowledgeBootstrapMiddleware
+
+    chain, extra_tools = _assemble_from_features(RuntimeFeatures(knowledge=True), name="test-agent")
+    assert any(isinstance(item, KnowledgeBootstrapMiddleware) for item in chain)
+    assert not {"ledger_search", "ledger_get", "experiment_get", "artifact_manifest", "artifact_open"} & {tool.name for tool in extra_tools}
+
+
+def test_factory_skips_knowledge_tools_when_feature_off(tmp_path, _knowledge_config_enabled):
+    from deerflow.agents.factory import _assemble_from_features
+    from deerflow.agents.features import RuntimeFeatures
+    from deerflow.knowledge.tools.middleware import KnowledgeBootstrapMiddleware
+
+    bind_all(tmp_path)
+    chain, extra_tools = _assemble_from_features(RuntimeFeatures(knowledge=False), name="test-agent")
+    assert not any(isinstance(item, KnowledgeBootstrapMiddleware) for item in chain)
+    assert not {"ledger_search", "ledger_get", "experiment_get", "artifact_manifest", "artifact_open"} & {tool.name for tool in extra_tools}
+
+
 # -- middleware -------------------------------------------------------------
 
 

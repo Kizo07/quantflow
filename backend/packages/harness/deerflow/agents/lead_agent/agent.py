@@ -199,6 +199,19 @@ def _append_memory_tools_without_name_conflicts(tools: list) -> None:
     _append_named_tools_without_conflicts(tools, get_memory_tools(), kind="Memory")
 
 
+def _append_knowledge_tools_without_name_conflicts(tools: list) -> None:
+    """Append KB recall tools without dropping unrelated duplicate-named tools.
+
+    Self-gating no-op unless the plane is enabled and bound (see
+    ``knowledge_tools_available``), so callers never register dead tools.
+    """
+    from deerflow.knowledge.tools.lookup import get_knowledge_tools, knowledge_tools_available
+
+    if not knowledge_tools_available():
+        return
+    _append_named_tools_without_conflicts(tools, get_knowledge_tools(), kind="Knowledge")
+
+
 def _append_project_document_tools_if_pinned(tools: list, cfg: dict) -> None:
     """Append the project shelf tools only for runs with a pinned project context.
 
@@ -1206,6 +1219,7 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
         authorization_candidates.append(skill_setup.describe_skill_tool)
     if memory_enabled and should_use_memory_tools(resolved_app_config.memory):
         _append_memory_tools_without_name_conflicts(authorization_candidates)
+    _append_knowledge_tools_without_name_conflicts(authorization_candidates)
     _append_project_document_tools_if_pinned(authorization_candidates, cfg)
     append_task_continuity_tools(authorization_candidates, resolved_app_config)
     configured_tool_ids = {id(tool) for tool in configured_tools}

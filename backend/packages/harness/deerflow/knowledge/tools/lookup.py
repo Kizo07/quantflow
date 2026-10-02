@@ -25,6 +25,14 @@ Import-cycle contract: importing this module must never pull in
 ``deerflow.config``. It depends on ``deerflow.knowledge`` record/search
 modules, the artifact store value types, ``langchain`` tool plumbing and
 ``deerflow.runtime``/``deerflow.tools`` runtime helpers only.
+
+Write path note: the ``write_api`` functions (``experiment_begin`` /
+``experiment_commit`` / ``failure_record`` / ``assumption_record``) are
+programmatic-only — no PG ``ExperimentStore`` binding is bound
+process-wide and no agent ``@tool`` wrappers exist for them. The ledger
+is therefore operator-curated at runtime: runs read via the lookup
+tools below and record outcomes through Spark (``log_outcome``), not
+the KB.
 """
 
 import json
@@ -39,6 +47,7 @@ from langchain.tools import tool
 
 from deerflow.knowledge.artifacts.models import ArtifactNotFoundError, ArtifactRecord
 from deerflow.knowledge.artifacts.store import ArtifactStore, parse_artifact_uri
+from deerflow.knowledge.config import get_knowledge_config
 from deerflow.knowledge.search import ExperimentSearchStore
 from deerflow.knowledge.write_api import ExperimentRecord, KnowledgeError, KnowledgeValidationError
 from deerflow.runtime.user_context import resolve_runtime_user_id
@@ -67,6 +76,7 @@ __all__ = [
     "bind_knowledge_backends",
     "get_knowledge_backends",
     "reset_knowledge_backends",
+    "knowledge_tools_available",
     "ledger_search",
     "ledger_get",
     "experiment_get",
@@ -424,6 +434,27 @@ def reset_knowledge_backends() -> None:
     """Clear all backend bindings (tests only)."""
     global _knowledge_backends
     _knowledge_backends = KnowledgeBackends()
+
+
+def knowledge_tools_available() -> bool:
+    """Return True when the mid-run recall tools should be registered.
+
+    Registration gate shared by the lead-agent and factory assembly
+    paths: the plane must be enabled AND at least one recall binding
+    (retrieval or experiments) must be bound — mirroring
+    ``KnowledgeBootstrapMiddleware``'s self-gating so the tools are
+    never registered dead (unbound wrappers can only return
+    ``{"error": ...}``). Any config/registry failure reads as
+    unavailable, never raises.
+    """
+    try:
+        if not get_knowledge_config().is_enabled():
+            return False
+        bindings = get_knowledge_backends()
+    except Exception:
+        logger.warning("knowledge_tools_available: config/registry read failed; treating knowledge tools as unavailable", exc_info=True)
+        return False
+    return bindings.retrieval is not None or bindings.experiments is not None
 
 
 def _require_query(query: Any) -> str:

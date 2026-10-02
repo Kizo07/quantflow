@@ -51,6 +51,21 @@ register at screen design, gate before promoting candidates,
 `log_outcome` per tested hypothesis. `spark_doctor` reports degraded
 mode (no LLM key → deterministic scoring, FTS5-only retrieval).
 
+## Research Knowledge Plane — ledger recall (built-in tools)
+
+Every run auto-injects a RESEARCH CONTEXT packet at run start (no call
+needed): prior consensus, experiments, failures, contradictions,
+assumptions. Mid-run recall stays available on every analyst:
+
+- **quant-analyst, before designing a screen**: call `ledger_search`
+  to check what the desk already tried; open provenance with
+  `ledger_get` / `experiment_get` before recycling an idea.
+- `artifact_manifest` / `artifact_open` inspect evidence blobs through
+  bounded windows only — never full multi-GB reads.
+- The KB write path is operator-curated (programmatic-only: no agent
+  write tools exist), so record run outcomes via Spark `log_outcome`,
+  not the KB.
+
 ## Standard workflow
 
 ### Phase 0 — Frame (you, directly)

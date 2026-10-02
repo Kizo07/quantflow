@@ -333,9 +333,18 @@ def _assemble_from_features(
         if isinstance(feat.knowledge, AgentMiddleware):
             chain.append(feat.knowledge)
         else:
+            from deerflow.knowledge.tools.lookup import get_knowledge_tools, knowledge_tools_available
             from deerflow.knowledge.tools.middleware import KnowledgeBootstrapMiddleware
 
             chain.append(KnowledgeBootstrapMiddleware(agent_name=name))
+            if knowledge_tools_available():
+                existing_names = {tool.name for tool in extra_tools}
+                for knowledge_tool in get_knowledge_tools():
+                    if knowledge_tool.name in existing_names:
+                        logger.warning("Knowledge tool name %r already exists and was skipped.", knowledge_tool.name)
+                        continue
+                    extra_tools.append(knowledge_tool)
+                    existing_names.add(knowledge_tool.name)
 
     # --- [11] Vision ---
     if feat.vision is not False:

@@ -40,6 +40,28 @@ _executor_mock.get_background_task_result = MagicMock()
 sys.modules["deerflow.subagents.executor"] = _executor_mock
 
 
+@pytest.fixture(autouse=True)
+def _reset_knowledge_plane_state():
+    """Restore Knowledge Plane singletons after every test.
+
+    Gateway-lifespan tests boot the real lifespan, which binds live
+    knowledge backends (PG + embedding model) into the process-wide
+    registry and mutates the config singleton. Without cleanup that
+    state leaks into later tests (e.g. bind-from-config tests asserting
+    an untouched registry). Reset after each test; in-test behavior is
+    unchanged.
+    """
+    from deerflow.knowledge.config import get_knowledge_config, set_knowledge_config
+    from deerflow.knowledge.tools.lookup import reset_knowledge_backends
+
+    previous = get_knowledge_config()
+    try:
+        yield
+    finally:
+        reset_knowledge_backends()
+        set_knowledge_config(previous)
+
+
 @pytest.fixture()
 def provisioner_module():
     """Load docker/provisioner/app.py as an importable test module.

@@ -5,8 +5,9 @@ Covers ``ExperimentRow.embedding`` in
 ``0028_knowledge_experiment_embeddings``:
 
 * revision chain integrity (direct child of
-  ``0027_merge_knowledge_upstream``, single alembic head — this file owns
-  the chain-head pin);
+  ``0027_merge_knowledge_upstream``; the chain-head pin moved on to
+  ``test_migration_0029_merge_knowledge_outbox`` with the
+  QuantFlow/upstream merge revision);
 * ``Base.metadata.create_all`` + experiment persistence, including exact
   embedding round-trip through the SQLite JSON fallback;
 * migration ``upgrade()`` / ``downgrade()`` against a scratch SQLite
@@ -136,15 +137,19 @@ class TestRevisionChain:
         assert migration.revision == REVISION
         assert migration.down_revision == PARENT
 
-    def test_0028_is_the_chain_head(self) -> None:
-        assert bootstrap._get_head_revision() == REVISION
+    def test_0028_is_ancestor_of_the_chain_head(self) -> None:
+        assert REVISION in {revision.revision for revision in self._script().walk_revisions()}
+        assert bootstrap._get_head_revision() == "0029_merge_knowledge_outbox"
 
     def test_single_head_no_branches(self) -> None:
+        assert self._script().get_heads() == ["0029_merge_knowledge_outbox"]
+
+    @staticmethod
+    def _script() -> ScriptDirectory:
         migrations_dir = Path(migration.__file__).resolve().parent.parent
         config = Config()
         config.set_main_option("script_location", migrations_dir.as_posix())
-        script = ScriptDirectory.from_config(config)
-        assert script.get_heads() == [REVISION]
+        return ScriptDirectory.from_config(config)
 
     def test_embedding_dimensions_match_findings(self) -> None:
         """Experiment embeddings share the finding dimensionality contract."""

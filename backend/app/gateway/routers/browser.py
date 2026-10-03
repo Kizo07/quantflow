@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from app.gateway.authz import require_permission
+from app.gateway.authz import Permissions, require_permission, resolve_route_permissions
 from app.gateway.browser_capability import browser_capability
 from deerflow.config.paths import get_paths
 from deerflow.runtime.user_context import get_effective_user_id, reset_current_user, set_current_user
@@ -219,6 +219,21 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
 
     if not _ws_origin_allowed(websocket):
         # Cross-origin upgrade — reject before touching any session (WS-CSRF).
+        await websocket.close(code=4403)
+        return
+
+    # HTTP auth middleware does not run for WebSockets. Live is bidirectional,
+    # so even a viewer must have the same write permission as REST navigation.
+    # _authenticate_ws accepts session cookies or the auth-disabled user, not
+    # internal-auth tokens. Both sources are non-internal, including the
+    # synthetic admin used when authentication is disabled.
+    try:
+        permissions = await resolve_route_permissions(user, is_internal=False)
+    except Exception:
+        logger.warning("Failed to resolve browser stream permissions", exc_info=True)
+        await websocket.close(code=4501)
+        return
+    if Permissions.THREADS_WRITE not in permissions:
         await websocket.close(code=4403)
         return
 
@@ -441,7 +456,7 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
                     # SSRF-screen client-driven navigations with the same policy
                     # the agent tools enforce; reject rather than dispatch.
                     url = event.get("url")
-                    reason = validate_browser_url(url) if isinstance(url, str) else "Error: invalid navigation URL"
+                    reason = await asyncio.to_thread(validate_browser_url, url) if isinstance(url, str) else "Error: invalid navigation URL"
                     if reason is not None:
                         await _send_payload({"type": "nav_rejected", "url": url, "message": reason})
                         continue
@@ -465,7 +480,7 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
         # page differs from the latest visible browser artifact, align Live with
         # what the user expects instead of requiring an off/on reconnect.
         seed = websocket.query_params.get("seed")
-        if seed and validate_browser_url(seed) is None:
+        if seed and await asyncio.to_thread(validate_browser_url, seed) is None:
             with contextlib.suppress(Exception):
                 current = await session.current_url()
                 if _should_apply_browser_seed(current, seed):

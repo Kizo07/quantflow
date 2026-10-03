@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from deerflow.config.prompt_overlay import PromptOverlay
+
 if TYPE_CHECKING:
     from deerflow.config.app_config import AppConfig
 
@@ -38,6 +40,7 @@ class SubagentConfig:
         reasoning_effort: Named effort override for this subagent's model, one
             of ``SUBAGENT_REASONING_EFFORT_LEVELS``. None (default) means no
             override — the model profile value (if any) stands.
+        prompt_overlay: Operator instructions around the complete system message.
     """
 
     name: str
@@ -51,6 +54,7 @@ class SubagentConfig:
     timeout_seconds: int = 900
     thinking_enabled: bool | None = None
     reasoning_effort: str | None = None
+    prompt_overlay: PromptOverlay = field(default_factory=PromptOverlay)
 
 
 SUBAGENT_REASONING_EFFORT_LEVELS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
@@ -71,12 +75,14 @@ def resolve_subagent_thinking(config: SubagentConfig, model_config) -> tuple[boo
     ``model_config`` (profile unknown) skips the capability check so the
     model factory can raise its canonical unknown-model error downstream.
     Effort on a model without ``supports_reasoning_effort`` is passed
-    through untouched — the factory strips it.
+    through untouched — the factory strips it. Missing attributes read as
+    ``None`` so duck-typed configs predating these fields keep working.
     """
-    effort = config.reasoning_effort
+    effort = getattr(config, "reasoning_effort", None)
     if effort is not None and effort not in SUBAGENT_REASONING_EFFORT_LEVELS:
         raise ValueError(f"Subagent '{config.name}': invalid reasoning_effort {effort!r}; expected one of {sorted(SUBAGENT_REASONING_EFFORT_LEVELS)}.")
-    thinking = config.thinking_enabled if config.thinking_enabled is not None else False
+    thinking_opt = getattr(config, "thinking_enabled", None)
+    thinking = thinking_opt if thinking_opt is not None else False
     if thinking and model_config is not None and not getattr(model_config, "supports_thinking", False):
         raise ValueError(f"Subagent '{config.name}': thinking_enabled=true but model '{getattr(model_config, 'name', '?')}' does not support thinking.")
     return thinking, effort

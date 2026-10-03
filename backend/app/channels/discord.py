@@ -108,7 +108,7 @@ class DiscordChannel(Channel):
         try:
             import discord
         except ImportError:
-            logger.error("discord.py is not installed. Install it with: uv add discord.py")
+            logger.error("discord.py is not installed. The Discord channel needs the 'discord' extra: run `cd backend && uv sync --extra discord`.")
             return
 
         if not self._bot_token:
@@ -264,7 +264,10 @@ class DiscordChannel(Channel):
                     logger.exception("[Discord] error while closing client")
 
         if self._thread:
-            self._thread.join(timeout=10)
+            # The client thread normally exits right after the close above, but
+            # a timed-out close or a slow ``_run_client()`` drain can keep it
+            # alive for the whole join timeout; keep that wait off the loop.
+            await asyncio.to_thread(self._thread.join, timeout=10)
             self._thread = None
 
         # _run_client() normally drains these tasks in its finally block.  If
@@ -364,12 +367,19 @@ class DiscordChannel(Channel):
             return  # Already typing for this target
 
         async def _typing_loop():
+            # The loop's first failure logs at WARNING, so an indicator that
+            # never works (missing permission, sustained 429s) shows at the
+            # default level; later ticks drop to DEBUG so retries cannot flood.
+            failure_level = logging.WARNING
             try:
                 while True:
                     try:
-                        await channel.trigger_typing()
+                        # discord.py 2.x removed ``trigger_typing()``; awaiting
+                        # ``typing()`` sends one indicator (~10s on screen).
+                        await channel.typing()
                     except Exception:
-                        pass
+                        logger.log(failure_level, "[Discord] failed to send typing indicator to %s", target_id, exc_info=True)
+                        failure_level = logging.DEBUG
                     await asyncio.sleep(10)
             except asyncio.CancelledError:
                 pass
@@ -876,8 +886,12 @@ class DiscordChannel(Channel):
             split_at = remaining.rfind("\n", 0, _DISCORD_MAX_MESSAGE_LEN)
             if split_at <= 0:
                 split_at = _DISCORD_MAX_MESSAGE_LEN
+            else:
+                # Keep the delimiter on this chunk's tail so consecutive
+                # Discord messages reconstruct the original text exactly.
+                split_at += 1
             chunks.append(remaining[:split_at])
-            remaining = remaining[split_at:].lstrip("\n")
+            remaining = remaining[split_at:]
 
         if remaining:
             chunks.append(remaining)

@@ -127,6 +127,10 @@ async def test_0025_downgrade_preserves_ancestor_owned_schema_and_data(tmp_path)
             assert await RunRepository._next_change_seq(session) == 1
             await session.commit()
 
+        # Pin the start at this repair: the test rolls back ONLY 0025, so a
+        # from-head downgrade would traverse unrelated merge legs (0027/0029)
+        # and land on a nondeterministic stamp.
+        await asyncio.to_thread(command.stamp, cfg, REVISION)
         await asyncio.to_thread(command.downgrade, cfg, PREVIOUS)
         has_table, has_column, run_indexes, version = _table_and_column_state(db_path)
         assert has_table

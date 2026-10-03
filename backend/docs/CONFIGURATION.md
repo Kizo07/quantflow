@@ -2,6 +2,54 @@
 
 This guide explains how to configure DeerFlow for your environment.
 
+## Prompt overlays
+
+Operators can add instructions around existing system prompts in `config.yaml`.
+Empty or omitted extensions preserve the original prompt exactly. The built-in
+instructions remain present; extensions do not change tool authorization,
+memory admission gates, or runtime limits.
+
+```yaml
+lead_prompt_overlay:
+  prepend: "Use our organization's terminology in reports."
+  append: "Conclude with decisions and unresolved questions."
+subagents:
+  agents:
+    general-purpose:
+      prompt_overlay:
+        append: "Include evidence for research claims."
+    bash:
+      prompt_overlay:
+        prepend: "Prefer reproducible, non-interactive commands."
+memory:
+  backend_config:
+    prompt_prepend: "Prefer concise summaries of lasting preferences."
+    prompt_append: "Preserve explicit corrections without redundant wording."
+```
+
+Merge these into existing sections rather than duplicating YAML keys. Extensions
+are joined with two newlines around the assembled system text. They are literal:
+`{conversation}` and JSON braces are not interpolated. The configuration loader's
+existing `$ENV_VAR` resolution still applies to values beginning with `$`.
+Use YAML block scalars for multiline instructions.
+
+These are trusted operator instructions, never request/body context or per-user
+agent data. Lead extensions apply to the assembled default or custom lead agent;
+its SOUL, skills and runtime guidance remain intact. Subagent extensions also
+support configured custom subagents and never mutate the shared built-in
+registry. Explicit application snapshots remain isolated; subsequent assemblies
+use new settings, while already-built graphs retain their prompt.
+
+DeerMem's current `memory_update` chat prompt handles both summary updates and
+fact extraction; the historical `FACT_EXTRACTION_PROMPT` constant is not a
+separate live extraction call. Its extensions wrap the first system message
+after template rendering, leaving memory and conversation data in their original
+human message. They also work with `prompts_dir` templates, which must include
+a system message when overlays are used. Restart the memory backend/Gateway after
+changing its configuration. Other memory backends do not consume these
+DeerMem-specific fields. Existing external memory templates remain the mechanism
+for complete template replacement; this feature adds no editing endpoint or UI.
+
 ## Model request admission
 
 For request-per-minute limits, opt into pacing on each relevant `models[]`
@@ -14,6 +62,10 @@ request_admission:
   max_wait_seconds: 300
   max_queue_size: 256
 ```
+
+Like every other field, these accept `$VAR` environment references; an integer
+field such as `requests_per_minute: $RPM` validates when the variable holds a
+decimal integer.
 
 Calls wait in a bounded FIFO before dispatch. At 60 RPM, admissions are spaced
 at least one second apart, even after idle periods. The first call can proceed
@@ -57,7 +109,7 @@ Run `make config-upgrade` to merge new fields into your config.
 ```
 
 - **Missing `config_version`** in your config is treated as version 0.
-- Run `make config-upgrade` to auto-merge missing fields (your existing values are preserved, a `.bak` backup is created).
+- Run `make config-upgrade` to auto-merge missing fields (your existing values are preserved, a `.bak` backup is created). It upgrades the file the Gateway loads, resolved as in [Configuration Priority](#configuration-priority).
 - When changing the config schema, bump `config_version` in `config.example.yaml`.
 
 ## Configuration Sections
@@ -217,7 +269,7 @@ models:
           type: enabled
 ```
 
-**Gemini with thinking via OpenAI-compatible gateway**:
+#### Gemini via Google's OpenAI-compatible endpoint
 
 When routing Gemini through an OpenAI-compatible proxy (Vertex AI OpenAI compat endpoint, AI Studio, or third-party gateways) with thinking enabled, the API attaches a `thought_signature` to each tool-call object returned in the response.  Every subsequent request that replays those assistant messages **must** echo those signatures back on the tool-call entries or the API returns:
 
@@ -230,22 +282,24 @@ Standard `langchain_openai:ChatOpenAI` silently drops `thought_signature` when s
 
 ```yaml
 models:
-  - name: gemini-2.5-pro-thinking
-    display_name: Gemini 2.5 Pro (Thinking)
+  - name: gemini-3.1-pro-preview
+    display_name: Gemini 3.1 Pro (Thinking)
     use: deerflow.models.patched_openai:PatchedChatOpenAI
-    model: google/gemini-2.5-pro-preview   # model name as expected by your gateway
+    model: gemini-3.1-pro-preview
     api_key: $GEMINI_API_KEY
-    base_url: https://<your-openai-compat-gateway>/v1
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
     max_tokens: 16384
-    supports_thinking: true
     supports_vision: true
-    when_thinking_enabled:
-      extra_body:
-        thinking:
-          type: enabled
+    reasoning:
+      thinking: required
+      dialect: none
+      effort:
+        values: [minimal, low, medium, high]
 ```
 
-For Gemini accessed **without** thinking (e.g. via OpenRouter where thinking is not activated), the plain `langchain_openai:ChatOpenAI` with `supports_thinking: false` is sufficient and no patch is needed.
+This example targets Google's official endpoint. Its [OpenAI compatibility API](https://ai.google.dev/gemini-api/docs/openai#thinking) accepts `reasoning_effort`; `extra_body.thinking` becomes an unsupported top-level `thinking` field and causes HTTP 400. Gemini 3.1 Pro cannot disable thinking, so `thinking: required` keeps it enabled even when a caller requests otherwise, while `dialect: none` prevents a provider-specific thinking toggle. Omitting effort uses the model's default.
+
+If you copied the previous example, replace its `supports_thinking`, `when_thinking_enabled`, and `when_thinking_disabled` settings with the `reasoning` block above. Third-party gateways may require different model IDs and reasoning parameters; follow that gateway's documentation instead of reusing Google's profile unchanged.
 
 **MiMo with thinking via OpenAI-compatible API**:
 
@@ -468,6 +522,7 @@ Notes:
 - Create/update accept `once`, `cron`, and `interval`. Interval uses `schedule_spec.every_seconds` (UTC `now + N`, no missed-beat catch-up). N is at least `min_once_delay_seconds` (default 60) and at most 30 days.
 - Manual trigger uses the same scheduled-task resource and run lifecycle.
 - Scheduled task definitions and task-run history are persisted in the application database.
+- With `channel_connections.enabled: true`, the scheduler enqueues IM outcome notifications for the task owner's connected identities. A delivery worker (same poll cadence as the scheduler) pushes them. Only runs that finish as success or failed notify: manual triggers and interrupts stay silent, and so do occurrences that end without a finished run (launch error, queue timeout, restart recovery). Channel/transport outages park rows without consuming the retry budget, for up to about a day; platform rejections exhaust ~15 minutes of counted retries then settle `failed`. The worker re-checks the binding right before sending: a target the owner has disconnected since enqueue is dropped as `failed`, never pushed. Only WeCom currently implements proactive `send_notification`.
 
 ### Agent Storage
 
@@ -522,9 +577,50 @@ empty or omitted `include_domains`. These filters compose with `max_results`
 and the model's optional `time_range`. The model-visible arguments remain `query`
 and `time_range`; the filters do not apply to `web_fetch` or other search providers.
 
+#### Jina fetch retries
+
+Jina's `web_fetch` keeps one attempt by default. Configure retries on its existing
+`tools` entry; model-facing arguments remain unchanged:
+
+```yaml
+tools:
+  - name: web_fetch
+    group: web
+    use: deerflow.community.jina_ai.tools:web_fetch_tool
+    timeout: 10
+    max_retries: 2              # Additional attempts; default 0 (disabled)
+    retry_budget_seconds: 30   # Total request + backoff budget; default 30
+```
+
+`max_retries` must be a non-negative integer and `retry_budget_seconds` a finite,
+positive number (YAML numbers, not strings or booleans). Invalid values return an
+`Error:` without sending a request. The budget applies only when retries are enabled,
+starts before HTTP client creation, and covers all attempts and waits. Each HTTP
+request timeout is capped by the remaining budget; the outer deadline also bounds
+responses that keep delivering data. The existing `timeout` remains Jina's
+`X-Timeout` header and the per-request HTTP timeout limit.
+
+Only HTTP 502/503/504 and HTTPX connection-establishment errors (`ConnectError`,
+`ConnectTimeout`) are retried. Authentication/client errors, 429, other statuses,
+empty successful responses, read/write timeouts and arbitrary exceptions are not
+retried. `Retry-After` is not interpreted. Backoff ceilings start at 0.5 seconds,
+double to 1 and 2 seconds, then stay at 4 seconds. Each asynchronous wait caps its
+ceiling by the remaining budget and independently samples a uniform factor from
+0.5 to 1.0, reducing synchronized retries without increasing the wait cap.
+Cancellation propagates during requests and waits. This stops local work; it
+cannot cancel work already started by Jina. Enabling retries can send up to `1 + max_retries` upstream requests
+and incur additional cost. Successful content and final `Error:` results retain
+the existing contract.
+
+Serper `web_search` also accepts the optional model argument
+`time_range: "day" | "week" | "month" | "year"`. For example,
+`{"query": "Python releases", "time_range": "week"}` sends `tbs: "qdr:w"`
+to Serper. Omitting `time_range` or passing `null` keeps the existing unrestricted
+search request. This option does not change Serper `image_search`.
+
 **Built-in Tools**:
-- `web_search` - Search the web (DuckDuckGo, Tavily, Brave, Serply, Exa, InfoQuest, Tencent Cloud WSA, Firecrawl, fastCRW, GroundRoute, Sofya)
-- `web_fetch` - Fetch web pages (Jina AI, Crawl4AI, Exa, InfoQuest, Firecrawl, fastCRW, GroundRoute, Browserless, Sofya)
+- `web_search` - Search the web (DuckDuckGo, Tavily, Brave, Serper, Serply, Exa, InfoQuest, Tencent Cloud WSA, Firecrawl, fastCRW, GroundRoute, Sofya)
+- `web_fetch` - Fetch web pages (Jina AI, Crawl4AI, Exa, InfoQuest, Firecrawl, fastCRW, GroundRoute, Browserless, Sofya, Unbrowse)
 - `web_capture` - Capture rendered webpage screenshots as artifacts (Browserless)
 - `image_search` - Search for reference images (DuckDuckGo, InfoQuest, Serper, Brave)
 - `ls` - List directory contents
@@ -632,6 +728,25 @@ sandbox:
 sandbox:
    use: deerflow.community.aio_sandbox:AioSandboxProvider # Docker-based sandbox
 ```
+
+For AIO images on the supported semver line (`1.9.3` through the recommended
+`1.11.0` image), `sandbox.bash_command_timeout` is enforced server-side through
+the `hard_timeout` API when the image exposes it. DeerFlow's legacy frozen
+`all-in-one-sandbox:latest` image predates that API, so only the host-side
+request is bounded there. On supported semver AIO images, `list_dir` uses a 60
+second server-side hard timeout with a 65 second no-retry host envelope; the
+frozen legacy image only gets the bounded host wait. Timed-out or otherwise
+ambiguous commands are never replayed, and a partial `list_dir` result is never
+returned as a complete listing.
+
+Explicit AIO shell/bash session creation is a separate control-plane
+operation. DeerFlow bounds those create requests to 5 seconds with SDK
+retries disabled. If a response cannot prove whether creation committed,
+DeerFlow does not replay the create or execute on that session id. The
+affected creation plane is quarantined, bounded best-effort session cleanup
+is attempted, and the container is recycled instead of being returned to the
+warm pool. Session-level cleanup does not clear that quarantine because a
+timed-out create may commit after cleanup has already returned.
 
 **BoxLite micro-VM Sandbox** (runs sandbox code in daemonless OCI micro-VMs):
 ```yaml
@@ -836,7 +951,6 @@ If the configured `host_path` is not visible to the gateway process, DeerFlow lo
 sandbox:
   use: deerflow.community.aio_sandbox:AioSandboxProvider
   port: 8080
-  auto_start: true
   container_prefix: deer-flow-sandbox
 
   # Optional: Additional mounts
@@ -1137,6 +1251,7 @@ models:
 - `SERPLY_API_KEY` - [Serply](https://serply.io) key for `web_search` (Google Search, plus Google News and Google Scholar via `vertical`)
 - `GROUNDROUTE_API_KEY` - GroundRoute meta-search API key for `web_search` and `web_fetch` (routes across Serper, Brave, Exa, Tavily, Firecrawl, Perplexity with gain-share pricing)
 - `SOFYA_API_KEY` - [Sofya](https://sofya.co) key for `web_search` and `web_fetch`
+- `UNBROWSE_API_KEY` - [Unbrowse](https://unbrowse.ai) key for `web_fetch`
 - `BROWSERLESS_TOKEN` - Browserless Cloud token for `web_capture` (optional for self-hosted Browserless)
 - `DEER_FLOW_PROJECT_ROOT` - Project root for relative runtime paths
 - `DEER_FLOW_CONFIG_PATH` - Custom config file path

@@ -21,7 +21,7 @@ from typing import Any
 
 from deerflow_extension_api import PROVENANCE_KEYS
 from fastapi import HTTPException, Request
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, ChatMessage, HumanMessage, SystemMessage
 from langchain_core.messages.utils import convert_to_messages
 from langgraph.types import Command
 
@@ -42,6 +42,8 @@ from deerflow.agents.human_input import read_human_input_response
 from deerflow.agents.middlewares.dynamic_context_middleware import _DYNAMIC_CONTEXT_REMINDER_KEY, _REMINDER_DATE_KEY
 from deerflow.agents.middlewares.input_sanitization_middleware import frame_untrusted_text
 from deerflow.agents.middlewares.message_utils import _SUMMARY_MESSAGE_NAME, is_genuine_user_message
+from deerflow.agents.middlewares.skill_usage import SKILL_USAGE_KEY, SKILL_USAGES_KEY
+from deerflow.agents.middlewares.tool_output_budget_middleware import TOOL_OUTPUT_BLOB_KEY
 from deerflow.agents.middlewares.tool_receipt import TOOL_RECEIPT_KEY, TOOL_RECEIPT_LEDGER_KEY
 from deerflow.agents.middlewares.tool_transform_meta import TOOL_TRANSFORMS_KEY
 from deerflow.agents.middlewares.view_image_middleware import _IMAGE_CONTEXT_MESSAGE_MARKER_KEY
@@ -49,6 +51,10 @@ from deerflow.config.agents_config import load_agent_config
 from deerflow.config.app_config import get_app_config
 from deerflow.config.database_config import resolve_checkpoint_graph_cache_max
 from deerflow.knowledge_scope import KNOWLEDGE_SCOPE_KEY, KNOWLEDGE_SCOPE_RUNTIME_KEY
+from deerflow.mcp_scope import (
+    THREAD_INCARNATION_METADATA_GUARD_KEY,
+    is_valid_thread_incarnation,
+)
 from deerflow.projects.context import PROJECT_CONTEXT_MESSAGE_MARKER, resolve_project_context
 from deerflow.runtime import (
     END_SENTINEL,
@@ -92,10 +98,18 @@ from deerflow.sandbox.lease import SANDBOX_SERVER_OWNED_CONTEXT_KEYS
 from deerflow.subagents.status_contract import SUBAGENT_ACCEPTANCE_VERDICT_KEY, SUBAGENT_RECEIPT_VERDICT_KEY, SUBAGENT_TOOL_RECEIPTS_KEY
 from deerflow.trace_context import DEERFLOW_TRACE_METADATA_KEY, ensure_trace_context, ensure_trace_id
 from deerflow.utils.assembly_io import run_assembly
+from deerflow.utils.file_io import await_drained
 from deerflow.utils.messages import ORIGINAL_USER_CONTENT_KEY, UNTRUSTED_INPUT_KEY
 from deerflow.utils.thread_id import validate_thread_id
 
 logger = logging.getLogger(__name__)
+
+
+class BusyThreadConflict(HTTPException):
+    """A retryable run-manager admission conflict exposed as HTTP 409."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(status_code=409, detail=detail)
 
 
 @asynccontextmanager
@@ -134,7 +148,10 @@ _SERVER_OWNED_MESSAGE_METADATA_KEYS = (
             KNOWLEDGE_SCOPE_RUNTIME_KEY,
             TOOL_RECEIPT_KEY,
             TOOL_RECEIPT_LEDGER_KEY,
+            TOOL_OUTPUT_BLOB_KEY,
             TOOL_TRANSFORMS_KEY,
+            SKILL_USAGE_KEY,
+            SKILL_USAGES_KEY,
             # Attached when a values frame is serialized, for display ordering only.
             # A replayed message carrying it back would write a thread-scoped seq
             # into the checkpoint, which a fork then re-seeds and reassigns (#4380).
@@ -206,7 +223,7 @@ async def _ensure_thread_metadata(
     *,
     owner_user_id: str | None,
     require_existing_thread: bool = False,
-) -> None:
+) -> dict[str, Any]:
     """Ensure an admitted run's thread exists without delaying task attachment."""
     thread_store = run_ctx.thread_store
     existing = await thread_store.get(record.thread_id)
@@ -231,12 +248,12 @@ async def _ensure_thread_metadata(
             # /threads/{id}/move — so the key must not persist either.
             if key not in (DEERFLOW_TRACE_METADATA_KEY, THREAD_PROJECT_METADATA_KEY)
         }
-        await thread_store.create(
+        existing = await thread_store.create(
             record.thread_id,
             assistant_id=record.assistant_id,
             metadata=metadata,
         )
-        return
+    return existing
 
 
 async def _terminal_record_stream_missing(bridge: StreamBridge, record: RunRecord) -> bool:
@@ -359,13 +376,13 @@ def _strip_external_message_metadata(message: Any) -> Any:
 
 
 def _strip_external_metadata_from_message_like(item: Any) -> Any:
-    """Strip server-owned keys from a message, in object or raw-dict form, and
-    stamp ``untrusted_input`` where a caller's markers would skip the guardrail.
+    """Strip server-owned keys from message-like values outside ``messages``.
 
-    Callers reach the checkpoint by two different routes and the message is a
-    ``BaseMessage`` on one and a plain dict on the other, so both shapes have
-    to be handled here rather than coercing — coercion would change what the
-    caller asked to be written.
+    The top-level ``messages`` channel is canonicalized and role-checked by
+    ``_normalize_input_messages``. Other middleware-contributed channels may
+    still carry either ``BaseMessage`` objects or raw dictionaries, so this
+    helper preserves those shapes while stripping metadata and stamping
+    ``untrusted_input`` where caller-owned markers would skip the guardrail.
     """
     if isinstance(item, BaseMessage):
         return _strip_external_message_metadata(item)
@@ -409,23 +426,70 @@ def _strip_external_delegation_verdict(entry: Any) -> Any:
     return entry
 
 
-def strip_server_owned_state_metadata(values: Mapping[str, Any]) -> dict[str, Any]:
-    """Remove server-owned message metadata from caller-supplied state values,
-    and mark messages whose caller-owned markers would skip the input guardrail.
+def _normalize_input_messages(
+    value: Any,
+    *,
+    location: str,
+    trusted_internal: bool = False,
+) -> list[BaseMessage]:
+    """Coerce once, then check the actual role before any checkpoint write.
 
-    ``normalize_input`` does this for the run path. The thread-state mutation
-    route writes its values straight into a checkpoint, so without the same
-    treatment an authenticated client can persist forged provenance and
-    transform trails — and those keys exist precisely so a later reader can
-    treat them as facts about what the host did.
-
-    Every channel is walked, not just ``messages``: middleware-contributed
-    channels can carry messages too, and popping a key that was never there
-    costs nothing.
+    Match add_messages' list-or-single convention. Checking raw ``role`` keys
+    misses type aliases, (role, content) pairs, constructor envelopes and chunks.
+    The normalized objects are also the ones forwarded to the graph: there is
+    no second, unchecked interpretation of an accepted wire representation.
     """
+    messages = value if isinstance(value, list) else [value]
+    converted: list[BaseMessage] = []
+    for index, item in enumerate(messages):
+        try:
+            message = convert_to_messages([item])[0]
+        except (ValueError, TypeError, NotImplementedError, KeyError) as exc:
+            # LangChain's error may contain the complete caller message.
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid message at {location}[{index}]",
+            ) from exc
+        if not trusted_internal:
+            if isinstance(message, SystemMessage) or (isinstance(message, ChatMessage) and message.role.strip().lower() in {"system", "developer"}):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(f"External system/developer messages are not allowed at {location}[{index}]"),
+                )
+            message = _strip_external_message_metadata(message)
+        converted.append(message)
+    return converted
+
+
+def strip_server_owned_state_metadata(values: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and sanitize caller-supplied state values before checkpointing.
+
+    The server-owned ``sandbox``, ``thread_data``, and ``viewed_images`` channels
+    are rejected. The ``messages`` channel
+    is canonicalized to a list of ``BaseMessage``
+    objects, rejects external system/developer roles with HTTP 400, and strips
+    server-owned metadata. Other channels keep their existing shapes while
+    forged metadata and delegation verdicts are removed. ``normalize_input``
+    applies the same message boundary to run input.
+
+    The thread-state mutation route writes values straight into a checkpoint,
+    so an authenticated client must not be able to persist forged provenance,
+    transform trails, or privileged message roles. Every channel is walked
+    because middleware-contributed channels can also carry message-like values.
+    """
+    server_owned_channels = {"sandbox", "thread_data", "viewed_images"}
+    rejected = server_owned_channels.intersection(values)
+    if rejected:
+        raise HTTPException(
+            status_code=400,
+            detail=f"External {sorted(rejected)[0]} state is not allowed",
+        )
+
     stripped: dict[str, Any] = {}
     for channel, value in values.items():
-        if channel == "delegations" and isinstance(value, list):
+        if channel == "messages" and value is not None:
+            stripped[channel] = _normalize_input_messages(value, location="values.messages")
+        elif channel == "delegations" and isinstance(value, list):
             stripped[channel] = [_strip_external_delegation_verdict(item) for item in value]
         elif isinstance(value, list):
             stripped[channel] = [_strip_external_metadata_from_message_like(item) for item in value]
@@ -439,7 +503,9 @@ def normalize_input(raw_input: dict[str, Any] | None, *, trusted_internal: bool 
 
     Delegates dict→message coercion to ``langchain_core.messages.utils.convert_to_messages``
     so that ``additional_kwargs`` (e.g. uploaded-file metadata — gh #3132), ``id``,
-    ``name``, and non-human roles (ai/system/tool) survive unchanged.  An earlier
+    ``name``, and history roles (ai/tool) survive unchanged. System/developer
+    messages require authenticated internal admission; ordinary API credentials
+    (including admin and PAT callers) do not grant system-prompt authority. An earlier
     hand-rolled version only forwarded ``content`` and collapsed every role to
     ``HumanMessage``, which silently stripped frontend-supplied attachments.
 
@@ -447,6 +513,11 @@ def normalize_input(raw_input: dict[str, Any] | None, *, trusted_internal: bool 
     role, etc.) raise ``HTTPException(400)`` with the offending index, instead
     of bubbling up as a 500.  The gateway is a system boundary, so per-entry
     validation errors are the right shape for clients to retry against.
+
+    The ``sandbox``, ``thread_data``, and ``viewed_images`` channels are also
+    server-owned. External callers cannot select a provider resource by id or
+    supply host image paths; trusted internal run admission may carry restored
+    values.
 
     ``original_user_content``, dynamic-context reminder markers, the transient
     view-image context marker, the execution-only knowledge-scope marker, tool
@@ -470,25 +541,18 @@ def normalize_input(raw_input: dict[str, Any] | None, *, trusted_internal: bool 
     """
     if raw_input is None:
         return {}
+    if not trusted_internal:
+        server_owned_channels = {"sandbox", "thread_data", "viewed_images"}
+        rejected = server_owned_channels.intersection(raw_input)
+        if rejected:
+            raise HTTPException(
+                status_code=400,
+                detail=f"External {sorted(rejected)[0]} state is not allowed",
+            )
     result = raw_input
     messages = raw_input.get("messages")
-    if messages and isinstance(messages, list):
-        converted: list[Any] = []
-        for index, msg in enumerate(messages):
-            if isinstance(msg, BaseMessage):
-                converted.append(msg)
-            elif isinstance(msg, dict):
-                try:
-                    converted.extend(convert_to_messages([msg]))
-                except (ValueError, TypeError, NotImplementedError) as exc:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid message at input.messages[{index}]: {exc}",
-                    ) from exc
-            else:
-                converted.append(msg)
-        if not trusted_internal:
-            converted = [_strip_external_message_metadata(message) for message in converted]
+    if messages is not None:
+        converted = _normalize_input_messages(messages, location="input.messages", trusted_internal=trusted_internal)
         result = {**raw_input, "messages": converted}
     if not trusted_internal:
         delegations = result.get("delegations")
@@ -570,6 +634,7 @@ _SERVER_OWNED_RUNTIME_CONTEXT_KEYS: frozenset[str] = (
             "__run_tool_progress_recorder",
             "langgraph_auth_user",
             "langgraph_auth_user_id",
+            THREAD_INCARNATION_METADATA_GUARD_KEY,
             # Server-owned pinned project snapshot (spec §7.1): resolved once
             # at admission from threads_meta; a client-supplied value must
             # never survive in either run-config section.
@@ -1726,13 +1791,16 @@ async def start_run(
 
     owner_context_token = set_current_user(SimpleNamespace(id=owner_user_id)) if owner_user_id else None
     try:
-        agent_factory = resolve_agent_factory(body.assistant_id)
         is_internal_caller = getattr(getattr(request, "state", None), "auth_source", None) == AUTH_SOURCE_INTERNAL
+        # Validate even when resume takes precedence, so ignored input cannot
+        # appear to have been admitted or persist as unchecked run audit data.
+        normalized_input = normalize_input(body.input, trusted_internal=is_internal_caller)
+        agent_factory = resolve_agent_factory(body.assistant_id)
         command = getattr(body, "command", None)
         if command and command.get("resume") is not None:
             graph_input = Command(resume=command["resume"])
         else:
-            graph_input = normalize_input(body.input, trusted_internal=is_internal_caller)
+            graph_input = normalized_input
         # deerflow_trace_id is server-issued, so the caller's value is replaced
         # here at the trust boundary. body.metadata forks two ways -- through
         # build_run_config into config["metadata"], which the run worker
@@ -1841,11 +1909,16 @@ async def start_run(
             reader, source_ids = prepared
             run_ctx = replace(run_ctx, conversation_reader=reader)
             if isinstance(graph_input, dict):
+                # Keep this endpoint's list-only wire contract even though
+                # message admission canonicalizes single-message shorthand.
+                raw_messages = (body.input or {}).get("messages")
+                if raw_messages is not None and not isinstance(raw_messages, list):
+                    raise HTTPException(status_code=422, detail="input.messages must be a list")
                 reference_messages = graph_input.get("messages")
                 if reference_messages is None:
                     reference_messages = []
-                if not isinstance(reference_messages, list):
-                    raise HTTPException(status_code=422, detail="input.messages must be a list")
+                # ``normalize_input`` guarantees a list here. The raw-input
+                # check above is the authoritative list-only wire validation.
                 # Reference IDs are user-selected data. Keep them out of the
                 # system prompt and grant no authority from this persisted hint.
                 graph_input = {
@@ -1884,6 +1957,7 @@ async def start_run(
             abort_task = asyncio.create_task(record.abort_event.wait())
             metadata_failure_logged = False
             metadata_failure: Exception | None = None
+            metadata_record: dict[str, Any] | None = None
             try:
                 done, _ = await asyncio.wait(
                     (metadata_task, abort_task),
@@ -1892,7 +1966,7 @@ async def start_run(
                 )
                 if metadata_task in done:
                     try:
-                        metadata_task.result()
+                        metadata_record = metadata_task.result()
                     except asyncio.CancelledError:
                         pass
                     except Exception as exc:
@@ -1914,8 +1988,20 @@ async def start_run(
                         metadata_failure = TimeoutError("Timed out verifying existing thread metadata")
             finally:
                 if metadata_task.done():
-                    if not metadata_failure_logged:
-                        _log_thread_metadata_task_result(metadata_task, thread_id=thread_id)
+                    if metadata_record is None and not metadata_failure_logged:
+                        try:
+                            metadata_record = metadata_task.result()
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as exc:
+                            metadata_failure_logged = True
+                            metadata_failure = exc
+                            logger.warning(
+                                "Failed to ensure thread_meta for %s%s",
+                                sanitize_log_param(thread_id),
+                                "" if require_existing_thread else " (non-fatal)",
+                                exc_info=True,
+                            )
                 else:
                     metadata_task.cancel()
                     metadata_task.add_done_callback(
@@ -1936,6 +2022,28 @@ async def start_run(
             # or strict verification failure:
             # its startup barrier is the single path that turns pending
             # cancellation into no-agent-construction plus publish_end.
+            incarnation_kwargs: dict[str, str | None] = {}
+            if metadata_record is None:
+                if not record.abort_event.is_set():
+                    logger.warning(
+                        "Thread metadata for %s is unavailable; MCP access will fail closed",
+                        sanitize_log_param(thread_id),
+                    )
+            else:
+                if "incarnation" not in metadata_record:
+                    logger.warning(
+                        "Thread metadata for %s has no incarnation; MCP access will fail closed",
+                        sanitize_log_param(thread_id),
+                    )
+                else:
+                    incarnation = metadata_record["incarnation"]
+                    if is_valid_thread_incarnation(incarnation):
+                        incarnation_kwargs["thread_incarnation"] = incarnation
+                    else:
+                        logger.warning(
+                            "Thread metadata for %s has an invalid incarnation; MCP access will fail closed",
+                            sanitize_log_param(thread_id),
+                        )
             await run_agent(
                 bridge,
                 run_mgr,
@@ -1949,6 +2057,7 @@ async def start_run(
                 interrupt_before=body.interrupt_before,
                 interrupt_after=body.interrupt_after,
                 knowledge_scope=admitted_knowledge_scope,
+                **incarnation_kwargs,
             )
 
         try:
@@ -2025,7 +2134,7 @@ async def start_run(
                     )
                     raise
         except ConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise BusyThreadConflict(str(exc)) from exc
         except UnsupportedStrategyError as exc:
             raise HTTPException(status_code=501, detail=str(exc)) from exc
 
@@ -2186,9 +2295,9 @@ async def launch_mcp_task_notification_run(
                 require_existing_thread=True,
             )
     except HTTPException as exc:
-        if exc.status_code == 409:
+        if isinstance(exc, BusyThreadConflict):
             raise ConflictError(str(exc.detail)) from exc
-        if exc.status_code == 404:
+        if exc.status_code in {400, 401, 403, 404, 409, 422, 501}:
             raise PermanentNotificationError(str(exc.detail)) from exc
         raise
     return {"run_id": record.run_id, "thread_id": record.thread_id}
@@ -2245,9 +2354,12 @@ async def sse_consumer(
         return
 
     gap_emitted = False
+    terminal_emitted = False
+    disconnect_observed = False
     try:
         async for entry in bridge.subscribe(record.run_id, last_event_id=last_event_id):
             if await request.is_disconnected():
+                disconnect_observed = True
                 break
 
             if isinstance(entry, StreamGap):
@@ -2267,26 +2379,36 @@ async def sse_consumer(
 
             if entry is HEARTBEAT_SENTINEL:
                 if await _orphan_recovery_observed_after_heartbeat(record, run_mgr):
+                    terminal_emitted = True
                     yield format_sse("end", None)
                     return
                 yield ": heartbeat\n\n"
                 continue
 
             if entry is END_SENTINEL:
+                terminal_emitted = True
                 yield format_sse("end", None, event_id=entry.id or None)
                 return
 
             yield format_sse(entry.event, entry.data, event_id=entry.id or None)
 
+        if not disconnect_observed:
+            raise RuntimeError("stream bridge subscription ended before a terminal event")
+    except (GeneratorExit, asyncio.CancelledError):
+        # Starlette closes the response generator or cancels its request task
+        # when the creator connection disappears. Ordinary bridge exceptions
+        # must not be mistaken for that client-owned lifecycle signal.
+        disconnect_observed = True
+        raise
     finally:
         # store_only records are cross-worker observation handles. An explicit
         # cancel-then-stream action has already persisted its request before
         # subscribing; a plain join disconnect must not invent a new
         # cancellation request. Only apply on_disconnect to locally-owned runs,
         # and only on the creator's own stream — never on an observer join.
-        if apply_on_disconnect and not gap_emitted and not record.store_only and record.status in (RunStatus.pending, RunStatus.running):
+        if disconnect_observed and apply_on_disconnect and not gap_emitted and not terminal_emitted and not record.store_only and record.status in (RunStatus.pending, RunStatus.running):
             if record.on_disconnect == DisconnectMode.cancel:
-                await run_mgr.cancel(record.run_id)
+                await await_drained(run_mgr.cancel(record.run_id))
 
 
 async def wait_for_run_completion(
@@ -2323,8 +2445,13 @@ async def wait_for_run_completion(
         disconnected.  Callers must skip checkpoint serialization on
         ``False`` so a partial checkpoint is not returned as a normal
         response.
+
+    Raises:
+        RuntimeError: The bridge subscription ended without a terminal event.
+        Other bridge failures propagate unchanged.
     """
     completed = False
+    disconnect_observed = False
     if await _terminal_record_stream_missing(bridge, record):
         return True
 
@@ -2350,11 +2477,17 @@ async def wait_for_run_completion(
                     completed = True
                     return True
                 if await request.is_disconnected():
+                    disconnect_observed = True
                     return False
                 # Heartbeats and regular events: keep waiting for END_SENTINEL.
             if not gap_seen:
-                return completed
+                raise RuntimeError("stream bridge subscription ended before a terminal event")
+    except asyncio.CancelledError:
+        # Request-task cancellation is the non-streaming equivalent of
+        # Starlette closing an SSE response generator.
+        disconnect_observed = True
+        raise
     finally:
-        if not completed and record.status in (RunStatus.pending, RunStatus.running):
+        if disconnect_observed and not completed and record.status in (RunStatus.pending, RunStatus.running):
             if record.on_disconnect == DisconnectMode.cancel:
-                await run_mgr.cancel(record.run_id)
+                await await_drained(run_mgr.cancel(record.run_id))

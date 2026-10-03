@@ -17,7 +17,67 @@ export const enUS: Translations = {
     localName: "English",
   },
 
+  extensions: {
+    title: "Extensions",
+    navigation: "Extensions",
+    search: "Search extensions by name or purpose",
+    loading: "Loading extensions…",
+    pageLoading: "Loading extension…",
+    unavailable: "Extensions unavailable.",
+    retry: "Retry",
+    reload: "Reload",
+    reloadAll: "Reload extensions (refresh page)",
+    all: "All extensions",
+    notInstalled: "This extension is not installed.",
+    enabledManaged: "Enabled · Managed by your administrator",
+    disabledManaged: "Disabled · Managed by your administrator",
+    deploymentHint:
+      "Interface and browser features update on manual reload. Installation, activation and configuration are managed through deployment configuration or the CLI.",
+    moduleUnavailable: "Page module unavailable",
+    noResults: "No matching extensions.",
+    catalogEntry: "Catalog extension",
+    catalogHint:
+      "This entry comes from the repository extension catalog. Ask your deployment administrator to confirm its installation and activation status.",
+    installationGuide: "Installation guide",
+    catalog: {
+      bookmarks: {
+        title: "Bookmarks",
+        description:
+          "Save useful answers and find and organize your own bookmarks on a dedicated page.",
+      },
+      context: {
+        title: "Context pruning",
+        description:
+          "Shorten older read-only tool results while preserving recent messages and native summaries.",
+      },
+      classify: {
+        title: "Text classification",
+        description:
+          "Label a list of texts with supplied categories using the deployment-configured classification service.",
+      },
+      screening: {
+        title: "Content risk warnings",
+        description:
+          "Screen fetched content and add advisory warnings to suspicious tool results without blocking tools.",
+      },
+      example: {
+        title: "Extension development example",
+        description:
+          "Explore middleware, task lifecycle, model observers, services and HTTP route contributions.",
+      },
+    },
+    pageUnavailable: "Extension page unavailable",
+    pageUnavailableHint:
+      "This page is not registered, or its plugin is disabled or unavailable.",
+    viewAll: "View extensions",
+    viewFailed: "Plugin view unavailable. Reload to retry.",
+    actionFailed: "Extension action unavailable. Try again.",
+    view: (name) => `View ${name}`,
+    open: (name) => `Open ${name}`,
+  },
+
   capabilities: {
+    toolsAndIntegrations: "Tools & integrations",
     icon: {
       title: "Plugin icon",
       upload: "Upload plugin icon",
@@ -155,10 +215,24 @@ export const enUS: Translations = {
     showBrowser: "Open browser panel",
   },
 
+  skillUsage: {
+    used: "Skills used",
+    title: "Skills",
+    name: "Name",
+    description: "Description",
+    builtIn: "Built-in",
+    custom: "Custom",
+    integration: "Integration",
+    legacy: "Legacy",
+    copy: "Copy skill snapshot",
+    partial:
+      "This is a partial snapshot of the skill instructions loaded during this run.",
+  },
+
   runDuration: {
     reasoning: "Reasoning",
     working: "Working…",
-    completedIn: (duration) => `Completed in ${duration}`,
+    completedIn: (duration) => `Took ${duration}`,
     description:
       "Total task time, including model reasoning, tool calls, and waiting.",
     lessThanSecond: "<1s",
@@ -304,6 +378,25 @@ export const enUS: Translations = {
 
   // Input Box
   inputBox: {
+    mentionPicker: "Add a reference",
+    mentionSearch: "Search skills, project files and conversations",
+    mentionSkills: "Skills",
+    mentionFiles: "Project files",
+    mentionConversations: "Conversations",
+    mentionUpload: "Upload a file",
+    mentionEmpty: "No matching references in loaded results",
+    mentionLoadMore: "Load more",
+    mentionLoading: "Loading references…",
+    mentionFailed: "Could not load references. Try again.",
+    mentionRetry: "Retry",
+    mentionAttaching: "Adding file…",
+    mentionAttachFailed: "Could not add this file. Try again.",
+    mentionMultipleSkills:
+      "Select up to 16 skills per message; select a checked skill again to remove it.",
+    mentionNoProject: "Open a project chat to reference its documents.",
+    mentionUnavailable: "File unavailable",
+    mentionClose: "Close references",
+
     placeholder: "How can I assist you today?",
     disclaimer: "QuantFlow is AI and can make mistakes",
     createSkillPrompt:
@@ -365,6 +458,11 @@ export const enUS: Translations = {
     reasoningEffortHigh: "High",
     reasoningEffortHighDescription:
       "Full-dimensional Logic Deduction + Multi-path Verification + Backward Check",
+    reasoningEffortXhigh: "Extra High",
+    reasoningEffortXhighDescription:
+      "Extended deduction beyond High; slowest, most thorough",
+    reasoningEffortMax: "Max",
+    reasoningEffortMaxDescription: "The provider's deepest reasoning budget",
     surpriseMe: "Surprise",
     surpriseMePrompt: "Surprise me",
     followupLoading: "Generating follow-up questions...",
@@ -1413,6 +1511,7 @@ export const enUS: Translations = {
         work: "Work",
         personal: "Personal",
         topOfMind: "Top of mind",
+        cognitiveStyle: "Thinking style",
         historyBackground: "History",
         recentMonths: "Recent months",
         earlierContext: "Earlier context",
@@ -1431,6 +1530,7 @@ export const enUS: Translations = {
           },
           content: "Content",
           source: "Source",
+          unknown: "Unknown",
           createdAt: "CreatedAt",
           view: "View",
         },
@@ -1789,6 +1889,7 @@ export const enUS: Translations = {
       exportOptional: "optional",
       exportRequired: "required",
       exportUndeclared: "Not declared",
+      exportNone: "None",
       exportScope:
         "Includes all files inside this skill. Account settings, conversations and history outside the skill folder are excluded. Configure tools and credentials again on the destination.",
       exportWarnings: "Check package contents",

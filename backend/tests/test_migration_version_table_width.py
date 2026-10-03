@@ -10,8 +10,8 @@ alembic runs.
   to ``TEXT`` on the Postgres dialect.
 * Live checks: against a scratch Postgres database (created and dropped by the
   fixture -- peer socket locally, ``DEERFLOW_TEST_POSTGRES_URL`` when set),
-  ``alembic stamp head`` through the repo-blessed in-process config stamps the
-  36-char head cleanly with a fresh, legacy-``VARCHAR(32)``, and existing-
+  ``alembic stamp`` of the pinned 36-char 0028 revision through the
+  repo-blessed in-process config stamps cleanly with a fresh, legacy-``VARCHAR(32)``, and existing-
   ``TEXT`` version table (the last being the live workaround shape, which must
   stay compatible). Skipped when no Postgres server is reachable.
 """
@@ -119,9 +119,11 @@ def _version_column_type(sync_url: str) -> str:
 
 
 def _stamp_head(async_url: str) -> str:
-    """Stamp head through the repo-blessed in-process config (runs env.py)."""
-    head = bootstrap._get_head_revision()
-    assert len(head) > 32, f"expected a >32-char head to exercise the overflow, got {head!r}"
+    """Stamp the pinned >32-char revision through the repo-blessed in-process config (runs env.py)."""
+    # The chain head is short again (0029 merge); stamp the 36-char 0028
+    # revision explicitly so the overflow path stays exercised.
+    head = REVISION_0028
+    assert len(head) > 32, f"expected a >32-char revision to exercise the overflow, got {head!r}"
     engine = create_async_engine(async_url, poolclass=sa.pool.NullPool)
     try:
         cfg = bootstrap._get_alembic_config(engine)

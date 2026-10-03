@@ -141,13 +141,14 @@ class TestRevisionChain:
 
     def test_single_head_is_new_revision(self) -> None:
         # The upstream merge (0022-0026) forked the chain; merge revision
-        # 0027 rejoins it, and Phase 3 revision 0028 extends it (single
-        # head, no branches).
+        # 0027 rejoins it, Phase 3 revision 0028 extends it, and merge
+        # revision 0029 joins the notification-outbox leg (single head,
+        # no branches).
         migrations_dir = Path(migration.__file__).resolve().parent.parent
         config = Config()
         config.set_main_option("script_location", migrations_dir.as_posix())
         script = ScriptDirectory.from_config(config)
-        assert script.get_heads() == ["0028_knowledge_experiment_embeddings"]
+        assert script.get_heads() == ["0029_merge_knowledge_outbox"]
 
     def test_vocabulary_matches_kb_contract(self) -> None:
         assert FINDING_TYPES == ("empirical", "methodological", "data_quality", "failure", "prior")

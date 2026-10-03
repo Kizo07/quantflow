@@ -58,6 +58,15 @@ class TestResolveSubagentThinking:
         )
         assert (thinking, effort) == (False, None)
 
+    def test_missing_attributes_read_as_none(self):
+        """Duck-typed configs predating the thinking fields keep working."""
+        legacy = SimpleNamespace(name="probe", description="probe subagent")
+        thinking, effort = _resolve(
+            legacy,
+            _model_config(supports_thinking=True, supports_reasoning_effort=True),
+        )
+        assert (thinking, effort) == (False, None)
+
     def test_effort_without_thinking_passes_through(self):
         thinking, effort = _resolve(
             _subagent_config(reasoning_effort="low"),

@@ -17,7 +17,63 @@ export const zhCN: Translations = {
     localName: "中文",
   },
 
+  extensions: {
+    title: "扩展插件",
+    navigation: "扩展",
+    search: "按名称或用途搜索扩展",
+    loading: "正在加载扩展…",
+    pageLoading: "正在加载扩展…",
+    unavailable: "扩展暂不可用。",
+    retry: "重试",
+    reload: "重新加载",
+    reloadAll: "重新加载扩展（刷新页面）",
+    all: "全部扩展",
+    notInstalled: "此扩展未安装或已移除。",
+    enabledManaged: "已启用 · 由管理员管理",
+    disabledManaged: "已停用 · 由管理员管理",
+    deploymentHint:
+      "界面和浏览器功能在手动刷新后更新；安装、启停和配置由部署管理员通过配置文件或 CLI 管理。",
+    moduleUnavailable: "当前页面加载失败",
+    noResults: "没有匹配的扩展。",
+    catalogEntry: "扩展目录",
+    catalogHint:
+      "此条目来自仓库扩展目录；实际安装和启用状态请由部署管理员确认。",
+    installationGuide: "查看安装说明",
+    catalog: {
+      bookmarks: {
+        title: "会话书签",
+        description: "收藏有用的回答，在独立页面查找与整理自己的书签。",
+      },
+      context: {
+        title: "上下文裁剪",
+        description: "按需缩短旧的只读工具结果，保留近期消息与原生摘要。",
+      },
+      classify: {
+        title: "文本分类",
+        description: "按给定类别为文本列表打标签，使用部署方配置的分类服务。",
+      },
+      screening: {
+        title: "内容风险提示",
+        description:
+          "检查获取的外部内容，为可疑工具结果添加提示，不阻断工具执行。",
+      },
+      example: {
+        title: "扩展开发示例",
+        description:
+          "演示中间件、任务生命周期、模型观察器、服务和 HTTP 路由的扩展方式。",
+      },
+    },
+    pageUnavailable: "扩展页面不可用",
+    pageUnavailableHint: "此页面未注册，或插件已停用、未能加载。",
+    viewAll: "查看扩展",
+    viewFailed: "扩展界面加载失败，请刷新重试。",
+    actionFailed: "暂时无法执行扩展操作，请重试。",
+    view: (name) => `查看 ${name}`,
+    open: (name) => `打开 ${name}`,
+  },
+
   capabilities: {
+    toolsAndIntegrations: "工具与集成",
     icon: {
       title: "插件图标",
       upload: "上传插件图标",
@@ -150,10 +206,23 @@ export const zhCN: Translations = {
     showBrowser: "打开浏览器面板",
   },
 
+  skillUsage: {
+    used: "使用的技能",
+    title: "技能",
+    name: "名称",
+    description: "描述",
+    builtIn: "内置",
+    custom: "自定义",
+    integration: "集成",
+    legacy: "旧版",
+    copy: "复制技能快照",
+    partial: "此快照仅包含本次运行加载的部分技能内容。",
+  },
+
   runDuration: {
     reasoning: "思考过程",
     working: "执行中…",
-    completedIn: (duration) => `本次任务耗时 ${duration}`,
+    completedIn: (duration) => `用时 ${duration}`,
     description: "任务总耗时，包括模型推理、工具调用和等待时间。",
     lessThanSecond: "不足 1 秒",
     hours: (value) => `${value} 小时`,
@@ -289,6 +358,25 @@ export const zhCN: Translations = {
 
   // Input Box
   inputBox: {
+    mentionPicker: "添加引用",
+    mentionSearch: "搜索技能、项目文件和对话",
+    mentionSkills: "技能",
+    mentionFiles: "项目文件",
+    mentionConversations: "对话",
+    mentionUpload: "上传文件",
+    mentionEmpty: "已加载的内容中没有匹配的引用",
+    mentionLoadMore: "加载更多",
+    mentionLoading: "正在加载引用…",
+    mentionFailed: "引用加载失败，请重试。",
+    mentionRetry: "重试",
+    mentionAttaching: "正在添加文件…",
+    mentionAttachFailed: "文件添加失败，请重试。",
+    mentionMultipleSkills:
+      "每条消息最多选择 16 个技能，再次选择已勾选技能可移除。",
+    mentionNoProject: "在项目对话中可引用该项目的文档。",
+    mentionUnavailable: "文件不可用",
+    mentionClose: "关闭引用面板",
+
     placeholder: "今天我能为你做些什么？",
     disclaimer: "内容由AI生成，重要信息请务必核查",
     createSkillPrompt:
@@ -341,6 +429,10 @@ export const zhCN: Translations = {
     reasoningEffortMediumDescription: "多层逻辑分析 + 基础验证",
     reasoningEffortHigh: "高",
     reasoningEffortHighDescription: "全维度逻辑推演 + 多路径验证 + 反推校验",
+    reasoningEffortXhigh: "极高",
+    reasoningEffortXhighDescription: "在“高”之上继续推演，最慢但最充分",
+    reasoningEffortMax: "最大",
+    reasoningEffortMaxDescription: "使用提供商允许的最大推理预算",
     surpriseMe: "小惊喜",
     surpriseMePrompt: "给我一个小惊喜吧",
     followupLoading: "正在生成可能的后续问题...",
@@ -1330,6 +1422,7 @@ export const zhCN: Translations = {
         work: "工作",
         personal: "个人",
         topOfMind: "近期关注（Top of mind）",
+        cognitiveStyle: "思维习惯",
         historyBackground: "历史背景",
         recentMonths: "近几个月",
         earlierContext: "更早上下文",
@@ -1348,6 +1441,7 @@ export const zhCN: Translations = {
           },
           content: "内容",
           source: "来源",
+          unknown: "未知",
           createdAt: "创建时间",
           view: "查看",
         },
@@ -1681,6 +1775,7 @@ export const zhCN: Translations = {
       exportOptional: "可选",
       exportRequired: "必需",
       exportUndeclared: "未声明",
+      exportNone: "无",
       exportScope:
         "包含此技能目录内的全部文件。账号配置、对话和目录外的历史不会导出；目标环境需重新配置工具与凭据。",
       exportWarnings: "请检查包内文件",

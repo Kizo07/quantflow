@@ -213,7 +213,7 @@ def _assemble_from_features(
 ) -> tuple[list[AgentMiddleware], list[BaseTool]]:
     """Build an ordered middleware chain + extra tools from *feat*.
 
-    Middleware order matches ``make_lead_agent``:
+    Middleware order matches ``make_lead_agent`` (19 middlewares):
 
       0-2. Sandbox infrastructure (ThreadData → Uploads → Sandbox)
       3.   DanglingToolCallMiddleware (always)
@@ -230,6 +230,7 @@ def _assemble_from_features(
       12.  SubagentLimitMiddleware (subagent feature)
       13.  LoopDetectionMiddleware (loop_detection feature)
       14.  TokenBudgetMiddleware (token_budget feature)
+      14a. ModelContentCompatibilityMiddleware (always)
       15.  ClarificationMiddleware (always last)
 
     Two-phase ordering:
@@ -430,9 +431,9 @@ def _assemble_from_features(
             from deerflow.subagents.batch_runtime import is_subagent_batch_runtime_available
 
             if is_subagent_batch_runtime_available():
-                from deerflow.tools.builtins import batch_status, batch_task, cancel_batch
+                from deerflow.tools.builtins import batch_status, batch_task, cancel_batch, read_batch_result
 
-                extra_tools.extend((batch_task, batch_status, cancel_batch))
+                extra_tools.extend((batch_task, batch_status, cancel_batch, read_batch_result))
 
     # --- [13] LoopDetection ---
     if feat.loop_detection is not False:
@@ -454,6 +455,19 @@ def _assemble_from_features(
 
             # ``enabled`` defaults to False for config.yaml; ``token_budget=True`` is the opt-in.
             chain.append(TokenBudgetMiddleware.from_config(TokenBudgetConfig(enabled=True)))
+
+    # --- [14a] ModelContentCompatibility (always) ---
+    # Read-time sanitizer: rewrites URL-sourced file/image blocks in list-form
+    # message content into text placeholders in the request view only, so
+    # threads poisoned before the conversion-layer fix heal on the next model
+    # call. Placement contract: after every built-in content transform so it
+    # sees the near-final request, and before the custom/extension injection
+    # point (_insert_extra) and the terminal tail — in the lead chain it is
+    # followed by configured extensions, terminal-response and finish-reason
+    # middlewares, and the always-last ClarificationMiddleware.
+    from deerflow.agents.middlewares.model_content_compatibility_middleware import ModelContentCompatibilityMiddleware
+
+    chain.append(ModelContentCompatibilityMiddleware())
 
     # --- [15] Clarification (always last among built-ins) ---
     chain.append(ClarificationMiddleware())

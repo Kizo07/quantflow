@@ -2,9 +2,9 @@
 
 Empty merge revision joining the upstream notification-outbox leg
 (0028_parked_attempts) with the QuantFlow knowledge leg
-(0028_knowledge_experiment_embeddings). This file owns the chain-head
-pin, moved on from ``test_migration_0028_knowledge_experiment_embeddings``
-and ``test_migration_0027_0028_notification_outbox``.
+(0028_knowledge_experiment_embeddings). The chain-head pin moved on to
+``test_migration_0040_merge_quantflow_upstream`` with the 2026-10-11
+QuantFlow/upstream merge revision.
 """
 
 from __future__ import annotations
@@ -25,11 +25,13 @@ def test_0029_joins_both_legs():
     assert tuple(migration.down_revision) == PARENTS
 
 
-def test_0029_is_the_chain_head():
+def test_0029_remains_in_the_single_migration_chain():
     from pathlib import Path
 
     migrations_dir = Path(migration.__file__).resolve().parent.parent
     config = Config()
     config.set_main_option("script_location", migrations_dir.as_posix())
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == [REVISION]
+    assert script.get_heads() == ["0040_merge_quantflow_upstream"]
+    ancestors = {revision.revision for revision in script.walk_revisions()}
+    assert REVISION in ancestors

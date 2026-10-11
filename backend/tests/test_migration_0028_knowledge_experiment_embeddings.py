@@ -6,8 +6,8 @@ Covers ``ExperimentRow.embedding`` in
 
 * revision chain integrity (direct child of
   ``0027_merge_knowledge_upstream``; the chain-head pin moved on to
-  ``test_migration_0029_merge_knowledge_outbox`` with the
-  QuantFlow/upstream merge revision);
+  ``test_migration_0040_merge_quantflow_upstream`` with the
+  2026-10-11 QuantFlow/upstream merge revision);
 * ``Base.metadata.create_all`` + experiment persistence, including exact
   embedding round-trip through the SQLite JSON fallback;
 * migration ``upgrade()`` / ``downgrade()`` against a scratch SQLite
@@ -139,10 +139,10 @@ class TestRevisionChain:
 
     def test_0028_is_ancestor_of_the_chain_head(self) -> None:
         assert REVISION in {revision.revision for revision in self._script().walk_revisions()}
-        assert bootstrap._get_head_revision() == "0029_merge_knowledge_outbox"
+        assert bootstrap._get_head_revision() == "0040_merge_quantflow_upstream"
 
     def test_single_head_no_branches(self) -> None:
-        assert self._script().get_heads() == ["0029_merge_knowledge_outbox"]
+        assert self._script().get_heads() == ["0040_merge_quantflow_upstream"]
 
     @staticmethod
     def _script() -> ScriptDirectory:

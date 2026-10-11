@@ -177,14 +177,15 @@ class TestRevisionChain:
 
     def test_single_head_is_new_revision(self) -> None:
         # Phase 2 landed revision 0023 on top of this one, the upstream
-        # merge added 0027 on top of that, Phase 3 added 0028, and the
-        # notification-outbox merge added 0029; the head pin follows the
+        # merge added 0027 on top of that, Phase 3 added 0028, the
+        # notification-outbox merge added 0029, and the 2026-10-11
+        # QuantFlow/upstream merge added 0040; the head pin follows the
         # chain tip (single head, no branches).
         migrations_dir = Path(migration.__file__).resolve().parent.parent
         config = Config()
         config.set_main_option("script_location", migrations_dir.as_posix())
         script = ScriptDirectory.from_config(config)
-        assert script.get_heads() == ["0029_merge_knowledge_outbox"]
+        assert script.get_heads() == ["0040_merge_quantflow_upstream"]
 
 
 class TestModels:

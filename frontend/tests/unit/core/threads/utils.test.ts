@@ -13,6 +13,7 @@ import {
   THREAD_ARCHIVED_METADATA_KEY,
   THREAD_IMPORTED_METADATA_KEY,
   THREAD_PINNED_METADATA_KEY,
+  titleOfThread,
 } from "@/core/threads/utils";
 
 function makeThread(
@@ -211,6 +212,14 @@ test("formats the Buzz channel source label", () => {
   });
 });
 
+test("formats the QQ channel source label", () => {
+  expect(
+    channelSourceOfThread({
+      metadata: { channel_source: { type: "im_channel", provider: "qq" } },
+    }),
+  ).toMatchObject({ provider: "qq", label: "QQ" });
+});
+
 test("ignores threads without valid IM channel source metadata", () => {
   expect(channelSourceOfThread({ metadata: {} })).toBeNull();
   expect(
@@ -260,4 +269,18 @@ test("textOfMessage returns null when array content has no text", () => {
   } as unknown as Message;
 
   expect(textOfMessage(message)).toBeNull();
+});
+
+test("titleOfThread falls back to the given label for an untitled thread", () => {
+  const untitled = {
+    thread_id: "t",
+    metadata: {},
+    values: {},
+  } as unknown as AgentThread;
+  expect(titleOfThread(untitled, "未命名")).toBe("未命名");
+  // Export filenames keep the English default.
+  expect(titleOfThread(untitled)).toBe("Untitled");
+  expect(titleOfThread(makeThread("Weekly report"), "未命名")).toBe(
+    "Weekly report",
+  );
 });

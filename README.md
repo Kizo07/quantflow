@@ -91,6 +91,46 @@ via `make config`) plus `.env` for keys — both gitignored, never committed.
 After editing the example, merge with `make config-upgrade`. `make check`
 verifies prerequisites.
 
+## Desktop App
+
+`quantflow-app.sh` is the desktop entry point: it ensures the stack is up
+(gateway + frontend + nginx on `http://localhost:2026`) and opens the UI in
+a dedicated Chromium app window (profile `~/.config/quantflow-chrome`).
+
+Prerequisites (once): `make install`, `make config`, fill in `.env`, and
+copy `extensions_config.example.json` to `extensions_config.json` with your
+paths enabled (see MCP servers below). (`DEER_FLOW_CONFIG_PATH` /
+`DEER_FLOW_EXTENSIONS_CONFIG_PATH` or `backend/` copies are accepted too.)
+
+```bash
+./quantflow-app.sh                       # auto mode, opens the window
+./quantflow-app.sh --dev                 # dev mode (hot-reload gateway + next dev)
+./quantflow-app.sh --prod                # prod mode (pre-built frontend, no hot-reload)
+./quantflow-app.sh --skip-frontend-build # with --prod, reuse the existing .next build
+./quantflow-app.sh --no-browser          # ensure the stack is up, no window
+./quantflow-app.sh --stop                # stop the stack — only if this script started it
+```
+
+Auto mode picks prod when `frontend/.next/BUILD_ID` exists, else dev
+(override with `--dev`/`--prod`).
+
+Reuse-vs-own teardown: a healthy already-running stack is reused and is
+**never** stopped on window close or by `--stop`; only a stack this script
+started itself is torn down. `--no-browser` leaves its stack running with
+no owner window — stop it later with `--stop`. Service logs live in
+`logs/` (`gateway.log`, `frontend.log`, `nginx.log`).
+
+Launcher (fresh checkouts): stamp the `quantflow.desktop` template
+with your checkout path and home dir, then copy `quantflow.svg` into place:
+
+```bash
+mkdir -p ~/.local/share/applications/ ~/.local/share/icons/
+sed -e "s|@@QUANTFLOW_REPO@@|$(pwd)|g" -e "s|@@HOME@@|$HOME|g" quantflow.desktop > ~/.local/share/applications/quantflow.desktop
+cp quantflow.svg ~/.local/share/icons/
+update-desktop-database ~/.local/share/applications/
+desktop-file-validate ~/.local/share/applications/quantflow.desktop
+```
+
 ## The quant desk
 
 Ask things like *"find 10 momentum names with fresh catalysts"* or

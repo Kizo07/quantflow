@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Name=QuantFlow
+GenericName=Quant Research Desk
+Comment=QuantFlow quant-research desktop app — reuses a healthy running stack, stops only a stack it started.
+Exec=@@QUANTFLOW_REPO@@/quantflow-app.sh
+Icon=@@HOME@@/.local/share/icons/quantflow.svg
+Terminal=false
+Categories=Office;Finance;
+Keywords=quant;research;backtest;portfolio;finance;stocks;deer-flow;
+Actions=Dev;Stop;
+
+[Desktop Action Dev]
+Name=Start in Dev Mode
+Exec=@@QUANTFLOW_REPO@@/quantflow-app.sh --dev
+
+[Desktop Action Stop]
+Name=Stop Stack
+Exec=@@QUANTFLOW_REPO@@/quantflow-app.sh --stop

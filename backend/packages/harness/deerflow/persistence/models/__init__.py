@@ -49,6 +49,7 @@ from deerflow.persistence.channel_connections.model import (
     ChannelOAuthStateRow,
 )
 from deerflow.persistence.channel_thread_bindings.model import ChannelThreadBindingRow
+from deerflow.persistence.cli_sessions.model import CliAuditRow, CliPresetRow, CliSessionRow
 from deerflow.persistence.feedback.model import FeedbackRow
 from deerflow.persistence.login_throttle.model import LoginThrottleRow
 from deerflow.persistence.managed_subagents.model import ManagedSubagentRow
@@ -74,6 +75,9 @@ __all__ = [
     "ChannelCredentialRow",
     "ChannelOAuthStateRow",
     "ChannelThreadBindingRow",
+    "CliAuditRow",
+    "CliPresetRow",
+    "CliSessionRow",
     "FeedbackRow",
     "KnowledgeAgentRunRow",
     "KnowledgeArtifactRow",

@@ -29,6 +29,7 @@ from app.gateway.routers import (
     capabilities,
     channel_connections,
     channels,
+    cli_sessions,
     console,
     features,
     feedback,
@@ -871,6 +872,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 set_subagent_batch_submitter(batch_service)
                 app.state.subagent_batches_available = True
 
+        # CLI-session boot reconciliation (B1.4): reattach live tmux runs,
+        # honestly mark process-gone rows interrupted. Best-effort and
+        # bounded — a failure here must never block gateway readiness.
+        try:
+            from app.gateway.cli_runner import reconcile_on_boot
+
+            cli_session_repo = getattr(app.state, "cli_session_repo", None)
+            if cli_session_repo is not None:
+                cli_reconcile = await asyncio.wait_for(reconcile_on_boot(cli_session_repo), timeout=60.0)
+                logger.info("CLI session boot reconciliation: %s", cli_reconcile)
+        except Exception:
+            logger.exception("CLI session boot reconciliation failed; running rows keep their stored status")
+
         yield
 
         await _shutdown_startup_trash_sweep(app)
@@ -1284,6 +1298,10 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
     # Durable MCP tasks are scoped to their owning thread.
     app.include_router(mcp_tasks.router)
     app.include_router(subagent_batches.router)
+
+    # Headless CLI sessions + launch presets.
+    app.include_router(cli_sessions.router)
+    app.include_router(cli_sessions.presets_router)
 
     # Memory API is mounted at /api/memory
     app.include_router(memory.router)

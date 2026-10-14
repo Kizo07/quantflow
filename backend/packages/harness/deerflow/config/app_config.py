@@ -18,6 +18,7 @@ from deerflow.config.authorization_config import AuthorizationConfig, load_autho
 from deerflow.config.blob_storage_config import BlobStorageConfig, load_blob_storage_config_from_dict
 from deerflow.config.channel_connections_config import ChannelConnectionsConfig
 from deerflow.config.checkpointer_config import CheckpointerConfig, load_checkpointer_config_from_dict
+from deerflow.config.cli_config import CliConfig
 from deerflow.config.database_config import DatabaseConfig
 from deerflow.config.dedupe_storage_config import DedupeStorageConfig
 from deerflow.config.deployment_config import DeploymentConfig
@@ -373,6 +374,10 @@ class AppConfig(BaseModel):
             "mcp_tasks",
             field_doc="Long-running MCP task persistence and background polling runtime.",
         ),
+    )
+    cli: CliConfig = Field(
+        default_factory=CliConfig,
+        description="External CLI-session harness (live-read per request): tmux vs direct-subprocess launch path for headless CLI runs.",
     )
     subagent_runtime: SubagentRuntimeConfig = Field(
         default_factory=SubagentRuntimeConfig,

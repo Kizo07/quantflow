@@ -16,6 +16,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useI18n } from "@/core/i18n/hooks";
 import { cn } from "@/lib/utils";
 
+import { CliModeToggle } from "./cli-mode-toggle";
 import { GithubIcon } from "./github-icon";
 import { Tooltip } from "./tooltip";
 // Workspace sections that have an index route (/workspace/<section>/page.tsx)
@@ -23,6 +24,7 @@ import { Tooltip } from "./tooltip";
 const LINKABLE_SECTIONS: Record<string, true> = {
   agents: true,
   chats: true,
+  "cli-sessions": true,
   "scheduled-tasks": true,
 };
 
@@ -99,7 +101,8 @@ export function WorkspaceHeader({
           </BreadcrumbList>
         </Breadcrumb>
       </div>
-      <div className="pr-4">
+      <div className="flex items-center gap-3 pr-4">
+        <CliModeToggle />
         <Tooltip content={t.workspace.githubTooltip}>
           <a
             href="https://github.com/Kizo07/quantflow"
@@ -142,6 +145,7 @@ function nameOfSegment(
   if (segment === "chats") return t.breadcrumb.chats;
   if (segment === "usage") return t.breadcrumb.usage;
   if (segment === "scheduled-tasks") return t.sidebar.scheduledTasks;
+  if (segment === "cli-sessions") return t.sidebar.cliSessions;
   if (segment === "agents") return t.sidebar.agents;
   return segment[0]?.toUpperCase() + segment.slice(1);
 }

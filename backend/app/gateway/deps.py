@@ -819,6 +819,7 @@ async def langgraph_runtime(app: FastAPI, startup_config: AppConfig) -> AsyncGen
 
         app.state.thread_store = make_thread_store(sf, app.state.store)
         if sf is not None:
+            from deerflow.persistence.cli_sessions import CliAuditRepository, CliPresetRepository, CliSessionRepository
             from deerflow.persistence.mcp_tasks import McpTaskRepository
             from deerflow.persistence.projects import ProjectDocumentRepository, ProjectRepository
             from deerflow.persistence.scheduled_task_events import ScheduledTaskEventRepository
@@ -844,7 +845,13 @@ async def langgraph_runtime(app: FastAPI, startup_config: AppConfig) -> AsyncGen
             app.state.thread_read_repo = ThreadReadRepository(sf)
             app.state.mcp_task_repo = McpTaskRepository(sf)
             app.state.subagent_batch_repo = SubagentBatchRepository(sf)
+            app.state.cli_session_repo = CliSessionRepository(sf)
+            app.state.cli_preset_repo = CliPresetRepository(sf)
+            app.state.cli_audit_repo = CliAuditRepository(sf)
         else:
+            app.state.cli_audit_repo = None
+            app.state.cli_preset_repo = None
+            app.state.cli_session_repo = None
             app.state.mcp_task_repo = None
             app.state.project_repo = None
             app.state.project_document_repo = None
@@ -1044,6 +1051,27 @@ def get_subagent_batch_repo(request: Request):
     val = getattr(request.app.state, "subagent_batch_repo", None)
     if val is None:
         raise HTTPException(status_code=503, detail="Subagent batch repository not available")
+    return val
+
+
+def get_cli_session_repo(request: Request):
+    val = getattr(request.app.state, "cli_session_repo", None)
+    if val is None:
+        raise HTTPException(status_code=503, detail="CLI session repo not available")
+    return val
+
+
+def get_cli_preset_repo(request: Request):
+    val = getattr(request.app.state, "cli_preset_repo", None)
+    if val is None:
+        raise HTTPException(status_code=503, detail="CLI preset repo not available")
+    return val
+
+
+def get_cli_audit_repo(request: Request):
+    val = getattr(request.app.state, "cli_audit_repo", None)
+    if val is None:
+        raise HTTPException(status_code=503, detail="CLI audit repo not available")
     return val
 
 

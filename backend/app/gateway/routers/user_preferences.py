@@ -28,6 +28,9 @@ class Preferences(BaseModel):
     # switch. Scheduled-task IM notices are written in it; without it they use
     # ``channel_connections.notification_locale``.
     locale: NotificationLocale | None = None
+    # Research/Coding harness mode for the CLI-sessions dashboard toggle:
+    # research runs the built-in harness, coding runs the CLI backend.
+    harness_mode: Literal["research", "coding"] | None = None
 
 
 async def _owner(request: Request, expected_user: str) -> str:

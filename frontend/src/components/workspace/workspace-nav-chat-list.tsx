@@ -6,6 +6,7 @@ import {
   CalendarClock,
   ChartColumn,
   MessagesSquare,
+  Terminal,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -92,6 +93,20 @@ export function WorkspaceNavChatList() {
             >
               <CalendarClock />
               <span>{t.sidebar.scheduledTasks}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            isActive={pathname.startsWith("/workspace/cli-sessions")}
+            asChild
+          >
+            <Link
+              className="text-muted-foreground"
+              href="/workspace/cli-sessions"
+            >
+              <Terminal />
+              <span>{t.sidebar.cliSessions}</span>
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>

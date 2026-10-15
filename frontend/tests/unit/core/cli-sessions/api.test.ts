@@ -7,6 +7,8 @@ rs.mock("@/core/config", () => ({ getBackendBaseURL: () => "" }));
 import { GatewayApiError } from "@/core/api/errors";
 import {
   exportCliSession,
+  fetchCliCapabilities,
+  fetchCliChatMessages,
   fetchCliPreset,
   fetchCliSession,
   fetchCliSessions,
@@ -14,6 +16,7 @@ import {
   launchCliSession,
   putCliPreset,
   resumeCliSession,
+  sendCliChatMessage,
   stopCliSession,
 } from "@/core/cli-sessions/api";
 
@@ -97,8 +100,55 @@ describe("cli-sessions api", () => {
     });
   });
 
+  it("backfills chat messages and sends follow-ups", async () => {
+    mocks.fetch.mockResolvedValue(
+      ok({ id: "b", runs: ["b"], messages: [], truncated: false }),
+    );
+    await expect(fetchCliChatMessages("b")).resolves.toEqual({
+      id: "b",
+      runs: ["b"],
+      messages: [],
+      truncated: false,
+    });
+    expect(mocks.fetch).toHaveBeenCalledWith("/api/cli-sessions/b/messages");
+
+    mocks.fetch.mockResolvedValue(ok({ id: "c" }));
+    await sendCliChatMessage("b", { prompt: "again", effort: "low" });
+    expect(mocks.fetch).toHaveBeenCalledWith("/api/cli-sessions/b/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "again", effort: "low" }),
+    });
+  });
+
   it("throws GatewayApiError on failure", async () => {
     mocks.fetch.mockResolvedValue(fail(422, "bad effort"));
     await expect(fetchCliSessions()).rejects.toBeInstanceOf(GatewayApiError);
+  });
+
+  it("fetches host CLI capabilities", async () => {
+    const capabilities = {
+      models: [
+        {
+          id: "muse-spark-1.3",
+          label: "Muse Spark 1.3",
+          effortTiers: ["low", "high"],
+          defaultEffort: "high",
+        },
+      ],
+      defaultModel: "muse-spark-1.3",
+      providers: [{ id: "meta", label: "Meta" }],
+      defaultProvider: "meta",
+    };
+    mocks.fetch.mockResolvedValue(ok(capabilities));
+    await expect(fetchCliCapabilities()).resolves.toEqual(capabilities);
+    expect(mocks.fetch).toHaveBeenCalledWith("/api/cli-capabilities");
+  });
+
+  it("throws GatewayApiError when capabilities fail", async () => {
+    mocks.fetch.mockResolvedValue(fail(403, "forbidden"));
+    await expect(fetchCliCapabilities()).rejects.toBeInstanceOf(
+      GatewayApiError,
+    );
   });
 });

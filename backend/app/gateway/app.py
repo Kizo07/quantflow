@@ -1302,6 +1302,7 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
     # Headless CLI sessions + launch presets.
     app.include_router(cli_sessions.router)
     app.include_router(cli_sessions.presets_router)
+    app.include_router(cli_sessions.capabilities_router)
 
     # Memory API is mounted at /api/memory
     app.include_router(memory.router)

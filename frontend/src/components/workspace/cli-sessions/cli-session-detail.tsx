@@ -13,11 +13,7 @@ import {
   useResumeCliSession,
   useStopCliSession,
 } from "@/core/cli-sessions/hooks";
-import {
-  CLI_YOLO_CONFIRM_TOKEN,
-  isCliSessionActive,
-  type CliSession,
-} from "@/core/cli-sessions/types";
+import { isCliSessionActive, type CliSession } from "@/core/cli-sessions/types";
 import { useI18n } from "@/core/i18n/hooks";
 
 function formatTime(value: string | null, locale: string): string {
@@ -71,7 +67,6 @@ export function CliSessionDetail({ session }: { session: CliSession }) {
   const active = isCliSessionActive(current);
 
   const [resumePrompt, setResumePrompt] = useState("");
-  const [yoloConfirm, setYoloConfirm] = useState(false);
   const [redacted, setRedacted] = useState(true);
   const [inspectOutput, setInspectOutput] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -92,8 +87,6 @@ export function CliSessionDetail({ session }: { session: CliSession }) {
         sessionId: current.id,
         payload: {
           prompt: resumePrompt.trim() || null,
-          yolo_confirm:
-            current.yolo && yoloConfirm ? CLI_YOLO_CONFIRM_TOKEN : null,
         },
       },
       { onError: fail(t.cliSessions.errors.resumeFailed) },
@@ -228,23 +221,11 @@ export function CliSessionDetail({ session }: { session: CliSession }) {
             type="button"
             variant="secondary"
             onClick={handleResume}
-            disabled={resume.isPending || (current.yolo && !yoloConfirm)}
+            disabled={resume.isPending}
           >
             {resume.isPending ? st.resuming : st.resume}
           </Button>
         </div>
-        {current.yolo && (
-          <label className="flex items-center gap-2 text-sm font-medium">
-            <input
-              type="checkbox"
-              aria-label={t.cliSessions.launch.yoloConfirm}
-              checked={yoloConfirm}
-              onChange={(event) => setYoloConfirm(event.target.checked)}
-              className="size-4"
-            />
-            {t.cliSessions.launch.yoloConfirm}
-          </label>
-        )}
       </div>
 
       {actionError && (

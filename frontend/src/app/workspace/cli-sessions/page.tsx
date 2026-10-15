@@ -13,9 +13,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { CliChatView } from "@/components/workspace/cli-sessions/cli-chat-view";
 import { CliLaunchForm } from "@/components/workspace/cli-sessions/cli-launch-form";
 import { CliSessionDetail } from "@/components/workspace/cli-sessions/cli-session-detail";
 import { CliSessionList } from "@/components/workspace/cli-sessions/cli-session-list";
+import { CliStartPanel } from "@/components/workspace/cli-sessions/cli-start-panel";
 import { CliUnifiedList } from "@/components/workspace/cli-sessions/cli-unified-list";
 import {
   WorkspaceBody,
@@ -27,6 +29,7 @@ import { useCliSessions } from "@/core/cli-sessions/hooks";
 import { useI18n } from "@/core/i18n/hooks";
 
 type ListTab = "coding" | "all";
+type DetailView = "chat" | "run";
 
 export default function CliSessionsPage() {
   const { t } = useI18n();
@@ -40,6 +43,7 @@ export default function CliSessionsPage() {
   const sessions = query.data ?? [];
 
   const [tab, setTab] = useState<ListTab>("coding");
+  const [view, setView] = useState<DetailView>("chat");
   const [launchOpen, setLaunchOpen] = useState(false);
   const [shownId, setShownId] = useState<string | null>(null);
 
@@ -158,16 +162,50 @@ export default function CliSessionsPage() {
                 />
               )}
             </div>
-            <div className="min-w-0">
+            <div className="flex min-w-0 flex-col gap-3">
+              {selectedSession && (
+                <ToggleGroup
+                  type="single"
+                  value={view}
+                  onValueChange={(value) => {
+                    if (value === "chat" || value === "run") setView(value);
+                  }}
+                  aria-label={t.cliSessions.title}
+                  size="sm"
+                  spacing={1}
+                  className="self-start"
+                >
+                  <ToggleGroupItem value="chat">
+                    {t.cliSessions.viewChat}
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="run">
+                    {t.cliSessions.viewRun}
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              )}
               {selectedSession ? (
-                <CliSessionDetail
-                  key={selectedSession.id}
-                  session={selectedSession}
-                />
+                view === "chat" ? (
+                  <CliChatView
+                    key={selectedSession.id}
+                    session={selectedSession}
+                    onSelectRun={selectSession}
+                  />
+                ) : (
+                  <CliSessionDetail
+                    key={selectedSession.id}
+                    session={selectedSession}
+                  />
+                )
               ) : query.isSuccess ? (
-                <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
-                  {t.cliSessions.selectHint}
-                </p>
+                mode === "coding" ? (
+                  <CliStartPanel
+                    onStarted={(session) => selectSession(session.id)}
+                  />
+                ) : (
+                  <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
+                    {t.cliSessions.selectHint}
+                  </p>
+                )
               ) : null}
             </div>
           </div>

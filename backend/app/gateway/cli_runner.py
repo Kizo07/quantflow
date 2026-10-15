@@ -33,9 +33,6 @@ CLI_MODEL_MUSE_13 = "muse-spark-1.3"
 CLI_PRESET_MUSE_13 = "muse-1.3"
 CLI_TOP_EFFORT = "ultra"
 
-# Launch requests that set yolo must echo this token back verbatim.
-YOLO_CONFIRM_TOKEN = "I-CONFIRM-YOLO"
-
 # Built-in Muse 1.3 launch defaults. Fresh databases are provisioned via
 # create_all + stamp (the 0041 seed insert only runs on the upgrade path),
 # so preset reads and launch-time loads fall back to this when no stored
@@ -67,13 +64,16 @@ EFFORT_TIERS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "
 # the runner passes nothing and lets the CLI apply it.
 CLI_DEFAULT_EFFORT = "high"
 PROVIDERS = frozenset({"echo", "meta", "local"})
-CLI_PRESETS = frozenset({"native-basic", "miniswe", "openai-apply-patch"})
 APPROVAL_MODES = frozenset({"untrusted", "on-request", "never"})
 
 TERMINAL_STATUSES = frozenset({"completed", "failed", "stopped", "interrupted"})
 
 _MODEL_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
 _SANDBOX_NETWORK_RE = re.compile(r"[a-z][a-z0-9-]{0,31}")
+# Run presets are an opaque passthrough: the CLI owns the preset
+# namespace (see `muse exec --help` on this host), so the gateway only
+# rejects empty/overlong/unsafe tokens and forwards the rest verbatim.
+_PRESET_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
 
 _SESSION_LOG_GLOB = "session.jsonl"
 _DISCOVERY_CAP = 500
@@ -111,7 +111,6 @@ class CliLaunchParams:
     disable_approval: bool = False
     disable_sandbox: bool = False
     yolo: bool = False
-    yolo_confirm: str | None = None
     workspace: str | None = None
     session_id: str | None = None
 
@@ -124,8 +123,8 @@ def validate_launch_params(params: CliLaunchParams) -> CliLaunchParams:
         raise CliValidationError(f"unsupported model id: {params.model!r}")
     if params.provider is not None and params.provider not in PROVIDERS:
         raise CliValidationError(f"unsupported provider: {params.provider!r} (expected one of {sorted(PROVIDERS)})")
-    if params.preset is not None and params.preset not in CLI_PRESETS:
-        raise CliValidationError(f"unsupported preset: {params.preset!r} (expected one of {sorted(CLI_PRESETS)})")
+    if params.preset is not None and _PRESET_NAME_RE.fullmatch(params.preset) is None:
+        raise CliValidationError(f"unsupported preset: {params.preset!r}")
     if params.effort is not None and params.effort not in EFFORT_TIERS:
         raise CliValidationError(f"unsupported effort: {params.effort!r} (expected one of {sorted(EFFORT_TIERS)})")
     if params.approval_mode is not None and params.approval_mode not in APPROVAL_MODES:
@@ -136,8 +135,6 @@ def validate_launch_params(params: CliLaunchParams) -> CliLaunchParams:
         raise CliValidationError(f"workspace is not an existing directory: {params.workspace!r}")
     if params.provider == "echo" and params.effort is not None:
         raise CliValidationError("reasoning effort is not supported with the echo provider (CLI refuses the run)")
-    if params.yolo and params.yolo_confirm != YOLO_CONFIRM_TOKEN:
-        raise CliValidationError("yolo launches require the explicit confirmation token")
     return params
 
 

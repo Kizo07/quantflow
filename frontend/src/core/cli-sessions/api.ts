@@ -3,6 +3,9 @@ import { fetch } from "@/core/api/fetcher";
 import { getBackendBaseURL } from "@/core/config";
 
 import type {
+  CliCapabilities,
+  CliChatBackfill,
+  CliChatSendPayload,
   CliExportResult,
   CliInspectResult,
   CliLaunchPayload,
@@ -109,6 +112,37 @@ export function cliSessionEventsUrl(sessionId: string): string {
   return cliSessionUrl(sessionId, "/events");
 }
 
+export async function fetchCliChatMessages(
+  sessionId: string,
+): Promise<CliChatBackfill> {
+  const response = await fetch(cliSessionUrl(sessionId, "/messages"));
+  if (!response.ok) {
+    await throwGatewayApiError(
+      response,
+      `Failed to load CLI chat messages: ${response.statusText}`,
+    );
+  }
+  return response.json();
+}
+
+export async function sendCliChatMessage(
+  sessionId: string,
+  payload: CliChatSendPayload,
+): Promise<CliSession> {
+  const response = await fetch(cliSessionUrl(sessionId, "/messages"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    await throwGatewayApiError(
+      response,
+      `Failed to send CLI chat message: ${response.statusText}`,
+    );
+  }
+  return response.json();
+}
+
 export async function inspectCliSession(
   sessionId: string,
 ): Promise<CliInspectResult> {
@@ -170,6 +204,17 @@ export async function putCliPreset(
     await throwGatewayApiError(
       response,
       `Failed to save CLI preset: ${response.statusText}`,
+    );
+  }
+  return response.json();
+}
+
+export async function fetchCliCapabilities(): Promise<CliCapabilities> {
+  const response = await fetch(`${getBackendBaseURL()}/api/cli-capabilities`);
+  if (!response.ok) {
+    await throwGatewayApiError(
+      response,
+      `Failed to load CLI capabilities: ${response.statusText}`,
     );
   }
   return response.json();

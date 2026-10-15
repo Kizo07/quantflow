@@ -29,6 +29,7 @@ const mocks = rs.hoisted(() => ({
   stop: rs.fn(),
   fetchPreset: rs.fn(),
   putPreset: rs.fn(),
+  fetchCapabilities: rs.fn(),
 }));
 
 rs.mock("next/navigation", () => ({
@@ -72,6 +73,7 @@ rs.mock("@/core/cli-sessions/api", () => ({
   fetchCliPresets: async () => [],
   fetchCliPreset: mocks.fetchPreset,
   putCliPreset: mocks.putPreset,
+  fetchCliCapabilities: mocks.fetchCapabilities,
   cliSessionEventsUrl: (id: string) => `/api/cli-sessions/${id}/events`,
 }));
 rs.mock("@/core/threads/hooks", () => ({
@@ -79,7 +81,11 @@ rs.mock("@/core/threads/hooks", () => ({
 }));
 
 import CliSessionsPage from "@/app/workspace/cli-sessions/page";
-import type { CliPreset, CliSession } from "@/core/cli-sessions/types";
+import type {
+  CliCapabilities,
+  CliPreset,
+  CliSession,
+} from "@/core/cli-sessions/types";
 import { I18nProvider } from "@/core/i18n/context";
 
 function session(overrides: Partial<CliSession> = {}): CliSession {
@@ -119,6 +125,26 @@ const PRESET_13: CliPreset = {
   updated_at: null,
 };
 
+const CAPABILITIES: CliCapabilities = {
+  models: [
+    {
+      id: "muse-spark-1.3",
+      label: "Muse Spark 1.3",
+      effortTiers: ["low", "high", "ultra"],
+      defaultEffort: "high",
+    },
+    {
+      id: "muse-wonder-1.0",
+      label: "muse-wonder-1.0",
+      effortTiers: ["minimal", "low"],
+      defaultEffort: "low",
+    },
+  ],
+  defaultModel: "muse-spark-1.3",
+  providers: [{ id: "meta", label: "Meta" }],
+  defaultProvider: "meta",
+};
+
 const clients: QueryClient[] = [];
 
 function renderPage() {
@@ -144,6 +170,7 @@ beforeEach(() => {
   mocks.fetchSessions.mockResolvedValue([session()]);
   mocks.fetchSession.mockImplementation(async (id: string) => session({ id }));
   mocks.fetchPreset.mockResolvedValue(PRESET_13);
+  mocks.fetchCapabilities.mockResolvedValue(CAPABILITIES);
 });
 
 afterEach(() => {
@@ -161,6 +188,7 @@ afterEach(() => {
     mocks.stop,
     mocks.fetchPreset,
     mocks.putPreset,
+    mocks.fetchCapabilities,
   ]) {
     fn.mockReset();
   }
@@ -173,13 +201,15 @@ async function openLaunchDialog() {
 }
 
 describe("CliSessionsPage", () => {
-  it("lists coding sessions and shows the first one's detail", async () => {
+  it("lists coding sessions, shows chat first, and toggles to run detail", async () => {
     renderPage();
     await screen.findByTestId("cli-session-list");
+    expect(screen.getByTestId("cli-chat-view")).toBeDefined();
+    fireEvent.click(screen.getByRole("radio", { name: "Run" }));
     expect(screen.getByTestId("cli-session-detail")).toBeDefined();
   });
 
-  it("gates yolo launches behind the explicit confirm checkbox", async () => {
+  it("launches yolo runs without a confirm checkbox", async () => {
     mocks.launch.mockResolvedValue(session({ id: "session-new" }));
     renderPage();
     await openLaunchDialog();
@@ -188,23 +218,24 @@ describe("CliSessionsPage", () => {
       target: { value: "do the thing" },
     });
     const launchButton = screen.getByRole("button", { name: "Launch" });
-    // The 1.3 preset defaults yolo on; the per-launch confirm still gates it.
+    // The 1.3 preset defaults yolo on; the warning shows but never gates.
     await screen.findByTestId("cli-yolo-warning");
-    expect((launchButton as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(
-      screen.getByRole("checkbox", {
+    expect(
+      screen.queryByRole("checkbox", {
         name: "I understand this run skips approvals",
       }),
-    );
-    await waitFor(() =>
-      expect((launchButton as HTMLButtonElement).disabled).toBe(false),
-    );
+    ).toBeNull();
+    expect((launchButton as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(launchButton);
     await waitFor(() => expect(mocks.launch).toHaveBeenCalledTimes(1));
     expect(mocks.launch).toHaveBeenCalledWith(
       expect.objectContaining({
         yolo: true,
-        yolo_confirm: "I-CONFIRM-YOLO",
+      }),
+    );
+    expect(mocks.launch).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        yolo_confirm: expect.anything(),
       }),
     );
   });
@@ -213,7 +244,7 @@ describe("CliSessionsPage", () => {
     renderPage();
     await openLaunchDialog();
     await screen.findByTestId("cli-preset-badge");
-    // Preset yolo default lands on the toggle (still gated per launch).
+    // Preset yolo default lands on the toggle (warning shows, never gates).
     const yoloSwitch = screen.getByRole("switch", { name: "Yolo mode" });
     await waitFor(() =>
       expect(yoloSwitch.getAttribute("aria-checked")).toBe("true"),
@@ -240,6 +271,103 @@ describe("CliSessionsPage", () => {
       expect(screen.queryByTestId("cli-preset-badge")).toBeNull(),
     );
     expect(screen.queryByTestId("cli-save-preset")).toBeNull();
+  });
+
+  it("lists capability models with the CLI default and custom hatch", async () => {
+    renderPage();
+    await openLaunchDialog();
+    await screen.findByTestId("cli-preset-badge");
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    await screen.findByRole("option", { name: "CLI default" });
+    expect(
+      screen.getByRole("option", {
+        name: "Muse Spark 1.3 (muse-spark-1.3)",
+      }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("option", { name: "muse-wonder-1.0" }),
+    ).toBeDefined();
+    expect(screen.getByRole("option", { name: "Custom…" })).toBeDefined();
+  });
+
+  it("offers only capability providers", async () => {
+    renderPage();
+    await openLaunchDialog();
+    await screen.findByTestId("cli-preset-badge");
+    fireEvent.click(screen.getByRole("combobox", { name: "Provider" }));
+    await screen.findByRole("option", { name: "Meta (meta)" });
+    expect(screen.queryByRole("option", { name: "echo" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "local" })).toBeNull();
+  });
+
+  it("scopes effort tiers to the selected model", async () => {
+    renderPage();
+    await openLaunchDialog();
+    await screen.findByTestId("cli-preset-badge");
+    // The 1.3 preset lands effort on ultra, one of its advertised tiers.
+    const effortBox = () =>
+      screen.getByRole("combobox", { name: "Reasoning effort" });
+    await waitFor(() => expect(effortBox().textContent).toContain("ultra"));
+    fireEvent.click(effortBox());
+    await screen.findByRole("option", { name: "ultra" });
+    expect(screen.queryByRole("option", { name: "minimal" })).toBeNull();
+    // Re-select the current tier to close the menu.
+    fireEvent.click(screen.getByRole("option", { name: "ultra" }));
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    fireEvent.click(
+      await screen.findByRole("option", { name: "muse-wonder-1.0" }),
+    );
+    // Ultra is invalid for wonder, so effort snaps to its default (low).
+    await waitFor(() => expect(effortBox().textContent).toContain("low"));
+    fireEvent.click(effortBox());
+    await screen.findByRole("option", { name: "minimal" });
+    expect(screen.queryByRole("option", { name: "ultra" })).toBeNull();
+  });
+
+  it("has no run-preset selector and omits the preset field on launch", async () => {
+    mocks.launch.mockResolvedValue(session({ id: "session-new" }));
+    renderPage();
+    await openLaunchDialog();
+    await screen.findByTestId("cli-preset-badge");
+    expect(screen.queryByRole("combobox", { name: "Run preset" })).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("What should the run do?"), {
+      target: { value: "do the thing" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(mocks.launch).toHaveBeenCalledTimes(1));
+    const payload = mocks.launch.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect("preset" in payload).toBe(false);
+  });
+
+  it("shows the start panel and starts a run when nothing is selected", async () => {
+    mocks.fetchSessions.mockResolvedValue([]);
+    mocks.launch.mockResolvedValue(session({ id: "session-new" }));
+    renderPage();
+    await screen.findByTestId("cli-start-panel");
+    expect(screen.getByTestId("cli-preset-badge")).toBeDefined();
+    fireEvent.change(screen.getByPlaceholderText("What should the run do?"), {
+      target: { value: "do the thing" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(mocks.launch).toHaveBeenCalledTimes(1));
+    expect(mocks.launch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "do the thing",
+        model: "muse-spark-1.3",
+        mode: "coding",
+      }),
+    );
+  });
+
+  it("surfaces a capabilities failure without breaking the form", async () => {
+    mocks.fetchCapabilities.mockRejectedValue(new Error("down"));
+    renderPage();
+    await openLaunchDialog();
+    await screen.findByTestId("cli-capabilities-error");
+    // CLI default + custom stay available; providers collapse to None only.
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    await screen.findByRole("option", { name: "CLI default" });
   });
 
   it("routes new sessions to chats in research mode", async () => {

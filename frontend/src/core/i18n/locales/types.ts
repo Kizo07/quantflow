@@ -740,11 +740,8 @@ export interface Translations {
       customModelPlaceholder: string;
       provider: string;
       providerNone: string;
-      runPreset: string;
-      runPresetNone: string;
       effort: string;
       effortNone: string;
-      effortEchoHint: string;
       contributorMode: string;
       contributorUnset: string;
       approvalMode: string;
@@ -753,13 +750,13 @@ export interface Translations {
       sandboxNetworkPlaceholder: string;
       trustWorkspace: string;
       yolo: string;
-      yoloConfirm: string;
       yoloWarning: string;
       presetBadge: string;
       savePreset: string;
       presetSaved: string;
       submit: string;
       submitting: string;
+      startRun: string;
       cancel: string;
       promptRequired: string;
     };
@@ -798,6 +795,34 @@ export interface Translations {
       exportFailed: string;
       inspectFailed: string;
       presetFailed: string;
+      chatLoadFailed: string;
+      chatSendFailed: string;
+      chatConflict: string;
+      capabilitiesFailed: string;
+    };
+    viewChat: string;
+    viewRun: string;
+    chat: {
+      messages: string;
+      loading: string;
+      truncated: string;
+      empty: string;
+      userLabel: string;
+      assistantLabel: string;
+      toolLabel: string;
+      streaming: string;
+      finished: string;
+      unavailable: string;
+      reconnect: string;
+      composerPlaceholder: string;
+      send: string;
+      sending: string;
+      controls: string;
+      inherit: string;
+      yoloOn: string;
+      yoloOff: string;
+      activeHint: string;
+      promptRequired: string;
     };
     guideLink: string;
     guide: {
@@ -811,7 +836,6 @@ export interface Translations {
       notesColumn: string;
       noteModel: string;
       noteProvider: string;
-      noteRunPreset: string;
       noteEffort: string;
       noteContributor: string;
       noteApproval: string;
@@ -826,6 +850,8 @@ export interface Translations {
       modeBody: string;
       presetTitle: string;
       presetBody: string;
+      chatTitle: string;
+      chatBody: string;
     };
   };
 

@@ -1,6 +1,6 @@
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class CliConfig(BaseModel):
@@ -15,6 +15,17 @@ class CliConfig(BaseModel):
         default="auto",
         description="tmux usage for CLI runs: 'auto' uses tmux when the binary is present else direct subprocess; 'on' fails the launch when tmux is missing; 'off' always uses a direct subprocess.",
     )
+
+    @field_validator("tmux", mode="before")
+    @classmethod
+    def _coerce_yaml_bool(cls, value: Any) -> Any:
+        # YAML 1.1 parses unquoted on/off as booleans; accept them.
+        if value is True:
+            return "on"
+        if value is False:
+            return "off"
+        return value
+
     binary: str = Field(
         default="muse",
         description="CLI executable name or absolute path used to build launch commands.",

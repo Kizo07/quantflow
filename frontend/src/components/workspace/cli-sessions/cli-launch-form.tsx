@@ -15,6 +15,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  useCliCapabilities,
   useCliLaunchPreset,
   useLaunchCliSession,
   usePutCliPreset,
@@ -22,12 +23,11 @@ import {
 import {
   CLI_APPROVAL_MODES,
   CLI_DEFAULT_EFFORT,
-  CLI_EFFORT_TIERS,
   CLI_MODEL_MUSE_13,
   CLI_PRESET_MUSE_13,
-  CLI_PROVIDERS,
-  CLI_RUN_PRESETS,
-  CLI_YOLO_CONFIRM_TOKEN,
+  coerceCliEffort,
+  selectCliEffortOptions,
+  type CliCapabilities,
   type CliLaunchPayload,
   type CliSession,
 } from "@/core/cli-sessions/types";
@@ -56,6 +56,20 @@ function Field({
   );
 }
 
+function modelIdForChoice(
+  modelChoice: string,
+  customModel: string,
+): string | null {
+  if (modelChoice === CUSTOM_MODEL_VALUE) {
+    return customModel.trim() || null;
+  }
+  return modelChoice === NONE_VALUE ? null : modelChoice;
+}
+
+function capabilityLabel(id: string, label: string): string {
+  return label === id ? id : `${label} (${id})`;
+}
+
 export function CliLaunchForm({
   onLaunched,
   onCancel,
@@ -69,27 +83,22 @@ export function CliLaunchForm({
   const [modelChoice, setModelChoice] = useState<string>(CLI_MODEL_MUSE_13);
   const [customModel, setCustomModel] = useState("");
   const [provider, setProvider] = useState<string>(NONE_VALUE);
-  const [runPreset, setRunPreset] = useState<string>(NONE_VALUE);
   const [effort, setEffort] = useState<string>(CLI_DEFAULT_EFFORT);
   const [contributorMode, setContributorMode] = useState<boolean | null>(null);
   const [approvalMode, setApprovalMode] = useState<string>(NONE_VALUE);
   const [sandboxNetwork, setSandboxNetwork] = useState("");
   const [trustWorkspace, setTrustWorkspace] = useState(false);
   const [yolo, setYolo] = useState(false);
-  const [yoloConfirmed, setYoloConfirmed] = useState(false);
   const [presetApplied, setPresetApplied] = useState(false);
   const [presetSaved, setPresetSaved] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const model =
-    modelChoice === CUSTOM_MODEL_VALUE
-      ? customModel.trim() || null
-      : modelChoice === NONE_VALUE
-        ? null
-        : modelChoice;
+  const capabilitiesQuery = useCliCapabilities();
+  const capabilities: CliCapabilities | null = capabilitiesQuery.data ?? null;
+  const model = modelIdForChoice(modelChoice, customModel);
   const isMuse13 = model === CLI_MODEL_MUSE_13;
-  const isEcho = provider === "echo";
-  const effectiveEffort = isEcho ? null : effort === NONE_VALUE ? null : effort;
+  const effortTiers = selectCliEffortOptions(capabilities, model, effort);
+  const effectiveEffort = effort === NONE_VALUE ? null : effort;
 
   const presetQuery = useCliLaunchPreset(model, { enabled: isMuse13 });
   const launch = useLaunchCliSession();
@@ -107,7 +116,6 @@ export function CliLaunchForm({
     }
     if (preset.yolo) setYolo(true);
     if (preset.provider !== null) setProvider(preset.provider);
-    if (preset.preset !== null) setRunPreset(preset.preset);
     if (preset.approval_mode !== null) setApprovalMode(preset.approval_mode);
     setPresetApplied(true);
   }, [isMuse13, presetQuery.data, presetApplied]);
@@ -117,26 +125,31 @@ export function CliLaunchForm({
     setPresetSaved(false);
   }, [isMuse13]);
 
-  useEffect(() => {
-    if (!yolo) setYoloConfirmed(false);
-  }, [yolo]);
+  const handleModelChoice = (value: string) => {
+    setModelChoice(value);
+    const nextModel = modelIdForChoice(value, customModel);
+    setEffort((current) =>
+      current === NONE_VALUE
+        ? current
+        : coerceCliEffort(capabilities, nextModel, current),
+    );
+  };
 
-  const yoloBlocked = yolo && !yoloConfirmed;
-  const canSubmit =
-    prompt.trim().length > 0 && !yoloBlocked && !launch.isPending;
+  const canSubmit = prompt.trim().length > 0 && !launch.isPending;
 
+  // The `preset` launch field stays server-side only: the gateway keeps it
+  // as a passthrough for future run presets, but the dashboard no longer
+  // sends it.
   const buildPayload = (): CliLaunchPayload => ({
     prompt: prompt.trim(),
     model,
     provider: provider === NONE_VALUE ? null : provider,
-    preset: runPreset === NONE_VALUE ? null : runPreset,
     effort: effectiveEffort,
     contributor_mode: contributorMode,
     approval_mode: approvalMode === NONE_VALUE ? null : approvalMode,
     sandbox_network: sandboxNetwork.trim() || null,
     trust_workspace: trustWorkspace,
     yolo,
-    yolo_confirm: yolo ? CLI_YOLO_CONFIRM_TOKEN : null,
     mode: "coding",
   });
 
@@ -166,7 +179,6 @@ export function CliLaunchForm({
         payload: {
           model: CLI_MODEL_MUSE_13,
           provider: provider === NONE_VALUE ? null : provider,
-          preset: runPreset === NONE_VALUE ? null : runPreset,
           effort: effectiveEffort,
           contributor_mode: contributorMode,
           yolo,
@@ -199,15 +211,17 @@ export function CliLaunchForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label={st.model}>
-          <Select value={modelChoice} onValueChange={setModelChoice}>
+          <Select value={modelChoice} onValueChange={handleModelChoice}>
             <SelectTrigger aria-label={st.model}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={NONE_VALUE}>{st.modelCliDefault}</SelectItem>
-              <SelectItem value={CLI_MODEL_MUSE_13}>
-                {CLI_MODEL_MUSE_13}
-              </SelectItem>
+              {(capabilities?.models ?? []).map((entry) => (
+                <SelectItem key={entry.id} value={entry.id}>
+                  {capabilityLabel(entry.id, entry.label)}
+                </SelectItem>
+              ))}
               <SelectItem value={CUSTOM_MODEL_VALUE}>
                 {st.modelCustom}
               </SelectItem>
@@ -221,15 +235,25 @@ export function CliLaunchForm({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={NONE_VALUE}>{st.providerNone}</SelectItem>
-              {CLI_PROVIDERS.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {value}
+              {(capabilities?.providers ?? []).map((entry) => (
+                <SelectItem key={entry.id} value={entry.id}>
+                  {capabilityLabel(entry.id, entry.label)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </Field>
       </div>
+
+      {capabilitiesQuery.isError && (
+        <p
+          role="alert"
+          data-testid="cli-capabilities-error"
+          className="text-destructive text-sm"
+        >
+          {t.cliSessions.errors.capabilitiesFailed}
+        </p>
+      )}
 
       {modelChoice === CUSTOM_MODEL_VALUE && (
         <Field label={st.modelCustom}>
@@ -249,14 +273,14 @@ export function CliLaunchForm({
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label={st.effort} hint={isEcho ? st.effortEchoHint : undefined}>
-          <Select value={effort} onValueChange={setEffort} disabled={isEcho}>
+        <Field label={st.effort}>
+          <Select value={effort} onValueChange={setEffort}>
             <SelectTrigger aria-label={st.effort}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={NONE_VALUE}>{st.effortNone}</SelectItem>
-              {CLI_EFFORT_TIERS.map((value) => (
+              {effortTiers.map((value) => (
                 <SelectItem key={value} value={value}>
                   {value}
                 </SelectItem>
@@ -264,24 +288,6 @@ export function CliLaunchForm({
             </SelectContent>
           </Select>
         </Field>
-        <Field label={st.runPreset}>
-          <Select value={runPreset} onValueChange={setRunPreset}>
-            <SelectTrigger aria-label={st.runPreset}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE_VALUE}>{st.runPresetNone}</SelectItem>
-              {CLI_RUN_PRESETS.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {value}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
         <Field label={st.approvalMode}>
           <Select value={approvalMode} onValueChange={setApprovalMode}>
             <SelectTrigger aria-label={st.approvalMode}>
@@ -297,6 +303,9 @@ export function CliLaunchForm({
             </SelectContent>
           </Select>
         </Field>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
         <Field label={st.sandboxNetwork}>
           <Input
             aria-label={st.sandboxNetwork}
@@ -360,16 +369,6 @@ export function CliLaunchForm({
           data-testid="cli-yolo-warning"
         >
           <p className="text-muted-foreground text-xs">{st.yoloWarning}</p>
-          <label className="flex items-center gap-2 font-medium">
-            <input
-              type="checkbox"
-              aria-label={st.yoloConfirm}
-              checked={yoloConfirmed}
-              onChange={(event) => setYoloConfirmed(event.target.checked)}
-              className="size-4"
-            />
-            {st.yoloConfirm}
-          </label>
         </div>
       )}
 

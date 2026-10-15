@@ -131,7 +131,7 @@ async def test_launch_is_owner_scoped(gateway, monkeypatch):
         ("provider", "bogus"),
         ("effort", "turbo"),
         ("approval_mode", "sometimes"),
-        ("preset", "evil-preset"),
+        ("preset", "evil preset!"),
         ("model", "not a model!!"),
         ("sandbox_network", "wide open"),
     ],
@@ -143,10 +143,19 @@ async def test_command_builder_rejects_unknown_values(gateway, monkeypatch, fiel
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kwargs", [{"provider": "bogus"}, {"effort": "bogus"}, {"approval_mode": "bogus"}, {"preset": "bogus"}, {"model": "bad model"}, {"workspace": "/nonexistent-dir-xyz"}])
+@pytest.mark.parametrize("kwargs", [{"provider": "bogus"}, {"effort": "bogus"}, {"approval_mode": "bogus"}, {"preset": "bogus preset!"}, {"model": "bad model"}, {"workspace": "/nonexistent-dir-xyz"}])
 async def test_validate_launch_params_rejects_unknown_values(kwargs):
     with pytest.raises(cli_runner.CliValidationError):
         cli_runner.validate_launch_params(cli_runner.CliLaunchParams(prompt="hi", **kwargs))
+
+
+def test_validate_launch_params_passes_opaque_preset_through():
+    """Run presets are an opaque passthrough: any safe token is accepted
+    and forwarded to `muse exec --preset`; the CLI owns the namespace."""
+    params = cli_runner.validate_launch_params(cli_runner.CliLaunchParams(prompt="hi", preset="my-future-preset"))
+    argv = cli_runner.build_exec_argv(params)
+    assert "--preset" in argv
+    assert argv[argv.index("--preset") + 1] == "my-future-preset"
 
 
 def test_validate_launch_params_rejects_effort_with_echo():
@@ -162,7 +171,7 @@ def test_command_string_quotes_prompt_safely():
 
 
 def test_command_has_no_freeform_passthrough():
-    params = cli_runner.CliLaunchParams(prompt="hi", yolo=True, yolo_confirm=cli_runner.YOLO_CONFIRM_TOKEN)
+    params = cli_runner.CliLaunchParams(prompt="hi", yolo=True)
     argv = cli_runner.build_exec_argv(params)
     assert argv[:3] == ["muse", "exec", "--json"]
     assert "--yolo" in argv
@@ -170,14 +179,7 @@ def test_command_has_no_freeform_passthrough():
 
 
 @pytest.mark.asyncio
-async def test_yolo_without_confirm_rejected(gateway, monkeypatch):
-    monkeypatch.setattr(cli_runner, "spawn_run", _spawn_stub())
-    assert (await gateway.client.post("/api/cli-sessions", json={"prompt": "hi", "yolo": True})).status_code == 422
-    assert (await gateway.client.post("/api/cli-sessions", json={"prompt": "hi", "yolo": True, "yolo_confirm": "yes"})).status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_yolo_with_confirm_token_launches(gateway, monkeypatch):
+async def test_yolo_launches_without_confirm(gateway, monkeypatch):
     seen = {}
 
     async def _spawn(**kwargs):
@@ -185,7 +187,7 @@ async def test_yolo_with_confirm_token_launches(gateway, monkeypatch):
         return cli_runner.SpawnResult(path="direct", pid=999001)
 
     monkeypatch.setattr(cli_runner, "spawn_run", _spawn)
-    response = await gateway.client.post("/api/cli-sessions", json={"prompt": "hi", "yolo": True, "yolo_confirm": cli_runner.YOLO_CONFIRM_TOKEN})
+    response = await gateway.client.post("/api/cli-sessions", json={"prompt": "hi", "yolo": True})
     assert response.status_code == 201
     assert response.json()["yolo"] is True
     assert "--yolo" in shlex.split(seen["command"])
@@ -250,7 +252,7 @@ async def test_launch_applies_13_preset_only_on_explicit_model_match(gateway, mo
     monkeypatch.setattr(cli_runner, "spawn_run", _spawn)
     matched = await gateway.client.post(
         "/api/cli-sessions",
-        json={"prompt": "hi", "model": "muse-spark-1.3", "yolo_confirm": cli_runner.YOLO_CONFIRM_TOKEN},
+        json={"prompt": "hi", "model": "muse-spark-1.3"},
     )
     assert matched.status_code == 201
     assert matched.json()["effort"] == "ultra" and matched.json()["contributor_mode"] is True
@@ -308,12 +310,10 @@ async def test_resume_inherits_prior_flags_and_links(gateway, monkeypatch):
     prior = (
         await gateway.client.post(
             "/api/cli-sessions",
-            json={"prompt": "original", "model": "muse-spark-1.3", "effort": "low", "yolo_confirm": cli_runner.YOLO_CONFIRM_TOKEN},
+            json={"prompt": "original", "model": "muse-spark-1.3", "effort": "low"},
         )
     ).json()
-    denied = await gateway.client.post(f"/api/cli-sessions/{prior['id']}/resume", json={})
-    assert denied.status_code == 422
-    resumed = await gateway.client.post(f"/api/cli-sessions/{prior['id']}/resume", json={"yolo_confirm": cli_runner.YOLO_CONFIRM_TOKEN})
+    resumed = await gateway.client.post(f"/api/cli-sessions/{prior['id']}/resume", json={})
     assert resumed.status_code == 201
     body = resumed.json()
     assert body["resumed_from"] == prior["id"] and body["model"] == "muse-spark-1.3" and body["effort"] == "low"

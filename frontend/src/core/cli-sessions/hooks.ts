@@ -11,6 +11,8 @@ import { GatewayApiError } from "@/core/api/errors";
 import {
   cliSessionEventsUrl,
   exportCliSession,
+  fetchCliCapabilities,
+  fetchCliChatMessages,
   fetchCliPreset,
   fetchCliSession,
   fetchCliSessions,
@@ -18,11 +20,21 @@ import {
   launchCliSession,
   putCliPreset,
   resumeCliSession,
+  sendCliChatMessage,
   stopCliSession,
 } from "./api";
 import {
+  appendCliChatFrame,
+  parseCliChatMessageFrame,
+  parseCliChatToolFrame,
+} from "./chat";
+import {
   CLI_PRESET_MUSE_13,
   isCliSessionActive,
+  type CliCapabilities,
+  type CliChatBackfill,
+  type CliChatMessage,
+  type CliChatSendPayload,
   type CliExportResult,
   type CliInspectResult,
   type CliLaunchPayload,
@@ -34,6 +46,7 @@ import {
 
 const CLI_SESSIONS_KEY = ["cli-sessions"] as const;
 const CLI_PRESETS_KEY = ["cli-presets"] as const;
+const CLI_CAPABILITIES_KEY = ["cli-capabilities"] as const;
 
 const ACTIVE_POLL_MS = 5000;
 const IDLE_POLL_MS = 30000;
@@ -44,6 +57,12 @@ function isNotFound(error: unknown): boolean {
 
 function invalidateCliSessions(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: CLI_SESSIONS_KEY });
+}
+
+const CLI_CHAT_KEY = [...CLI_SESSIONS_KEY, "chat"] as const;
+
+function invalidateCliChat(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: CLI_CHAT_KEY });
 }
 
 /** List polling: fast while any session is still active. */
@@ -138,6 +157,16 @@ export function useCliLaunchPreset(
     enabled: enabled && Boolean(model),
     retry: false,
     staleTime: 60000,
+  });
+}
+
+/** Host CLI capabilities: verified models + their tiers, providers. */
+export function useCliCapabilities() {
+  return useQuery<CliCapabilities>({
+    queryKey: CLI_CAPABILITIES_KEY,
+    queryFn: fetchCliCapabilities,
+    retry: false,
+    staleTime: 300000,
   });
 }
 
@@ -249,4 +278,119 @@ export function useCliSessionEvents(
   }, [active, sessionId]);
 
   return { events, exitCode, connected, unavailable };
+}
+
+/** Chat backfill: the `resumed_from` chain replayed into messages. */
+export function useCliChatMessages(sessionId: string | null | undefined) {
+  return useQuery<CliChatBackfill>({
+    queryKey: [...CLI_CHAT_KEY, sessionId],
+    queryFn: () => fetchCliChatMessages(sessionId ?? ""),
+    enabled: Boolean(sessionId),
+    retry: (failureCount, error) => !isNotFound(error) && failureCount < 2,
+    staleTime: 15000,
+  });
+}
+
+export function useSendCliChatMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      payload,
+    }: {
+      sessionId: string;
+      payload: CliChatSendPayload;
+    }) => sendCliChatMessage(sessionId, payload),
+    onSuccess: () => {
+      invalidateCliSessions(queryClient);
+      invalidateCliChat(queryClient);
+    },
+  });
+}
+
+const MAX_BUFFERED_CHAT_MESSAGES = 500;
+
+/**
+ * Live chat stream over a run's SSE endpoint (cookie auth via EventSource
+ * credentials). Parses the typed `message` / `tool` frames into bubbles and
+ * folds deltas into the trailing assistant message; raw passthrough frames
+ * are ignored here since backfill already covers history. Connects only
+ * while `runId` is set; `reconnect` forces a fresh EventSource.
+ */
+export function useCliChatStream(runId: string | null | undefined) {
+  const [messages, setMessages] = useState<CliChatMessage[]>([]);
+  const [exitCode, setExitCode] = useState<number | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    setMessages([]);
+    setExitCode(null);
+    setConnected(false);
+    setUnavailable(false);
+    if (!runId) return;
+    if (typeof EventSource === "undefined") {
+      setUnavailable(true);
+      return;
+    }
+    const source = new EventSource(cliSessionEventsUrl(runId), {
+      withCredentials: true,
+    });
+    const fold = (
+      parse: (
+        data: string,
+        fallbackRunId: string,
+      ) => Parameters<typeof appendCliChatFrame>[1] | null,
+      data: unknown,
+    ) => {
+      const frame = parse(String(data), runId);
+      if (frame === null) return;
+      setMessages((previous) => {
+        const next = appendCliChatFrame(previous, frame);
+        return next.length > MAX_BUFFERED_CHAT_MESSAGES
+          ? next.slice(next.length - MAX_BUFFERED_CHAT_MESSAGES)
+          : next;
+      });
+    };
+    source.onopen = () => setConnected(true);
+    source.addEventListener("message", (event: Event) =>
+      fold(parseCliChatMessageFrame, (event as MessageEvent).data),
+    );
+    source.addEventListener("tool", (event: Event) =>
+      fold(parseCliChatToolFrame, (event as MessageEvent).data),
+    );
+    source.addEventListener("end", (event: Event) => {
+      const data = (event as MessageEvent).data;
+      try {
+        const parsed: unknown = JSON.parse(String(data));
+        setExitCode(
+          typeof parsed === "object" &&
+            parsed !== null &&
+            typeof Reflect.get(parsed, "exit_code") === "number"
+            ? (Reflect.get(parsed, "exit_code") as number)
+            : 0,
+        );
+      } catch {
+        setExitCode(0);
+      }
+      source.close();
+      setConnected(false);
+      invalidateCliSessions(queryClient);
+      invalidateCliChat(queryClient);
+    });
+    source.onerror = () => {
+      setConnected(false);
+    };
+    return () => source.close();
+  }, [queryClient, retryNonce, runId]);
+
+  return {
+    messages,
+    exitCode,
+    connected,
+    unavailable,
+    reconnect: () => setRetryNonce((nonce) => nonce + 1),
+  };
 }

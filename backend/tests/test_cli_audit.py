@@ -100,7 +100,7 @@ def test_redact_command_string_leaves_plain_commands_alone():
 @pytest.mark.asyncio
 async def test_launch_records_audit_row_with_preset(gateway, monkeypatch):
     monkeypatch.setattr(cli_runner, "spawn_run", _spawn_stub())
-    launched = await gateway.client.post("/api/cli-sessions", json={"prompt": "hello", "model": "muse-spark-1.3", "yolo": True, "yolo_confirm": "I-CONFIRM-YOLO"})
+    launched = await gateway.client.post("/api/cli-sessions", json={"prompt": "hello", "model": "muse-spark-1.3", "yolo": True})
     assert launched.status_code == 201
     row_id = launched.json()["id"]
     rows = await gateway.audit_repo.list_for_session(row_id, actor="user-1")

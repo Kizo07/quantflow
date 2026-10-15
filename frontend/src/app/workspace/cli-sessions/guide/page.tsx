@@ -13,7 +13,6 @@ import {
   CLI_EFFORT_TIERS,
   CLI_MODEL_MUSE_13,
   CLI_PROVIDERS,
-  CLI_RUN_PRESETS,
 } from "@/core/cli-sessions/types";
 import { useI18n } from "@/core/i18n/hooks";
 
@@ -35,11 +34,6 @@ export default function CliSessionsGuidePage() {
       flag: "--provider",
       values: CLI_PROVIDERS.join(" / "),
       note: guide.noteProvider,
-    },
-    {
-      flag: "--preset",
-      values: CLI_RUN_PRESETS.join(" / "),
-      note: guide.noteRunPreset,
     },
     {
       flag: "--reasoning-effort",
@@ -131,6 +125,11 @@ export default function CliSessionsGuidePage() {
           <section className="flex flex-col gap-1">
             <h2 className="text-lg font-semibold">{guide.presetTitle}</h2>
             <p className="text-sm">{guide.presetBody}</p>
+          </section>
+
+          <section className="flex flex-col gap-1">
+            <h2 className="text-lg font-semibold">{guide.chatTitle}</h2>
+            <p className="text-sm">{guide.chatBody}</p>
           </section>
 
           <div>

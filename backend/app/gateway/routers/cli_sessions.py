@@ -15,12 +15,14 @@ from pydantic import BaseModel, Field
 
 from app.gateway import cli_runner
 from app.gateway.authz import require_permission
+from app.gateway.cli_capabilities import CliCapabilitiesUnavailable, get_cli_capabilities
 from app.gateway.deps import get_cli_audit_repo, get_cli_preset_repo, get_cli_session_repo, get_current_user
 from app.gateway.sse_headers import sse_response_headers
 from deerflow.config.cli_config import CliConfig
 
 router = APIRouter(prefix="/api/cli-sessions", tags=["cli-sessions"])
 presets_router = APIRouter(prefix="/api/cli-presets", tags=["cli-presets"])
+capabilities_router = APIRouter(prefix="/api/cli-capabilities", tags=["cli-capabilities"])
 
 _MAX_PUBLIC_ERROR_CHARS = 500
 
@@ -42,14 +44,20 @@ class CliLaunchRequest(BaseModel):
     disable_approval: bool = False
     disable_sandbox: bool = False
     yolo: bool = False
-    yolo_confirm: str | None = None
     workspace: str | None = None
     mode: Literal["research", "coding"] = "coding"
 
 
 class CliResumeRequest(BaseModel):
     prompt: str | None = None
-    yolo_confirm: str | None = None
+
+
+class CliChatSendRequest(BaseModel):
+    prompt: str = Field(min_length=1)
+    model: str | None = None
+    provider: str | None = None
+    effort: str | None = None
+    yolo: bool | None = None
 
 
 class CliExportRequest(BaseModel):
@@ -173,6 +181,125 @@ async def _record_audit(
     )
 
 
+# Chat layer: passthrough-first mapping from exec JSONL lines to typed chat
+# frames. The exec event vocabulary is only partially evidenced, so
+# anything unrecognized yields no typed frame here — the raw line still
+# flows through as a compat `data:` frame and is never dropped.
+_CLI_CHAT_MESSAGE_TYPES = frozenset({"message", "text", "delta", "assistant", "output", "content", "chunk"})
+_CLI_CHAT_TOOL_TYPES = frozenset({"tool", "tool_call", "tool_result", "tool_use", "progress"})
+_CLI_CHAT_TEXT_KEYS = ("delta", "text", "content", "output", "message")
+
+# Backfill walks at most this many `resumed_from` links (newest first);
+# longer chats report `truncated: true`.
+_CLI_CHAT_CHAIN_CAP = 50
+
+
+def _typed_chat_frames(line: str, *, run_id: str) -> list[tuple[str, dict[str, Any]]]:
+    """Map one exec JSONL line to typed chat frames (shared by SSE + backfill)."""
+    try:
+        obj = json.loads(line)
+    except ValueError:
+        return []
+    if not isinstance(obj, dict):
+        return []
+    if obj.get("payload_type") == "turn.input.user":
+        return []  # user prompt already recorded from the run row
+    # MSP envelope: real content nests under "payload"
+    # (e.g. payload_type "run.output.delta" carries payload.text).
+    payload = obj.get("payload")
+    body = payload if isinstance(payload, dict) else obj
+    kind = str(body.get("type", "") or "").lower()
+    is_tool = kind in _CLI_CHAT_TOOL_TYPES or kind.startswith("tool")
+    frames: list[tuple[str, dict[str, Any]]] = []
+    tool_obj = body.get("tool")
+    tool_obj = tool_obj if isinstance(tool_obj, dict) else {}
+    name = body.get("name", tool_obj.get("name"))
+    status = body.get("status", tool_obj.get("status"))
+    if is_tool or (name is not None and status is not None):
+        detail = body.get("detail", tool_obj.get("detail", body.get("output", "")))
+        frames.append(("tool", {"run_id": run_id, "name": name or "", "status": status or "", "detail": detail or ""}))
+        return frames
+    delta: str | None = None
+    if kind in _CLI_CHAT_MESSAGE_TYPES or kind == "":
+        for key in _CLI_CHAT_TEXT_KEYS:
+            value = body.get(key)
+            if isinstance(value, str) and value:
+                delta = value
+                break
+    if delta:
+        frames.append(("message", {"role": "assistant", "delta": delta, "run_id": run_id}))
+    return frames
+
+
+def _chat_frames_for_line(line: str, *, run_id: str | None) -> list[str]:
+    """Raw compat frame plus any typed chat frames for one log line."""
+    out = [f"data: {line}\n\n"]
+    if run_id is not None:
+        for event, payload in _typed_chat_frames(line, run_id=run_id):
+            out.append(f"event: {event}\ndata: {json.dumps(payload)}\n\n")
+    return out
+
+
+def _replay_run_messages(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Replay one run's stored prompt + JSONL log into chat messages."""
+    messages: list[dict[str, Any]] = []
+    run_id = record["id"]
+    if record.get("prompt"):
+        messages.append({"run_id": run_id, "role": "user", "content": record["prompt"]})
+    lines: list[str] = []
+    if record.get("log_path"):
+        try:
+            lines = Path(record["log_path"]).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            lines = []
+    pending: list[str] = []
+
+    def _flush() -> None:
+        if pending:
+            messages.append({"run_id": run_id, "role": "assistant", "content": "".join(pending)})
+            pending.clear()
+
+    for line in lines:
+        if not line.strip():
+            continue
+        for event, payload in _typed_chat_frames(line, run_id=run_id):
+            if event == "message":
+                pending.append(payload["delta"])
+            elif event == "tool":
+                _flush()
+                messages.append(
+                    {
+                        "run_id": run_id,
+                        "role": "tool",
+                        "name": payload["name"],
+                        "status": payload["status"],
+                        "detail": payload["detail"],
+                    }
+                )
+    _flush()
+    return messages
+
+
+async def _chat_chain(session_repo, leaf_id: str, *, user_id: str) -> tuple[list[dict[str, Any]], bool]:
+    """Walk `resumed_from` from the leaf to the root; oldest run first."""
+    chain: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    current: str | None = leaf_id
+    truncated = False
+    while current is not None and current not in seen:
+        if len(chain) >= _CLI_CHAT_CHAIN_CAP:
+            truncated = True
+            break
+        record = await session_repo.get(current, user_id=user_id)
+        if record is None:
+            break
+        chain.append(record)
+        seen.add(current)
+        current = record.get("resumed_from")
+    chain.reverse()
+    return chain, truncated
+
+
 def _preset_version_label(preset: dict[str, Any] | None) -> str:
     """Version stamp for a preset row: stored updated_at, else built-in."""
     updated = (preset or {}).get("updated_at")
@@ -193,7 +320,6 @@ def _params_from_launch(body: CliLaunchRequest) -> cli_runner.CliLaunchParams:
         disable_approval=body.disable_approval,
         disable_sandbox=body.disable_sandbox,
         yolo=body.yolo,
-        yolo_confirm=body.yolo_confirm,
         workspace=body.workspace,
     )
 
@@ -357,10 +483,63 @@ async def resume_cli_session(session_id: str, request: Request, body: CliResumeR
         disable_approval=bool(prior.get("disable_approval")),
         disable_sandbox=bool(prior.get("disable_sandbox")),
         yolo=bool(prior.get("yolo")),
-        yolo_confirm=body.yolo_confirm if body is not None else None,
         workspace=prior.get("workspace"),
     )
     record = await _start_run(request=request, user_id=user_id, params=params, mode=prior.get("mode", "coding"), action="resume", resumed_from=session_id)
+    return _item(record)
+
+
+@router.get("/{session_id}/messages")
+@require_permission("runs", "read")
+async def list_cli_chat_messages(session_id: str, request: Request) -> dict[str, Any]:
+    """Backfill a chat: replay the `resumed_from` chain's stored logs into messages, oldest first."""
+    user_id = await _current_user_id(request)
+    session_repo = get_cli_session_repo(request)
+    leaf = await session_repo.get(session_id, user_id=user_id)
+    if leaf is None:
+        raise HTTPException(status_code=404, detail="CLI session not found")
+    chain, truncated = await _chat_chain(session_repo, session_id, user_id=user_id)
+    messages: list[dict[str, Any]] = []
+    for record in chain:
+        messages.extend(_replay_run_messages(record))
+    return {"id": session_id, "runs": [record["id"] for record in chain], "messages": messages, "truncated": truncated}
+
+
+@router.post("/{session_id}/messages", status_code=201)
+@require_permission("runs", "create")
+async def send_cli_chat_message(session_id: str, body: CliChatSendRequest, request: Request) -> dict[str, Any]:
+    """Follow-up send: a headless exec run inheriting the prior row's flags unless overridden, linked via `resumed_from`."""
+    user_id = await _current_user_id(request)
+    session_repo = get_cli_session_repo(request)
+    prior = await session_repo.get(session_id, user_id=user_id)
+    if prior is None:
+        raise HTTPException(status_code=404, detail="CLI session not found")
+    if not (body.prompt or "").strip():
+        raise HTTPException(status_code=422, detail="chat prompt must not be empty")
+    if prior["status"] == "running":
+        exit_code = cli_runner.sentinel_exit_code(prior.get("log_path"))
+        if exit_code is not None:
+            finished = await session_repo.mark_finished(session_id, user_id=user_id, exit_code=exit_code)
+            if finished is not None:
+                prior = finished
+        else:
+            raise HTTPException(status_code=409, detail="chat has an active run; wait for it to finish or stop it first")
+    params = cli_runner.CliLaunchParams(
+        prompt=body.prompt.strip(),
+        model=body.model if body.model is not None else prior.get("model"),
+        provider=body.provider if body.provider is not None else prior.get("provider"),
+        preset=prior.get("preset"),
+        effort=body.effort if body.effort is not None else prior.get("effort"),
+        contributor_mode=prior.get("contributor_mode"),
+        approval_mode=prior.get("approval_mode"),
+        sandbox_network=prior.get("sandbox_network"),
+        trust_workspace=bool(prior.get("trust_workspace")),
+        disable_approval=bool(prior.get("disable_approval")),
+        disable_sandbox=bool(prior.get("disable_sandbox")),
+        yolo=body.yolo if body.yolo is not None else bool(prior.get("yolo")),
+        workspace=prior.get("workspace"),
+    )
+    record = await _start_run(request=request, user_id=user_id, params=params, mode=prior.get("mode", "coding"), action="chat_send", resumed_from=session_id)
     return _item(record)
 
 
@@ -413,7 +592,13 @@ async def stream_cli_session_events(session_id: str, request: Request) -> Stream
         await session_repo.mark_finished(session_id, user_id=user_id, exit_code=exit_code)
 
     return StreamingResponse(
-        _event_generator(record.get("log_path"), poll_seconds=config.events_poll_seconds, request=request, on_complete=_finalize),
+        _event_generator(
+            record.get("log_path"),
+            poll_seconds=config.events_poll_seconds,
+            request=request,
+            on_complete=_finalize,
+            run_id=session_id,
+        ),
         media_type="text/event-stream",
         headers=sse_response_headers(),
     )
@@ -433,8 +618,8 @@ async def _refresh_finished_rows(session_repo, records: list[dict[str, Any]], *,
     return refreshed
 
 
-async def _event_generator(log_path: str | None, *, poll_seconds: float, request: Request, on_complete=None):
-    """Yield run-log lines as SSE data frames, then a terminal end frame."""
+async def _event_generator(log_path: str | None, *, poll_seconds: float, request: Request, on_complete=None, run_id: str | None = None):
+    """Yield run-log lines as SSE data frames plus typed chat frames, then a terminal end frame."""
     offset = 0
     polls = 0
     path = Path(log_path) if log_path else None
@@ -451,7 +636,8 @@ async def _event_generator(log_path: str | None, *, poll_seconds: float, request
                 tail = ""
             for line in tail.splitlines():
                 if line.strip():
-                    yield f"data: {line}\n\n"
+                    for frame in _chat_frames_for_line(line, run_id=run_id):
+                        yield frame
         if on_complete is not None:
             try:
                 await on_complete(exit_code)
@@ -472,7 +658,8 @@ async def _event_generator(log_path: str | None, *, poll_seconds: float, request
                 chunk = ""
             for line in chunk.splitlines():
                 if line.strip():
-                    yield f"data: {line}\n\n"
+                    for frame in _chat_frames_for_line(line, run_id=run_id):
+                        yield frame
             exit_code = cli_runner.sentinel_exit_code(path)
             if exit_code is not None:
                 async for frame in _drain_and_end(exit_code):
@@ -543,6 +730,17 @@ async def list_cli_session_audit(session_id: str, request: Request, limit: int =
         raise HTTPException(status_code=404, detail="CLI session not found")
     rows = await get_cli_audit_repo(request).list_for_session(session_id, actor=user_id, limit=limit)
     return [_audit_item(row) for row in rows]
+
+
+@capabilities_router.get("")
+@require_permission("runs", "read")
+async def get_cli_capabilities_payload(request: Request) -> dict[str, Any]:
+    """Return the local CLI's advertised models, effort tiers, and providers."""
+    await _current_user_id(request)
+    try:
+        return get_cli_capabilities()
+    except CliCapabilitiesUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"CLI capabilities unavailable: {exc}") from exc
 
 
 @presets_router.get("")

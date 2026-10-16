@@ -2,34 +2,100 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { CliChatView } from "@/components/workspace/cli-sessions/cli-chat-view";
-import { CliLaunchForm } from "@/components/workspace/cli-sessions/cli-launch-form";
-import { CliSessionDetail } from "@/components/workspace/cli-sessions/cli-session-detail";
-import { CliSessionList } from "@/components/workspace/cli-sessions/cli-session-list";
-import { CliStartPanel } from "@/components/workspace/cli-sessions/cli-start-panel";
-import { CliUnifiedList } from "@/components/workspace/cli-sessions/cli-unified-list";
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import {
-  WorkspaceBody,
-  WorkspaceContainer,
-  WorkspaceHeader,
-} from "@/components/workspace/workspace-container";
+  CliChatView,
+  type CliRunStats,
+} from "@/components/workspace/cli-sessions/cli-chat-view";
+import { CliLaunchComposer } from "@/components/workspace/cli-sessions/cli-composer";
+import { CliSessionDetail } from "@/components/workspace/cli-sessions/cli-session-detail";
+import { RunDurationLabel } from "@/components/workspace/messages/run-duration";
+import { Welcome } from "@/components/workspace/welcome";
+import { selectFirstCliUserPrompt } from "@/core/cli-sessions/chat";
 import { useHarnessMode } from "@/core/cli-sessions/harness-mode";
-import { useCliSessions } from "@/core/cli-sessions/hooks";
+import { useCliChatMessages, useCliSessions } from "@/core/cli-sessions/hooks";
+import type { CliSession } from "@/core/cli-sessions/types";
 import { useI18n } from "@/core/i18n/hooks";
+import { cn } from "@/lib/utils";
 
-type ListTab = "coding" | "all";
-type DetailView = "chat" | "run";
+function sessionTime(session: CliSession): number {
+  const value = session.started_at ?? session.created_at;
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function elapsedSeconds(session: CliSession): number | null {
+  if (!session.started_at) return null;
+  const start = new Date(session.started_at).getTime();
+  const end = session.ended_at
+    ? new Date(session.ended_at).getTime()
+    : Date.now();
+  if (Number.isNaN(start) || Number.isNaN(end)) return null;
+  return Math.max(0, Math.floor((end - start) / 1000));
+}
+
+/**
+ * Run stats line in the header slot where the research tab shows token
+ * usage: elapsed (the research `RunDurationLabel`) + model + exit code.
+ */
+function CliHeaderStats({
+  session,
+  live,
+}: {
+  session: CliSession;
+  live: CliRunStats | null;
+}) {
+  const { t } = useI18n();
+  const seconds = elapsedSeconds(session);
+  const model = session.model ?? t.cliSessions.launch.modelCliDefault;
+  const tail =
+    live?.exitCode !== null && live?.exitCode !== undefined
+      ? `${t.cliSessions.statsExit} ${live.exitCode}`
+      : t.cliSessions.status[session.status];
+  return (
+    <span
+      data-testid="cli-run-stats"
+      className="text-muted-foreground hidden items-center gap-1.5 text-xs sm:inline-flex"
+    >
+      {seconds !== null && <RunDurationLabel durationSeconds={seconds} />}
+      <span aria-hidden="true">·</span>
+      <span className="max-w-40 truncate font-medium">{model}</span>
+      <span aria-hidden="true">·</span>
+      <span>{tail}</span>
+    </span>
+  );
+}
+
+function CliHeaderTitle({ session }: { session: CliSession | null }) {
+  const { t } = useI18n();
+  const backfill = useCliChatMessages(session?.id);
+  if (!session) {
+    return (
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+        {t.cliSessions.newSession}
+      </span>
+    );
+  }
+  const title =
+    selectFirstCliUserPrompt(backfill.data?.messages) ??
+    `${session.model ?? t.cliSessions.launch.modelCliDefault}${session.effort ? ` · ${session.effort}` : ""}`;
+  return (
+    <span className="min-w-0 flex-1 truncate text-sm font-medium" title={title}>
+      {title}
+    </span>
+  );
+}
 
 export default function CliSessionsPage() {
   const { t } = useI18n();
@@ -37,198 +103,216 @@ export default function CliSessionsPage() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const sessionIdParam = searchParams.get("session_id");
+  const newParam = searchParams.get("new") === "1";
 
   const { mode } = useHarnessMode();
   const query = useCliSessions();
-  const sessions = query.data ?? [];
+  const sessions = useMemo(
+    () =>
+      [...(query.data ?? [])].sort((a, b) => sessionTime(b) - sessionTime(a)),
+    [query.data],
+  );
 
-  const [tab, setTab] = useState<ListTab>("coding");
-  const [view, setView] = useState<DetailView>("chat");
-  const [launchOpen, setLaunchOpen] = useState(false);
   const [shownId, setShownId] = useState<string | null>(null);
+  const [isNew, setIsNew] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [liveStats, setLiveStats] = useState<{
+    id: string;
+    stats: CliRunStats;
+  } | null>(null);
 
   const pinnedId = sessionIdParam ?? shownId;
-  const selectedSession =
-    (pinnedId ? sessions.find((s) => s.id === pinnedId) : undefined) ??
-    sessions[0] ??
-    null;
-  if (!sessionIdParam && selectedSession && selectedSession.id !== shownId) {
-    setShownId(selectedSession.id);
-  }
+  const selectedSession: CliSession | null = isNew
+    ? null
+    : ((pinnedId ? sessions.find((s) => s.id === pinnedId) : undefined) ??
+      sessions[0] ??
+      null);
 
   useEffect(() => {
     document.title = `${t.sidebar.cliSessions} - ${t.pages.appName}`;
   }, [t.pages.appName, t.sidebar.cliSessions]);
 
+  // URL params drive the welcome/selection state so the app-sidebar links
+  // (`?session_id=` / `?new=1`) work without remounting the page.
+  useEffect(() => {
+    if (sessionIdParam) setIsNew(false);
+  }, [sessionIdParam]);
+
+  useEffect(() => {
+    if (newParam) {
+      setIsNew(true);
+      setShownId(null);
+    }
+  }, [newParam]);
+
   const replaceQuery = useCallback(
-    (sessionId: string | null) => {
+    (sessionId: string | "new" | null) => {
       const params = new URLSearchParams();
-      if (sessionId) params.set("session_id", sessionId);
+      if (sessionId === "new") params.set("new", "1");
+      else if (sessionId) params.set("session_id", sessionId);
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [pathname, router],
   );
 
-  const selectSession = (sessionId: string) => {
-    setShownId(sessionId);
-    replaceQuery(sessionId);
-  };
+  const selectSession = useCallback(
+    (sessionId: string) => {
+      setIsNew(false);
+      setShownId(sessionId);
+      replaceQuery(sessionId);
+    },
+    [replaceQuery],
+  );
+
+  const newSession = useCallback(() => {
+    setIsNew(true);
+    setShownId(null);
+    replaceQuery("new");
+  }, [replaceQuery]);
+
+  // Bare landing with sessions: pin the newest into the URL so the sidebar
+  // highlights what the page shows.
+  useEffect(() => {
+    const newest = sessions[0];
+    if (!sessionIdParam && !newParam && !isNew && newest) {
+      replaceQuery(newest.id);
+    }
+  }, [isNew, newParam, replaceQuery, sessionIdParam, sessions]);
+
+  const handleRunStats = useCallback(
+    (stats: CliRunStats) => {
+      if (!selectedSession) return;
+      const id = selectedSession.id;
+      setLiveStats((previous) =>
+        previous?.id === id &&
+        previous.stats.exitCode === stats.exitCode &&
+        previous.stats.streaming === stats.streaming
+          ? previous
+          : { id, stats },
+      );
+    },
+    [selectedSession],
+  );
+
+  const live =
+    liveStats && liveStats.id === selectedSession?.id ? liveStats.stats : null;
 
   return (
-    <WorkspaceContainer>
-      <WorkspaceHeader />
-      <WorkspaceBody>
-        <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4 px-4 py-5 sm:px-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex min-w-0 flex-col gap-1">
-              <h1 className="text-2xl font-semibold">{t.cliSessions.title}</h1>
-              <p className="text-muted-foreground text-sm">
-                {t.cliSessions.description}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" asChild>
-                <Link href="/workspace/cli-sessions/guide">
-                  {t.cliSessions.guideLink}
-                </Link>
-              </Button>
-              {mode === "coding" ? (
-                <Button type="button" onClick={() => setLaunchOpen(true)}>
-                  {t.cliSessions.newSession}
-                </Button>
-              ) : (
-                <Button type="button" asChild>
-                  <Link href="/workspace/chats">
-                    {t.cliSessions.newSession}
-                  </Link>
-                </Button>
-              )}
-            </div>
+    <div
+      data-testid="cli-sessions-chat"
+      className="relative flex size-full min-h-0 flex-col"
+    >
+      {query.error && (
+        <p
+          role="alert"
+          data-testid="cli-session-load-error"
+          className="text-destructive px-4 pt-2 text-sm"
+        >
+          {t.cliSessions.errors.loadFailed}
+        </p>
+      )}
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        <header className="bg-background/80 absolute top-0 right-0 left-0 z-30 flex h-12 shrink-0 items-center gap-2 px-2 shadow-xs backdrop-blur sm:px-4">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <CliHeaderTitle session={selectedSession} />
           </div>
-
-          {mode === "research" && (
-            <p
-              className="text-muted-foreground text-sm"
-              data-testid="cli-research-hint"
-            >
-              {t.cliSessions.researchNewSessionHint}
-            </p>
-          )}
-
-          {query.error && (
-            <p
-              role="alert"
-              data-testid="cli-session-load-error"
-              className="text-destructive text-sm"
-            >
-              {t.cliSessions.errors.loadFailed}
-            </p>
-          )}
-
-          <ToggleGroup
-            type="single"
-            value={tab}
-            onValueChange={(value) => {
-              if (value === "coding" || value === "all") setTab(value);
-            }}
-            aria-label={t.cliSessions.title}
-            size="sm"
-            spacing={1}
-            className="flex-wrap"
-          >
-            <ToggleGroupItem value="coding">
-              {t.cliSessions.tabsCoding}
-            </ToggleGroupItem>
-            <ToggleGroupItem value="all">
-              {t.cliSessions.tabsAll}
-            </ToggleGroupItem>
-          </ToggleGroup>
-
-          <div className="grid min-w-0 gap-4 lg:grid-cols-[330px_minmax(0,1fr)] lg:items-start">
-            <div className="flex min-w-0 flex-col gap-3">
-              {tab === "coding" ? (
-                <CliSessionList
-                  sessions={sessions}
-                  selectedId={selectedSession?.id ?? null}
-                  onSelect={selectSession}
-                  isLoading={query.isPending}
-                />
-              ) : (
-                <CliUnifiedList
-                  cliSessions={sessions}
-                  selectedId={selectedSession?.id ?? null}
-                  onSelectCli={selectSession}
-                />
-              )}
-            </div>
-            <div className="flex min-w-0 flex-col gap-3">
-              {selectedSession && (
-                <ToggleGroup
-                  type="single"
-                  value={view}
-                  onValueChange={(value) => {
-                    if (value === "chat" || value === "run") setView(value);
-                  }}
-                  aria-label={t.cliSessions.title}
-                  size="sm"
-                  spacing={1}
-                  className="self-start"
+          <div className="flex shrink-0 items-center gap-2">
+            {mode === "coding" ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={newSession}
+              >
+                {t.cliSessions.newSession}
+              </Button>
+            ) : (
+              <Button type="button" variant="outline" size="sm" asChild>
+                <Link href="/workspace/chats">{t.cliSessions.newSession}</Link>
+              </Button>
+            )}
+            {selectedSession && (
+              <CliHeaderStats session={selectedSession} live={live} />
+            )}
+            {selectedSession && (
+              <Sheet open={inspectorOpen} onOpenChange={setInspectorOpen}>
+                <SheetTrigger asChild>
+                  <Button type="button" variant="outline" size="sm">
+                    {t.cliSessions.inspector}
+                  </Button>
+                </SheetTrigger>
+                <SheetContent
+                  side="right"
+                  className="w-full overflow-y-auto sm:max-w-xl"
                 >
-                  <ToggleGroupItem value="chat">
-                    {t.cliSessions.viewChat}
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="run">
-                    {t.cliSessions.viewRun}
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              )}
-              {selectedSession ? (
-                view === "chat" ? (
-                  <CliChatView
-                    key={selectedSession.id}
-                    session={selectedSession}
-                    onSelectRun={selectSession}
-                  />
-                ) : (
+                  <SheetHeader>
+                    <SheetTitle>{t.cliSessions.inspector}</SheetTitle>
+                    <SheetDescription>
+                      {t.cliSessions.inspectorDescription}
+                    </SheetDescription>
+                  </SheetHeader>
                   <CliSessionDetail
                     key={selectedSession.id}
                     session={selectedSession}
                   />
-                )
-              ) : query.isSuccess ? (
-                mode === "coding" ? (
-                  <CliStartPanel
-                    onStarted={(session) => selectSession(session.id)}
-                  />
-                ) : (
-                  <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
-                    {t.cliSessions.selectHint}
-                  </p>
-                )
-              ) : null}
-            </div>
+                </SheetContent>
+              </Sheet>
+            )}
+            <Button type="button" variant="ghost" size="sm" asChild>
+              <Link href="/workspace/cli-sessions/guide">
+                {t.cliSessions.guideLink}
+              </Link>
+            </Button>
           </div>
-        </div>
-      </WorkspaceBody>
+        </header>
 
-      <Dialog open={launchOpen} onOpenChange={setLaunchOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{t.cliSessions.launch.title}</DialogTitle>
-            <DialogDescription>
-              {t.cliSessions.launch.description}
-            </DialogDescription>
-          </DialogHeader>
-          <CliLaunchForm
-            onLaunched={(session) => {
-              setLaunchOpen(false);
-              selectSession(session.id);
-            }}
-            onCancel={() => setLaunchOpen(false)}
-          />
-        </DialogContent>
-      </Dialog>
-    </WorkspaceContainer>
+        <main className="flex min-h-0 max-w-full grow flex-col">
+          {selectedSession ? (
+            <div className="flex min-h-0 flex-1 justify-center pt-12">
+              <CliChatView
+                key={selectedSession.id}
+                session={selectedSession}
+                onSelectRun={selectSession}
+                onRunStats={handleRunStats}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="flex min-h-0 flex-1 justify-center" />
+              <div className="absolute right-0 bottom-0 left-0 z-30 flex justify-center px-3 sm:px-4">
+                <div
+                  className={cn(
+                    "relative w-full max-w-(--container-width-sm)",
+                    "-translate-y-[calc(50vh-48px)] sm:-translate-y-[calc(50vh-96px)]",
+                  )}
+                >
+                  <Welcome />
+                  {mode === "coding" ? (
+                    <CliLaunchComposer
+                      isWelcomeMode
+                      onStarted={(session) => selectSession(session.id)}
+                      className="-translate-y-2 sm:-translate-y-4"
+                    />
+                  ) : (
+                    <>
+                      <p
+                        className="text-muted-foreground pb-2 text-center text-xs"
+                        data-testid="cli-research-hint"
+                      >
+                        {t.cliSessions.researchNewSessionHint}
+                      </p>
+                      <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
+                        {t.cliSessions.selectHint}
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </main>
+      </div>
+    </div>
   );
 }

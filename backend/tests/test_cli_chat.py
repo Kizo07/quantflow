@@ -84,6 +84,150 @@ async def _seed_run(gateway, session_id, *, prompt=None, resumed_from=None, log_
     return record
 
 
+def _vocab_envelope(payload_type, payload, *, recorded_at=1792031604529169):
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "sequence": 1,
+            "recorded_at": recorded_at,
+            "record_type": "event",
+            "payload_type": payload_type,
+            "payload": payload,
+        }
+    )
+
+
+def _vocab_fixture_lines():
+    """Realistic exec log: preamble noise + deltas + terminal echo + lifecycle rows."""
+    full = "I'm Muse Code powered by Meta Muse Spark."
+    return [
+        "muse: workspace root: /home/fire/Documents/deer-flow/backend (cwd default)",
+        "muse: workspace trust: trusted source=run-flag",
+        "tbh: reasoning effort ultra is not available; using xhigh",
+        _vocab_envelope("runtime.command.accepted", {"kind": "command_accepted", "command_kind": "turn.submit"}, recorded_at=1000),
+        _vocab_envelope(
+            "run.model.configured",
+            {"kind": "run_model_configured", "model_id": "muse-spark-1.3", "provider_id": "meta", "display_label": "muse-spark-1.3"},
+            recorded_at=2000,
+        ),
+        _vocab_envelope("turn.input.user", {"kind": "turn_input_user", "prompt": "what model are you?"}, recorded_at=3000),
+        _vocab_envelope("run.lifecycle.started", {"kind": "run_started", "prompt": "what model are you?"}, recorded_at=4000),
+        _vocab_envelope(
+            "task.lifecycle.proposed",
+            {"kind": "task_lifecycle", "task_id": "task-1", "event": {"kind": "proposed", "task_id": "task-1", "task_kind": "model.meta.response"}},
+            recorded_at=5000,
+        ),
+        _vocab_envelope(
+            "task.lifecycle.side_effect_intent",
+            {
+                "kind": "task_lifecycle",
+                "task_id": "task-1",
+                "event": {"kind": "side_effect_intent", "task_id": "task-1", "operation": "model.meta.response", "policy_decision": "not_applicable"},
+            },
+            recorded_at=6000,
+        ),
+        _vocab_envelope(
+            "task.lifecycle.status",
+            {
+                "kind": "task_lifecycle",
+                "task_id": "task-1",
+                "event": {
+                    "kind": "status",
+                    "task_id": "task-1",
+                    "message": "opening meta model stream attempt 1/10",
+                    "details": {"phase": "opening_stream", "facets": [{"kind": "external_attempt", "operation": "model.response"}]},
+                },
+            },
+            recorded_at=7000,
+        ),
+        _vocab_envelope("run.output.delta", {"kind": "run_output_delta", "text": "I'm"}, recorded_at=8000),
+        _vocab_envelope("run.output.delta", {"kind": "run_output_delta", "text": " Muse Code powered by Meta Muse Spark."}, recorded_at=9000),
+        _vocab_envelope(
+            "task.lifecycle.completed",
+            {"kind": "task_lifecycle", "task_id": "task-1", "event": {"kind": "completed", "task_id": "task-1"}},
+            recorded_at=10000,
+        ),
+        _vocab_envelope(
+            "run.terminal.completed",
+            {"kind": "run_terminal", "terminal": "completed", "reason": None, "text": full},
+            recorded_at=11000,
+        ),
+    ]
+
+
+def test_typed_frames_terminal_echo_and_noise_emit_no_text():
+    full = "I'm Muse Code powered by Meta Muse Spark."
+    terminal = _vocab_envelope("run.terminal.completed", {"kind": "run_terminal", "terminal": "completed", "text": full})
+    assert cli_sessions._typed_chat_frames(terminal, run_id="r1") == []
+    assert cli_sessions._typed_chat_frames("muse: workspace trust: trusted source=run-flag", run_id="r1") == []
+    assert cli_sessions._typed_chat_frames(_vocab_envelope("run.lifecycle.started", {"kind": "run_started", "prompt": "hi"}), run_id="r1") == []
+    first = cli_sessions._typed_chat_frames(_vocab_envelope("run.output.delta", {"kind": "run_output_delta", "text": "I'm"}), run_id="r1")
+    assert first == [("message", {"role": "assistant", "delta": "I'm", "run_id": "r1"})]
+
+
+def test_lifecycle_events_map_to_tool_rows():
+    # Bare state transitions carry no displayable content: no chat rows.
+    for kind in ("proposed", "accepted", "scheduled", "started", "completed"):
+        frames = cli_sessions._typed_chat_frames(
+            _vocab_envelope(
+                f"task.lifecycle.{kind}",
+                {"task_id": "t1", "event": {"kind": kind, "task_id": "t1", "task_kind": "model.meta.response"}},
+            ),
+            run_id="r1",
+        )
+        assert frames == []
+    # Intents without an operation and statuses without a message are dropped too.
+    assert (
+        cli_sessions._typed_chat_frames(
+            _vocab_envelope("task.lifecycle.side_effect_intent", {"task_id": "t1", "event": {"kind": "side_effect_intent"}}),
+            run_id="r1",
+        )
+        == []
+    )
+    # Internal reminder machinery never surfaces as a chat row.
+    assert (
+        cli_sessions._typed_chat_frames(
+            _vocab_envelope(
+                "task.lifecycle.side_effect_intent",
+                {"task_id": "t1", "event": {"kind": "side_effect_intent", "operation": "reminder.child_run"}},
+            ),
+            run_id="r1",
+        )
+        == []
+    )
+    assert (
+        cli_sessions._typed_chat_frames(
+            _vocab_envelope("task.lifecycle.status", {"task_id": "t1", "event": {"kind": "status"}}),
+            run_id="r1",
+        )
+        == []
+    )
+    intent = cli_sessions._typed_chat_frames(
+        _vocab_envelope(
+            "task.lifecycle.side_effect_intent",
+            {"task_id": "t1", "event": {"kind": "side_effect_intent", "operation": "shell.exec", "policy_decision": "auto"}},
+        ),
+        run_id="r1",
+    )
+    assert intent == [("tool", {"run_id": "r1", "name": "shell.exec", "status": "intent", "detail": "auto"})]
+    status = cli_sessions._typed_chat_frames(
+        _vocab_envelope(
+            "task.lifecycle.status",
+            {
+                "task_id": "t1",
+                "event": {"kind": "status", "message": "opening stream", "details": {"phase": "opening_stream", "facets": [{"operation": "model.response"}]}},
+            },
+        ),
+        run_id="r1",
+    )
+    assert status == [("tool", {"run_id": "r1", "name": "model.response", "status": "opening_stream", "detail": "opening stream"})]
+    cancelled = cli_sessions._typed_chat_frames(
+        _vocab_envelope("task.lifecycle.cancelled", {"task_id": "t9", "event": {"kind": "cancelled", "task_id": "t9", "reason": "superseded"}}),
+        run_id="r1",
+    )
+    assert cancelled == [("tool", {"run_id": "r1", "name": "t9", "status": "cancelled", "detail": "superseded"})]
+
+
 def test_typed_frames_map_known_lines_and_ignore_unknown():
     message = cli_sessions._typed_chat_frames(json.dumps({"type": "message", "delta": "hello"}), run_id="r1")
     assert message == [("message", {"role": "assistant", "delta": "hello", "run_id": "r1"})]
@@ -271,3 +415,47 @@ async def test_sse_emits_typed_frames_beside_raw_passthrough(gateway):
     assert "event: message" in body and '"delta": "streamed"' in body and '"run_id": "chat-sse"' in body
     assert "event: tool" in body and '"name": "edit"' in body
     assert "event: end" in body and '"exit_code": 0' in body
+
+
+@pytest.mark.asyncio
+async def test_backfill_vocab_fixture_single_text_plus_tools_and_stats(gateway):
+    await _seed_run(gateway, "chat-vocab", prompt="what model are you?", log_lines=_vocab_fixture_lines())
+    (gateway.tmp_path / "cli_runs" / "chat-vocab.exit").write_text("0", encoding="utf-8")
+    response = await gateway.client.get("/api/cli-sessions/chat-vocab/messages")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == "chat-vocab" and body["runs"] == ["chat-vocab"] and body["truncated"] is False
+    assert body["messages"] == [
+        {"run_id": "chat-vocab", "role": "user", "content": "what model are you?"},
+        {"run_id": "chat-vocab", "role": "tool", "name": "model.meta.response", "status": "intent", "detail": ""},
+        {
+            "run_id": "chat-vocab",
+            "role": "tool",
+            "name": "model.response",
+            "status": "opening_stream",
+            "detail": "opening meta model stream attempt 1/10",
+        },
+        {"run_id": "chat-vocab", "role": "assistant", "content": "I'm Muse Code powered by Meta Muse Spark."},
+    ]
+    stats = body["stats"]["chat-vocab"]
+    assert stats["model"] == "muse-spark-1.3" and stats["provider"] == "meta"
+    assert stats["display_label"] == "muse-spark-1.3"
+    assert stats["terminal"] == "completed" and stats["reason"] is None
+    assert stats["elapsed_ms"] == pytest.approx((11000 - 1000) / 1000.0)
+    assert stats["exit_code"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sse_vocab_fixture_no_duplicate_text_end_carries_stats(gateway):
+    await _seed_run(gateway, "chat-vocab-sse", prompt="hi", log_lines=_vocab_fixture_lines())
+    log_path = gateway.tmp_path / "cli_runs" / "chat-vocab-sse.jsonl"
+    log_path.with_suffix(".exit").write_text("0", encoding="utf-8")
+    async with gateway.client.stream("GET", "/api/cli-sessions/chat-vocab-sse/events") as response:
+        assert response.status_code == 200
+        body = (await response.aread()).decode()
+    assert body.count('"delta": "I\'m"') == 1
+    assert '"delta": "I\'m Muse Code powered by Meta Muse Spark."' not in body
+    assert "run.terminal.completed" in body  # raw compat passthrough preserved
+    assert '"name": "model.meta.response"' in body and '"status": "intent"' in body
+    assert '"status": "proposed"' not in body and '"status": "completed"' not in body.replace('"terminal": "completed"', "")
+    assert '"exit_code": 0' in body and '"model": "muse-spark-1.3"' in body and '"terminal": "completed"' in body

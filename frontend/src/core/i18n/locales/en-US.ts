@@ -988,6 +988,15 @@ export const enUS: Translations = {
       promptRequired: "A prompt is required.",
     },
     guideLink: "Operator guide",
+    inspector: "Run inspector",
+    inspectorDescription:
+      "Run detail, live events, export, inspect, resume, and stop.",
+    statsExit: "exit",
+    chatStarters: [
+      "Fix the failing tests in this workspace",
+      "Refactor the hottest module for readability",
+      "Add regression tests for the last bugfix",
+    ],
     guide: {
       title: "CLI sessions operator guide",
       intro:

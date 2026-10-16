@@ -825,6 +825,10 @@ export interface Translations {
       promptRequired: string;
     };
     guideLink: string;
+    inspector: string;
+    inspectorDescription: string;
+    statsExit: string;
+    chatStarters: string[];
     guide: {
       title: string;
       intro: string;

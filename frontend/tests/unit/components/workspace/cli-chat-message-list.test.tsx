@@ -1,25 +1,7 @@
-import { expect, rs, test } from "@rstest/core";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { expect, test } from "@rstest/core";
 
-import { CliChatMessageList } from "@/components/workspace/cli-sessions/cli-chat-view";
+import { cliChatToThreadMessages } from "@/components/workspace/cli-sessions/cli-chat-view";
 import type { CliChatMessage } from "@/core/cli-sessions/types";
-
-rs.mock("@/core/i18n/hooks", () => ({
-  useI18n: () => ({
-    t: {
-      cliSessions: {
-        chat: {
-          empty: "No messages yet.",
-          truncated: "Trimmed.",
-          userLabel: "You",
-          assistantLabel: "Assistant",
-          toolLabel: "Tool",
-        },
-      },
-    },
-  }),
-}));
 
 const MESSAGES: CliChatMessage[] = [
   { run_id: "r1", role: "user", content: "do the thing" },
@@ -27,26 +9,29 @@ const MESSAGES: CliChatMessage[] = [
   { run_id: "r1", role: "tool", name: "shell", status: "ok", detail: "ran" },
 ];
 
-test("renders user, assistant, and tool bubbles", () => {
-  const html = renderToStaticMarkup(
-    createElement(CliChatMessageList, { messages: MESSAGES, truncated: false }),
-  );
-  expect(html).toContain('data-testid="cli-chat-message-user"');
-  expect(html).toContain('data-testid="cli-chat-message-assistant"');
-  expect(html).toContain('data-testid="cli-chat-message-tool"');
-  expect(html).toContain("do the thing");
-  expect(html).toContain("Tool: shell");
-  expect(html).not.toContain("cli-chat-truncated");
+test("maps user and assistant turns to human/ai messages", () => {
+  const [human, ai] = cliChatToThreadMessages(MESSAGES);
+  expect(human?.type).toBe("human");
+  expect(human).toMatchObject({ content: "do the thing" });
+  expect(ai?.type).toBe("ai");
+  expect(ai).toMatchObject({ content: "on it" });
+  expect(human?.id).toBe("r1:0");
+  expect(ai?.id).toBe("r1:1");
 });
 
-test("shows the trimmed notice and the empty state", () => {
-  const trimmed = renderToStaticMarkup(
-    createElement(CliChatMessageList, { messages: MESSAGES, truncated: true }),
-  );
-  expect(trimmed).toContain('data-testid="cli-chat-truncated"');
+test("maps tool turns to assistant markdown preserving name/status/detail", () => {
+  const [, , tool] = cliChatToThreadMessages(MESSAGES);
+  expect(tool?.type).toBe("ai");
+  const content = (tool as unknown as { content: string }).content;
+  expect(content).toContain("shell");
+  expect(content).toContain("ok");
+  expect(content).toContain("ran");
+});
 
-  const empty = renderToStaticMarkup(
-    createElement(CliChatMessageList, { messages: [], truncated: false }),
-  );
-  expect(empty).toContain('data-testid="cli-chat-empty"');
+test("maps empty tool turns to a placeholder bubble", () => {
+  const [tool] = cliChatToThreadMessages([
+    { run_id: "r1", role: "tool", name: "", status: "", detail: "" },
+  ]);
+  expect(tool?.type).toBe("ai");
+  expect((tool as unknown as { content: string }).content).toContain("—");
 });

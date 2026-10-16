@@ -27,6 +27,19 @@ export interface CliChatToolFrame {
 
 export type CliChatStreamFrame = CliChatMessageFrame | CliChatToolFrame;
 
+/** First user turn of a chat backfill — the session's recent-chats title. */
+export function selectFirstCliUserPrompt(
+  messages: CliChatMessage[] | undefined,
+): string | null {
+  if (!messages) return null;
+  for (const message of messages) {
+    if (message.role === "user" && message.content.trim().length > 0) {
+      return message.content.trim();
+    }
+  }
+  return null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

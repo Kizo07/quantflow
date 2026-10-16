@@ -927,6 +927,14 @@ export const zhCN: Translations = {
       promptRequired: "提示词必填。",
     },
     guideLink: "操作指南",
+    inspector: "运行检查器",
+    inspectorDescription: "运行详情、实时事件、导出、检查、恢复与停止。",
+    statsExit: "退出码",
+    chatStarters: [
+      "修复此工作区中失败的测试",
+      "重构最热模块以提高可读性",
+      "为上次修复补充回归测试",
+    ],
     guide: {
       title: "CLI 会话操作指南",
       intro: "如何在此看板中启动、监管和审计无头 CLI 运行。",

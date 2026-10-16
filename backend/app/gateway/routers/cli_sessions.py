@@ -181,10 +181,18 @@ async def _record_audit(
     )
 
 
-# Chat layer: passthrough-first mapping from exec JSONL lines to typed chat
-# frames. The exec event vocabulary is only partially evidenced, so
-# anything unrecognized yields no typed frame here — the raw line still
-# flows through as a compat `data:` frame and is never dropped.
+# Chat layer: payload_type-driven mapping from exec JSONL lines to typed chat
+# frames, per the evidenced exec vocabulary (`cli_runs/*.jsonl` mirrors):
+# assistant text comes ONLY from `run.output.delta` records — the
+# `run.terminal.completed` record repeats the full concatenated text and
+# must never surface as chat text (that echo duplicated assistant content).
+# Tool/progress rows come from `task.lifecycle.*` records. Anything
+# unrecognized yields no typed frame here — the raw line still flows
+# through as a compat `data:` frame and is never dropped.
+_CLI_CHAT_DELTA_TYPES = frozenset({"run.output.delta"})
+_CLI_CHAT_LIFECYCLE_PREFIX = "task.lifecycle."
+# Pre-envelope flat shapes (no `payload_type` key) keep their legacy mapping
+# so older producers still render.
 _CLI_CHAT_MESSAGE_TYPES = frozenset({"message", "text", "delta", "assistant", "output", "content", "chunk"})
 _CLI_CHAT_TOOL_TYPES = frozenset({"tool", "tool_call", "tool_result", "tool_use", "progress"})
 _CLI_CHAT_TEXT_KEYS = ("delta", "text", "content", "output", "message")
@@ -194,41 +202,160 @@ _CLI_CHAT_TEXT_KEYS = ("delta", "text", "content", "output", "message")
 _CLI_CHAT_CHAIN_CAP = 50
 
 
-def _typed_chat_frames(line: str, *, run_id: str) -> list[tuple[str, dict[str, Any]]]:
-    """Map one exec JSONL line to typed chat frames (shared by SSE + backfill)."""
-    try:
-        obj = json.loads(line)
-    except ValueError:
-        return []
-    if not isinstance(obj, dict):
-        return []
-    if obj.get("payload_type") == "turn.input.user":
-        return []  # user prompt already recorded from the run row
-    # MSP envelope: real content nests under "payload"
-    # (e.g. payload_type "run.output.delta" carries payload.text).
-    payload = obj.get("payload")
-    body = payload if isinstance(payload, dict) else obj
-    kind = str(body.get("type", "") or "").lower()
+def _lifecycle_tool_frame(payload_type: str, payload: dict[str, Any], *, run_id: str) -> dict[str, Any] | None:
+    """Map one `task.lifecycle.*` envelope payload to a tool/progress row.
+
+    Only events carrying displayable content become chat rows: bare state
+    transitions (proposed/accepted/scheduled/started/completed) name an
+    opaque task id and would render as dozens of empty rows per run, so
+    they yield no frame. The raw line still flows through as a compat
+    `data:` frame for the run inspector.
+    """
+    event = payload.get("event")
+    event = event if isinstance(event, dict) else {}
+    kind = str(event.get("kind") or payload_type.rsplit(".", 1)[-1] or "")
+    task_id = str(payload.get("task_id") or event.get("task_id") or "")
+    if kind in {"proposed", "accepted", "scheduled", "started", "completed"}:
+        return None
+    if kind == "side_effect_intent":
+        operation = str(event.get("operation") or "")
+        if not operation:
+            return None
+        if operation == "reminder" or operation.startswith("reminder."):
+            return None  # internal reminder machinery, never a user-facing tool
+        policy = str(event.get("policy_decision") or "")
+        detail = "" if policy == "not_applicable" else policy
+        return {"run_id": run_id, "name": operation, "status": "intent", "detail": detail}
+    if kind == "status":
+        message = str(event.get("message") or "")
+        if not message:
+            return None
+        details = event.get("details")
+        details = details if isinstance(details, dict) else {}
+        facets = details.get("facets")
+        facets = facets if isinstance(facets, list) else []
+        first = facets[0] if facets and isinstance(facets[0], dict) else {}
+        name = str(first.get("operation") or task_id or "")
+        if not name:
+            return None
+        return {"run_id": run_id, "name": name, "status": str(details.get("phase") or "status"), "detail": message}
+    if kind == "cancelled":
+        reason = str(event.get("reason") or "")
+        if not reason or not task_id:
+            return None
+        return {"run_id": run_id, "name": task_id, "status": "cancelled", "detail": reason}
+    detail = str(event.get("message") or event.get("reason") or "")
+    if not detail or not task_id:
+        return None
+    return {"run_id": run_id, "name": task_id, "status": kind or "update", "detail": detail}
+
+
+def _legacy_chat_frames(obj: dict[str, Any], *, run_id: str) -> list[tuple[str, dict[str, Any]]]:
+    """Map a pre-envelope flat line (no `payload_type`) to typed chat frames."""
+    kind = str(obj.get("type", "") or "").lower()
     is_tool = kind in _CLI_CHAT_TOOL_TYPES or kind.startswith("tool")
     frames: list[tuple[str, dict[str, Any]]] = []
-    tool_obj = body.get("tool")
+    tool_obj = obj.get("tool")
     tool_obj = tool_obj if isinstance(tool_obj, dict) else {}
-    name = body.get("name", tool_obj.get("name"))
-    status = body.get("status", tool_obj.get("status"))
+    name = obj.get("name", tool_obj.get("name"))
+    status = obj.get("status", tool_obj.get("status"))
     if is_tool or (name is not None and status is not None):
-        detail = body.get("detail", tool_obj.get("detail", body.get("output", "")))
+        detail = obj.get("detail", tool_obj.get("detail", obj.get("output", "")))
         frames.append(("tool", {"run_id": run_id, "name": name or "", "status": status or "", "detail": detail or ""}))
         return frames
     delta: str | None = None
     if kind in _CLI_CHAT_MESSAGE_TYPES or kind == "":
         for key in _CLI_CHAT_TEXT_KEYS:
-            value = body.get(key)
+            value = obj.get(key)
             if isinstance(value, str) and value:
                 delta = value
                 break
     if delta:
         frames.append(("message", {"role": "assistant", "delta": delta, "run_id": run_id}))
     return frames
+
+
+def _typed_chat_frames(line: str, *, run_id: str) -> list[tuple[str, dict[str, Any]]]:
+    """Map one exec JSONL line to typed chat frames (shared by SSE + backfill).
+
+    Envelope lines dispatch on `payload_type`: only `run.output.delta`
+    yields assistant text, only `task.lifecycle.*` yields tool rows. The
+    terminal record, user-input echo, model/linkage records, and non-JSON
+    preamble (`muse:`/`tbh:`) yield no typed frame by construction.
+    """
+    try:
+        obj = json.loads(line)
+    except ValueError:
+        return []
+    if not isinstance(obj, dict):
+        return []
+    if "payload_type" not in obj:
+        return _legacy_chat_frames(obj, run_id=run_id)
+    payload_type = str(obj.get("payload_type") or "")
+    payload = obj.get("payload")
+    payload = payload if isinstance(payload, dict) else {}
+    if payload_type in _CLI_CHAT_DELTA_TYPES:
+        text = payload.get("text")
+        if isinstance(text, str) and text:
+            return [("message", {"role": "assistant", "delta": text, "run_id": run_id})]
+        return []
+    if payload_type.startswith(_CLI_CHAT_LIFECYCLE_PREFIX):
+        frame = _lifecycle_tool_frame(payload_type, payload, run_id=run_id)
+        return [("tool", frame)] if frame is not None else []
+    return []
+
+
+def _run_stats_for_log(log_path: str | Path | None, *, run_id: str) -> dict[str, Any]:
+    """Summarize one run log for the UI summary line: model, terminal state, elapsed, exit.
+
+    `recorded_at` is microseconds; `elapsed_ms` spans first-to-last envelope.
+    Missing carriers stay None rather than guessing.
+    """
+    stats: dict[str, Any] = {
+        "run_id": run_id,
+        "model": None,
+        "provider": None,
+        "display_label": None,
+        "terminal": None,
+        "reason": None,
+        "elapsed_ms": None,
+        "exit_code": cli_runner.sentinel_exit_code(log_path),
+    }
+    if not log_path:
+        return stats
+    try:
+        text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return stats
+    first_ts: float | None = None
+    last_ts: float | None = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue  # non-JSON preamble carries no stats
+        if not isinstance(obj, dict):
+            continue
+        ts = obj.get("recorded_at")
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            first_ts = ts if first_ts is None else min(first_ts, ts)
+            last_ts = ts if last_ts is None else max(last_ts, ts)
+        payload = obj.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        if obj.get("payload_type") == "run.model.configured":
+            stats["model"] = payload.get("model_id") or stats["model"]
+            stats["provider"] = payload.get("provider_id") or stats["provider"]
+            stats["display_label"] = payload.get("display_label") or stats["display_label"]
+        elif obj.get("payload_type") == "run.terminal.completed":
+            stats["terminal"] = payload.get("terminal")
+            stats["reason"] = payload.get("reason")
+    if first_ts is not None and last_ts is not None:
+        stats["elapsed_ms"] = max(0.0, (last_ts - first_ts) / 1000.0)
+    return stats
 
 
 def _chat_frames_for_line(line: str, *, run_id: str | None) -> list[str]:
@@ -500,9 +627,16 @@ async def list_cli_chat_messages(session_id: str, request: Request) -> dict[str,
         raise HTTPException(status_code=404, detail="CLI session not found")
     chain, truncated = await _chat_chain(session_repo, session_id, user_id=user_id)
     messages: list[dict[str, Any]] = []
+    stats: dict[str, dict[str, Any]] = {}
     for record in chain:
         messages.extend(_replay_run_messages(record))
-    return {"id": session_id, "runs": [record["id"] for record in chain], "messages": messages, "truncated": truncated}
+        run_stats = _run_stats_for_log(record.get("log_path"), run_id=record["id"])
+        if run_stats["model"] is None:
+            run_stats["model"] = record.get("model")
+        if run_stats["provider"] is None:
+            run_stats["provider"] = record.get("provider")
+        stats[record["id"]] = run_stats
+    return {"id": session_id, "runs": [record["id"] for record in chain], "messages": messages, "truncated": truncated, "stats": stats}
 
 
 @router.post("/{session_id}/messages", status_code=201)
@@ -643,7 +777,9 @@ async def _event_generator(log_path: str | None, *, poll_seconds: float, request
                 await on_complete(exit_code)
             except Exception:
                 pass
-        yield f"event: end\ndata: {json.dumps({'exit_code': exit_code})}\n\n"
+        end_stats = _run_stats_for_log(path, run_id=run_id or "")
+        end_stats["exit_code"] = exit_code
+        yield f"event: end\ndata: {json.dumps({'exit_code': exit_code, 'stats': end_stats})}\n\n"
 
     while True:
         if await request.is_disconnected():

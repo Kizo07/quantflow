@@ -22,6 +22,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CliSidebarSessions } from "@/components/workspace/cli-sessions/cli-sidebar-sessions";
 import { useAgentsApiEnabled } from "@/core/agents";
 import { useI18n } from "@/core/i18n/hooks";
 
@@ -109,6 +110,9 @@ export function WorkspaceNavChatList() {
               <span>{t.sidebar.cliSessions}</span>
             </Link>
           </SidebarMenuButton>
+          {pathname.startsWith("/workspace/cli-sessions") && (
+            <CliSidebarSessions />
+          )}
         </SidebarMenuItem>
         <SidebarMenuItem>
           <SidebarMenuButton

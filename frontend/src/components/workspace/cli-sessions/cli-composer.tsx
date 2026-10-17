@@ -425,11 +425,10 @@ export function CliLaunchComposer({
             <PromptInputSubmit
               aria-label={st.startRun}
               className="rounded-full"
+              variant="outline"
               disabled={!canSubmit}
               status={launch.isPending ? "submitted" : undefined}
-            >
-              {launch.isPending ? st.submitting : st.startRun}
-            </PromptInputSubmit>
+            />
           </PromptInputTools>
         </PromptInputFooter>
       </PromptInput>
@@ -661,11 +660,10 @@ export function CliSendComposer({
             <PromptInputSubmit
               aria-label={ct.send}
               className="rounded-full"
+              variant="outline"
               disabled={!canSend}
               status={send.isPending ? "submitted" : undefined}
-            >
-              {send.isPending ? ct.sending : ct.send}
-            </PromptInputSubmit>
+            />
           </PromptInputTools>
         </PromptInputFooter>
       </PromptInput>

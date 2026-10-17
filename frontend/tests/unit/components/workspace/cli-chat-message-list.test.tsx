@@ -19,19 +19,47 @@ test("maps user and assistant turns to human/ai messages", () => {
   expect(ai?.id).toBe("r1:1");
 });
 
-test("maps tool turns to assistant markdown preserving name/status/detail", () => {
-  const [, , tool] = cliChatToThreadMessages(MESSAGES);
-  expect(tool?.type).toBe("ai");
-  const content = (tool as unknown as { content: string }).content;
-  expect(content).toContain("shell");
-  expect(content).toContain("ok");
-  expect(content).toContain("ran");
+test("maps tool turns to paired ai-tool_calls + tool messages", () => {
+  const [, , call, result] = cliChatToThreadMessages(MESSAGES);
+  expect(call?.type).toBe("ai");
+  expect(call).toMatchObject({
+    content: "",
+    tool_calls: [{ id: "r1:2:call", name: "shell", args: {} }],
+  });
+  expect(result?.type).toBe("tool");
+  expect(result).toMatchObject({
+    tool_call_id: "r1:2:call",
+    name: "shell",
+    content: "ran",
+    status: "success",
+  });
 });
 
-test("maps empty tool turns to a placeholder bubble", () => {
-  const [tool] = cliChatToThreadMessages([
+test("marks failed tool turns as error results", () => {
+  for (const status of ["failed", "error", "rejected", "stream_failed"]) {
+    const [, result] = cliChatToThreadMessages([
+      { run_id: "r1", role: "tool", name: "t", status, detail: "boom" },
+    ]);
+    expect(result).toMatchObject({ type: "tool", status: "error" });
+  }
+  const [, ok] = cliChatToThreadMessages([
+    { run_id: "r1", role: "tool", name: "t", status: "result", detail: "ok" },
+  ]);
+  expect(ok).toMatchObject({ type: "tool", status: "success" });
+});
+
+test("maps empty tool turns to a placeholder result", () => {
+  const [call, result] = cliChatToThreadMessages([
     { run_id: "r1", role: "tool", name: "", status: "", detail: "" },
   ]);
-  expect(tool?.type).toBe("ai");
-  expect((tool as unknown as { content: string }).content).toContain("—");
+  expect(call).toMatchObject({
+    type: "ai",
+    tool_calls: [{ id: "r1:0:call", name: "tool", args: {} }],
+  });
+  expect(result).toMatchObject({
+    type: "tool",
+    tool_call_id: "r1:0:call",
+    content: "—",
+    status: "success",
+  });
 });

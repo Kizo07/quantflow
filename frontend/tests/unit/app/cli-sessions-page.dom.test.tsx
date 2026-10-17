@@ -70,6 +70,7 @@ rs.mock("@/core/cli-sessions/api", () => ({
 }));
 
 import CliSessionsPage from "@/app/workspace/cli-sessions/page";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import type {
   CliCapabilities,
   CliChatBackfill,
@@ -162,7 +163,9 @@ function renderPage() {
   render(
     <QueryClientProvider client={client}>
       <I18nProvider initialLocale="en-US">
-        <CliSessionsPage />
+        <SidebarProvider>
+          <CliSessionsPage />
+        </SidebarProvider>
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -247,6 +250,36 @@ describe("CliSessionsPage", () => {
       within(list).getByText("ack").closest(".is-assistant"),
     ).not.toBeNull();
     expect(screen.getByTestId("cli-send-composer")).toBeDefined();
+  });
+
+  it("condenses tool turns to one-liners with a details expander", async () => {
+    mocks.fetchSessions.mockResolvedValue([
+      session({ status: "completed", ended_at: "2026-10-14T10:05:00Z" }),
+    ]);
+    mocks.fetchChat.mockImplementation(async (id: string) => ({
+      id,
+      runs: [id],
+      truncated: false,
+      messages: [
+        { run_id: id, role: "user", content: "do the thing" },
+        {
+          run_id: id,
+          role: "tool",
+          name: "shell",
+          status: "ok",
+          detail: "SECRET-OUTPUT-123",
+        },
+        { run_id: id, role: "assistant", content: "done" },
+      ],
+    }));
+    renderPage();
+    const list = await screen.findByTestId("cli-chat-messages");
+    await within(list).findByText('Use "shell" tool');
+    // Condensed: the raw output stays hidden until expanded.
+    expect(within(list).queryByText("SECRET-OUTPUT-123")).toBeNull();
+    fireEvent.click(within(list).getByRole("button", { name: /Tool details/ }));
+    await within(list).findByText("SECRET-OUTPUT-123");
+    expect(within(list).getByText("Result")).toBeDefined();
   });
 
   it("pins the newest session into the URL on a bare landing", async () => {

@@ -101,7 +101,7 @@ def _vocab_fixture_lines():
     """Realistic exec log: preamble noise + deltas + terminal echo + lifecycle rows."""
     full = "I'm Muse Code powered by Meta Muse Spark."
     return [
-        "muse: workspace root: /home/fire/Documents/deer-flow/backend (cwd default)",
+        "muse: workspace root: /home/example/workspace/backend (cwd default)",
         "muse: workspace trust: trusted source=run-flag",
         "tbh: reasoning effort ultra is not available; using xhigh",
         _vocab_envelope("runtime.command.accepted", {"kind": "command_accepted", "command_kind": "turn.submit"}, recorded_at=1000),
@@ -226,6 +226,20 @@ def test_lifecycle_events_map_to_tool_rows():
         run_id="r1",
     )
     assert cancelled == [("tool", {"run_id": "r1", "name": "t9", "status": "cancelled", "detail": "superseded"})]
+
+
+def test_tool_result_maps_to_generic_tool_row():
+    frames = cli_sessions._typed_chat_frames(
+        _vocab_envelope("tool.result", {"kind": "tool_result", "text": "tool failed: missing field `command` at line 1 column 2"}),
+        run_id="r1",
+    )
+    assert frames == [("tool", {"run_id": "r1", "name": "tool", "status": "error", "detail": "tool failed: missing field `command` at line 1 column 2"})]
+    ok = cli_sessions._typed_chat_frames(
+        _vocab_envelope("tool.result", {"kind": "tool_result", "text": "checked 12 files, 0 errors"}),
+        run_id="r1",
+    )
+    assert ok == [("tool", {"run_id": "r1", "name": "tool", "status": "result", "detail": "checked 12 files, 0 errors"})]
+    assert cli_sessions._typed_chat_frames(_vocab_envelope("tool.result", {"kind": "tool_result", "text": ""}), run_id="r1") == []
 
 
 def test_typed_frames_map_known_lines_and_ignore_unknown():

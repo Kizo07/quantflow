@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type ComponentProps } from "react";
 
 import { ConversationEmptyState } from "@/components/ai-elements/conversation";
 import { Button } from "@/components/ui/button";
+import { ArtifactsProvider } from "@/components/workspace/artifacts";
 import {
   MESSAGE_LIST_DEFAULT_PADDING_BOTTOM,
   MessageList,
@@ -24,37 +25,56 @@ import { useI18n } from "@/core/i18n/hooks";
 
 import { CliSendComposer } from "./cli-composer";
 
+/** Tool statuses that mark the paired result an error (research `Error` label). */
+const CLI_TOOL_ERROR_STATUS = /fail|error|reject/i;
+
 /**
  * Adapt CLI chat turns to LangGraph messages so the conversation renders
- * through the research tab's actual `MessageList`/`MessageListItem` (user
- * right-pill + assistant markdown). Tool turns become assistant markdown —
- * research has no standalone tool bubble, and an orphan `tool` message would
- * render as an empty ChainOfThought shell.
+ * through the research tab's actual `MessageList` (user right-pill +
+ * assistant markdown + condensed tool steps). Tool turns become native
+ * `ai`-with-`tool_calls` + `tool` pairs, so research renders them exactly
+ * like its own tool calls: a one-line `ChainOfThoughtStep` with the
+ * `ToolCallDetails` expander (truncated preview + copy) instead of a wall
+ * of raw output. An orphan `tool` message without the pairing `ai` turn
+ * would render as an empty ChainOfThought shell, hence the pair.
  */
 export function cliChatToThreadMessages(messages: CliChatMessage[]): Message[] {
-  return messages.map((message, index) => {
+  return messages.flatMap((message, index) => {
     const id = `${message.run_id}:${index}`;
     if (message.role === "tool") {
-      const header = [message.name, message.status]
-        .filter((part) => part.length > 0)
-        .join(" · ");
-      const body = message.detail || "—";
-      return {
-        id,
-        type: "ai",
-        content: header ? `**${header}**\n\n${body}` : body,
-        run_id: message.run_id,
-      } as unknown as Message;
+      const callId = `${id}:call`;
+      const name = message.name || "tool";
+      const failed = CLI_TOOL_ERROR_STATUS.test(message.status);
+      return [
+        {
+          id: `${id}-call`,
+          type: "ai",
+          content: "",
+          tool_calls: [{ id: callId, name, args: {} }],
+          run_id: message.run_id,
+        },
+        {
+          id,
+          type: "tool",
+          tool_call_id: callId,
+          name,
+          content: message.detail || "—",
+          status: failed ? "error" : "success",
+          run_id: message.run_id,
+        },
+      ] as unknown as Message[];
     }
     if (message.role === "user") {
-      return { id, type: "human", content: message.content } as Message;
+      return [{ id, type: "human", content: message.content } as Message];
     }
-    return {
-      id,
-      type: "ai",
-      content: message.content,
-      run_id: message.run_id,
-    } as unknown as Message;
+    return [
+      {
+        id,
+        type: "ai",
+        content: message.content,
+        run_id: message.run_id,
+      } as unknown as Message,
+    ];
   });
 }
 
@@ -189,15 +209,21 @@ export function CliChatView({
                 {ct.truncated}
               </p>
             )}
-            <MessageList
-              className="size-full"
-              testId="cli-chat-messages"
-              threadId={session.id}
-              thread={thread}
-              tokenUsageInlineMode="off"
-              enableSidecarActions={false}
-              paddingBottom={MESSAGE_LIST_DEFAULT_PADDING_BOTTOM}
-            />
+            <ArtifactsProvider>
+              <MessageList
+                className="size-full"
+                testId="cli-chat-messages"
+                threadId={session.id}
+                thread={thread}
+                tokenUsageInlineMode="off"
+                // Unlock research's Details expander on the condensed tool
+                // steps (no token-debug summaries: CLI carries no token
+                // metadata).
+                showToolCallDetails
+                enableSidecarActions={false}
+                paddingBottom={MESSAGE_LIST_DEFAULT_PADDING_BOTTOM}
+              />
+            </ArtifactsProvider>
           </div>
         )}
       </div>

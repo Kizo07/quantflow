@@ -65,6 +65,8 @@ interface MessageGroupProps {
   deferBrowserPreviews?: boolean;
   tokenDebugSteps?: TokenDebugStep[];
   showTokenDebugSummaries?: boolean;
+  /** Show the tool Details expander without token-debug summaries. */
+  showToolCallDetails?: boolean;
   threadId?: string;
   toolArtifacts?: ArtifactEntry[];
 }
@@ -77,6 +79,7 @@ function MessageGroupComponent({
   deferBrowserPreviews = false,
   tokenDebugSteps = [],
   showTokenDebugSummaries = false,
+  showToolCallDetails = false,
   threadId,
   toolArtifacts,
 }: MessageGroupProps) {
@@ -291,7 +294,7 @@ function MessageGroupComponent({
         isLast={options?.isLast}
         isLoading={isLoading}
         deferBrowserPreview={deferBrowserPreviews}
-        showDetails={showTokenDebugSummaries}
+        showDetails={showTokenDebugSummaries || showToolCallDetails}
         tokenDebugStep={
           debugStep && !debugStep.sharedAttribution ? debugStep : undefined
         }
@@ -529,6 +532,8 @@ function areMessageGroupPropsEqual(
       Boolean(next.deferBrowserPreviews) &&
     Boolean(previous.showTokenDebugSummaries) ===
       Boolean(next.showTokenDebugSummaries) &&
+    Boolean(previous.showToolCallDetails) ===
+      Boolean(next.showToolCallDetails) &&
     previous.threadId === next.threadId &&
     sameReferences(previous.messages, next.messages) &&
     sameReferences(previous.toolArtifacts, next.toolArtifacts) &&

@@ -333,6 +333,7 @@ export function MessageList({
   canBranch = false,
   enableSidecarActions = true,
   enableConversationOutline = false,
+  showToolCallDetails = false,
   sidecarSurface = false,
   initialScroll = "smooth",
   resizeScroll = "smooth",
@@ -371,6 +372,8 @@ export function MessageList({
   canBranch?: boolean;
   enableSidecarActions?: boolean;
   enableConversationOutline?: boolean;
+  /** Show the tool Details expander without token-debug summaries. */
+  showToolCallDetails?: boolean;
   sidecarSurface?: boolean;
   initialScroll?: ConversationProps["initial"];
   resizeScroll?: ConversationProps["resize"];
@@ -1524,6 +1527,7 @@ export function MessageList({
                           message,
                         ])}
                         showTokenDebugSummaries={showTokenDebugSummaries}
+                        showToolCallDetails={showToolCallDetails}
                         toolArtifacts={thread.values?.tool_artifacts}
                       />,
                     );
@@ -1582,6 +1586,7 @@ export function MessageList({
                       group.messages,
                     )}
                     showTokenDebugSummaries={showTokenDebugSummaries}
+                    showToolCallDetails={showToolCallDetails}
                     toolArtifacts={thread.values?.tool_artifacts}
                   />
                   {renderTokenUsage({

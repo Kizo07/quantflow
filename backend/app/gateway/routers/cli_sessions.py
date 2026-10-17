@@ -279,9 +279,9 @@ def _typed_chat_frames(line: str, *, run_id: str) -> list[tuple[str, dict[str, A
     """Map one exec JSONL line to typed chat frames (shared by SSE + backfill).
 
     Envelope lines dispatch on `payload_type`: only `run.output.delta`
-    yields assistant text, only `task.lifecycle.*` yields tool rows. The
-    terminal record, user-input echo, model/linkage records, and non-JSON
-    preamble (`muse:`/`tbh:`) yield no typed frame by construction.
+    yields assistant text; `task.lifecycle.*` and `tool.result` yield tool
+    rows. The terminal record, user-input echo, model/linkage records, and
+    non-JSON preamble (`muse:`/`tbh:`) yield no typed frame by construction.
     """
     try:
         obj = json.loads(line)
@@ -302,6 +302,18 @@ def _typed_chat_frames(line: str, *, run_id: str) -> list[tuple[str, dict[str, A
     if payload_type.startswith(_CLI_CHAT_LIFECYCLE_PREFIX):
         frame = _lifecycle_tool_frame(payload_type, payload, run_id=run_id)
         return [("tool", frame)] if frame is not None else []
+    if payload_type == "tool.result":
+        # Tool outcomes (success output or "tool failed: ..." text). The
+        # record carries no tool name, so the row is generic; lifecycle
+        # intent rows name the operation when the CLI reports one.
+        # Failed results keep an error status so the UI's Error label
+        # applies; prefix match only, since success output may mention
+        # "error" (e.g. "0 errors").
+        text = payload.get("text")
+        if isinstance(text, str) and text:
+            status = "error" if text.startswith("tool failed:") else "result"
+            return [("tool", {"run_id": run_id, "name": "tool", "status": status, "detail": text})]
+        return []
     return []
 
 

@@ -45,6 +45,9 @@ export const SCHEDULED_TASK_ERROR_KEYS: Readonly<
   scheduler_not_running: "schedulerNotRunning",
   scheduler_unavailable: "schedulerUnavailable",
   trigger_failed: "triggerFailed",
+  task_managed: "taskManaged",
+  invalid_notify_policy: "invalidNotifyPolicy",
+  invalid_notify_quiet: "invalidNotifyQuiet",
 };
 
 export type ScheduledTaskErrorDescription = {

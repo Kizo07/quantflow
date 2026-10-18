@@ -20,7 +20,7 @@ REVISION = "0037_project_document_summaries"
 PREVIOUS = "0036_run_idempotency_request"
 CHANNEL_BINDINGS = "0038_channel_thread_bindings"
 USER_DISABLED = "0039_user_disabled"
-CURRENT_HEAD = "0040_merge_quantflow_upstream"
+CURRENT_HEAD = "0044_scheduled_task_notify_policy"
 pytestmark = pytest.mark.asyncio
 
 

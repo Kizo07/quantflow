@@ -26,11 +26,14 @@ def test_0040_joins_both_legs():
     assert len(REVISION) <= 32
 
 
-def test_0040_is_the_chain_head():
+def test_0040_is_ancestor_of_the_single_chain_head():
+    # The chain-head pin moved on with 0041+ (now owned by the newest
+    # migration's tests); 0040 only needs to remain on the single chain.
     from pathlib import Path
 
     migrations_dir = Path(migration.__file__).resolve().parent.parent
     config = Config()
     config.set_main_option("script_location", migrations_dir.as_posix())
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == [REVISION]
+    assert len(script.get_heads()) == 1
+    assert REVISION in {rev.revision for rev in script.walk_revisions()}

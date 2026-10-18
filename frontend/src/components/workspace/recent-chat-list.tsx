@@ -66,6 +66,7 @@ import {
   useRenameThread,
 } from "@/core/threads/hooks";
 import { threadOriginOf } from "@/core/threads/origin";
+import { isPersistentBotThread } from "@/core/threads/persistent-bot";
 import {
   flattenThreadBranches,
   type ThreadBranchEntry,
@@ -532,18 +533,21 @@ export function RecentChatList() {
   );
   const { threads } = threadListModel;
   const displayedThreads = useMemo(() => {
+    // The pinned-assistant section owns the bot's singleton thread; listing
+    // it here too would render the same conversation twice in the sidebar.
+    const withoutBot = threadListModel.displayedThreads.filter(
+      (thread) => !isPersistentBotThread(thread),
+    );
     if (
       !threadIdFromPath ||
-      threadListModel.displayedThreads.some(
-        (thread) => thread.thread_id === threadIdFromPath,
-      )
+      withoutBot.some((thread) => thread.thread_id === threadIdFromPath)
     ) {
-      return threadListModel.displayedThreads;
+      return withoutBot;
     }
     const activeThread = threadListModel.byId.get(threadIdFromPath);
-    return activeThread
-      ? [...threadListModel.displayedThreads, activeThread]
-      : threadListModel.displayedThreads;
+    return activeThread && !isPersistentBotThread(activeThread)
+      ? [...withoutBot, activeThread]
+      : withoutBot;
   }, [threadIdFromPath, threadListModel]);
   // In grouped mode, project-assigned threads render under their project
   // header in `ProjectsSection`; this list keeps only unassigned threads —

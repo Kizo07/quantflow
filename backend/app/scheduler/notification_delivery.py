@@ -20,9 +20,9 @@ from typing import Any
 
 from app.channels.base import ChannelUnavailable
 from app.channels.capabilities import supports_proactive_notifications
-from app.scheduler.notification_text import DEFAULT_NOTIFICATION_LOCALE, redact_egress_text, render_notification_text, wants_result_summary
+from app.scheduler.notification_text import DEFAULT_CONTENT_MAX_CHARS, DEFAULT_NOTIFICATION_LOCALE, notify_policy_of, redact_egress_text, render_notification_text, wants_result_summary, wants_run_content
 
-__all__ = ["NotificationDeliveryWorker", "redact_egress_text", "render_notification_text"]
+__all__ = ["NotificationDeliveryWorker", "redact_egress_text", "render_notification_text", "wants_run_content"]
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,8 @@ class NotificationDeliveryWorker:
         stale_sending_timeout_seconds: int = _STALE_SENDING_TIMEOUT_SECONDS,
         stop_timeout_seconds: float = _STOP_TIMEOUT_SECONDS,
         default_locale: str = DEFAULT_NOTIFICATION_LOCALE,
+        content_egress_enabled: bool = False,
+        content_max_chars: int = DEFAULT_CONTENT_MAX_CHARS,
     ) -> None:
         self._delivery_repo = delivery_repo
         self._resolve_channel = resolve_channel
@@ -82,6 +84,10 @@ class NotificationDeliveryWorker:
         # ``channel_connections.notification_locale``: the language of rows
         # whose owner has no UI language preference (and of legacy rows).
         self._default_locale = default_locale
+        # Redacted run-output egress (channel_connections.proactive_content_enabled).
+        # Off by default: "content" rows then render the summary template.
+        self._content_egress_enabled = content_egress_enabled
+        self._content_max_chars = content_max_chars
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._lifecycle_lock = asyncio.Lock()
@@ -219,6 +225,19 @@ class NotificationDeliveryWorker:
     async def _deliver(self, delivery: dict[str, Any]) -> None:
         delivery_id = delivery["id"]
         provider = delivery.get("provider") or ""
+        payload = delivery.get("payload") if isinstance(delivery.get("payload"), dict) else {}
+        if payload.get("notify_quiet") is True or notify_policy_of(delivery) == "none":
+            # The enqueue side writes no such rows; one that exists anyway
+            # (hand-written, or predating the policy) is suppressed here and
+            # recorded terminally so it is never retried into a send.
+            await self._delivery_repo.mark_failed(
+                delivery_id,
+                claim_token=delivery.get("claim_token"),
+                error="suppressed by the task's notify policy",
+                terminal=True,
+            )
+            return
+        content_row = self._content_egress_enabled and wants_run_content(delivery)
         if not supports_proactive_notifications(provider):
             # The scheduler enqueues only for providers with proactive push;
             # a row for any other provider predates that rule. It can never
@@ -229,6 +248,13 @@ class NotificationDeliveryWorker:
                 error="provider does not support proactive notifications",
                 terminal=True,
             )
+            return
+        if content_row and self._resolve_connections is None:
+            # Run output only leaves through a verified bound identity.
+            # Unlike the template path (which keeps its legacy no-resolver
+            # behavior), content egress fails closed: park without sending
+            # until a connection resolver can prove the binding.
+            await self._delivery_repo.mark_failed(delivery_id, claim_token=delivery.get("claim_token"), error="content egress requires a verified bound channel identity", count_attempt=False)
             return
         if self._resolve_connections is not None:
             # Re-check the binding at delivery time, before anything else: a
@@ -273,7 +299,12 @@ class NotificationDeliveryWorker:
         try:
             await channel.send_notification(
                 target=delivery.get("target") or "",
-                text_markdown=render_notification_text(enriched, default_locale=self._default_locale),
+                text_markdown=render_notification_text(
+                    enriched,
+                    default_locale=self._default_locale,
+                    content_enabled=self._content_egress_enabled,
+                    content_max_chars=self._content_max_chars,
+                ),
             )
         except ChannelUnavailable as exc:
             await self._delivery_repo.mark_failed(delivery_id, claim_token=delivery.get("claim_token"), error=str(exc), count_attempt=False)

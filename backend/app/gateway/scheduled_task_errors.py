@@ -49,6 +49,9 @@ SCHEDULER_UI_ERROR_CODES: frozenset[str] = frozenset(
         "scheduler_not_running",
         "scheduler_unavailable",
         "trigger_failed",
+        "task_managed",
+        "invalid_notify_policy",
+        "invalid_notify_quiet",
     }
 )
 

@@ -52,6 +52,12 @@ class ChannelConnectionsConfig(BaseModel):
     # preference (auth disabled, or never signed in to the web app). The owner's
     # own preference, which the web app keeps in sync with its UI language, wins.
     notification_locale: NotificationLocale = "en-US"
+    # Redacted run-output egress: tasks whose notify_policy is "content" push
+    # their (secret-scrubbed) run output instead of the canned summary
+    # template. Off by default, so every task keeps template behavior until
+    # an operator explicitly opts the deployment in.
+    proactive_content_enabled: bool = False
+    proactive_content_max_chars: int = Field(default=4000, ge=200, le=20000)
     slack: SlackChannelConnectionConfig = Field(default_factory=SlackChannelConnectionConfig)
     telegram: TelegramChannelConnectionConfig = Field(default_factory=TelegramChannelConnectionConfig)
     discord: DiscordChannelConnectionConfig = Field(default_factory=DiscordChannelConnectionConfig)

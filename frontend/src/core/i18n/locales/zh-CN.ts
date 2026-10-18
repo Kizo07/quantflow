@@ -576,6 +576,11 @@ export const zhCN: Translations = {
     cliSessions: "CLI 会话",
     usage: "用量",
     agentsDisabledTooltip: "功能未启用",
+    pinnedAssistant: "助手",
+    pinnedAssistantNewActivity: "你的助手有新消息",
+    pinnedAssistantPause: "暂停助手",
+    pinnedAssistantResume: "恢复助手",
+    pinnedAssistantPaused: "已暂停",
   },
 
   // 自定义智能体聊天中的知识库范围
@@ -1323,6 +1328,9 @@ export const zhCN: Translations = {
       runQueued: "有一次运行正在排队。先暂停任务即可取消排队，然后再试。",
       taskChanged: "任务刚刚被修改过，请刷新后再试。",
       taskFinished: "这个任务已经结束，无法暂停。",
+      taskManaged: "这个任务由常驻机器人管理。请在置顶助手中暂停或恢复它。",
+      invalidNotifyPolicy: "通知方式只能是无、摘要或内容。",
+      invalidNotifyQuiet: "静默模式只能开启或关闭。",
       taskQuotaExceeded:
         "你已有 {limit} 个在对话中创建的任务（含已暂停的），删除一些后才能继续创建。",
       schedulerNotRunning: "此服务器未开启自动运行，暂时无法新建任务。",

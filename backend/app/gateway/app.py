@@ -41,6 +41,7 @@ from app.gateway.routers import (
     mcp_tasks,
     memory,
     models,
+    persistent_bot,
     personal_mcp,
     plugins,
     project_documents,
@@ -481,6 +482,114 @@ def _scheduled_task_notification_repos(startup_config: AppConfig, credentials_ci
     return ChannelConnectionRepository(session_factory, cipher=credentials_cipher), NotificationDeliveryRepository(session_factory)
 
 
+async def _thread_has_active_run(thread_id: str) -> bool:
+    """Whether ``thread_id`` currently has a pending/running durable run.
+
+    The busy probe for persistent-bot heartbeat arbitration: a heartbeat
+    occurrence that reuses the pinned thread yields to an interactive run
+    instead of launching over it. Reads the shared ``runs`` table so the
+    answer is correct across Gateway workers.
+    """
+    from sqlalchemy import select
+
+    from deerflow.persistence.engine import get_session_factory
+    from deerflow.persistence.run.model import RunRow
+
+    session_factory = get_session_factory()
+    if session_factory is None:
+        return False
+    async with session_factory() as session:
+        found = await session.scalar(select(RunRow.run_id).where(RunRow.thread_id == thread_id, RunRow.status.in_(("pending", "running"))).limit(1))
+    return found is not None
+
+
+async def _seed_persistent_bot(app: FastAPI, startup_config: AppConfig) -> None:
+    """Seed/repair the persistent bot after the scheduler has started.
+
+    Only called when ``persistent_bot.enabled`` is true, and fail-closed:
+    a missing SQL backend, a disabled scheduler, or a failed seed aborts
+    startup instead of leaving a silently heartbeat-less bot. When the
+    feature is disabled this is never called and nothing changes.
+    """
+    persistent_bot_config = startup_config.persistent_bot
+    bot_repo = getattr(app.state, "persistent_bot_repo", None)
+    task_repo = getattr(app.state, "scheduled_task_repo", None)
+    thread_store = getattr(app.state, "thread_store", None)
+    if bot_repo is None or task_repo is None or thread_store is None:
+        raise RuntimeError("persistent_bot.enabled requires database.backend sqlite or postgres")
+    if not startup_config.scheduler.enabled:
+        raise RuntimeError("persistent_bot.enabled requires scheduler.enabled=true so heartbeats can fire")
+
+    from deerflow.persistent_bot.service import PersistentBotService
+
+    bot_service = PersistentBotService(
+        config=persistent_bot_config,
+        bot_repo=bot_repo,
+        thread_store=thread_store,
+        task_repo=task_repo,
+    )
+    seeded = await bot_service.ensure_seeded()
+    app.state.persistent_bot_service = bot_service
+    scheduled_task_service = getattr(app.state, "scheduled_task_service", None)
+    heartbeat_task_id = seeded.get("heartbeat_task_id")
+    if scheduled_task_service is not None and isinstance(heartbeat_task_id, str) and heartbeat_task_id:
+        scheduled_task_service.set_thread_busy_check(_thread_has_active_run)
+        scheduled_task_service.configure_task_arbitration(
+            heartbeat_task_id,
+            stale_drop_seconds=persistent_bot_config.queued_stale_drop_seconds,
+            max_runs_per_day=persistent_bot_config.max_heartbeat_runs_per_day or None,
+        )
+    logger.info("Persistent bot seeded: %s", seeded)
+    # Proactive notices can only reach providers whose channel implements a
+    # push send (today: wecom only). Binding e.g. Feishu alone would
+    # otherwise mean heartbeats that silently never arrive; say so loudly.
+    if persistent_bot_config.notify_policy != "none" and not persistent_bot_config.notify_quiet:
+        from app.channels.capabilities import CHANNEL_CAPABILITIES, supports_proactive_notifications
+
+        connections = startup_config.channel_connections
+        enabled_providers = [name for name in CHANNEL_CAPABILITIES if getattr(getattr(connections, name, None), "enabled", False)]
+        if connections.enabled and enabled_providers and not any(supports_proactive_notifications(name) for name in enabled_providers):
+            logger.warning(
+                "Persistent bot notify_policy=%s but none of the enabled channel providers %s supports proactive notifications (only wecom does today); heartbeat notices will not be pushed to IM",
+                persistent_bot_config.notify_policy,
+                enabled_providers,
+            )
+
+
+async def _pause_leftover_persistent_bot(app: FastAPI) -> None:
+    """Disable-after-enable stop: a disabled bot must not keep heartbeating.
+
+    When ``persistent_bot.enabled`` is false but a previous deployment
+    seeded the bot, the heartbeat row stays enabled in the DB and the
+    scheduler would keep firing it — without the seed's arbitration.
+    Pause it and record the off-switch. Best-effort: failures are logged,
+    never fatal, so a disabled deployment still boots unchanged.
+    """
+    bot_repo = getattr(app.state, "persistent_bot_repo", None)
+    task_repo = getattr(app.state, "scheduled_task_repo", None)
+    if bot_repo is None or task_repo is None:
+        return
+    try:
+        bot = await bot_repo.get()
+        if bot is None:
+            return
+        task_id = bot.get("heartbeat_task_id")
+        if not isinstance(task_id, str) or not task_id:
+            return
+        task = await task_repo.get_internal(task_id)
+        if task is None or task.get("status") != "enabled":
+            return
+        from datetime import UTC, datetime
+
+        from deerflow.scheduler.host_notes import RUN_ERROR_PAUSED_WHILE_QUEUED
+
+        await task_repo.pause_with_queue_cancellation(task_id, user_id=str(bot.get("user_id")), error=RUN_ERROR_PAUSED_WHILE_QUEUED, now=datetime.now(UTC))
+        await bot_repo.set_user_paused(True)
+        logger.warning("persistent_bot.enabled is false; paused leftover heartbeat task %s from a previous deployment", task_id)
+    except Exception:
+        logger.warning("Failed to pause leftover persistent-bot heartbeat while disabled", exc_info=True)
+
+
 async def _start_scheduled_task_notification_delivery(app: FastAPI, startup_config: AppConfig, notification_repo, connection_repo) -> None:
     """Start the delivery side of the scheduled-run outbox, or switch its enqueue side off.
 
@@ -526,6 +635,10 @@ async def _start_scheduled_task_notification_delivery(app: FastAPI, startup_conf
             poll_interval_seconds=startup_config.scheduler.poll_interval_seconds,
             # Language of notices whose owner has no UI language preference.
             default_locale=startup_config.channel_connections.notification_locale,
+            # Redacted run-output egress for notify_policy="content" tasks;
+            # off unless the operator opts in (template behavior otherwise).
+            content_egress_enabled=getattr(startup_config.channel_connections, "proactive_content_enabled", False),
+            content_max_chars=getattr(startup_config.channel_connections, "proactive_content_max_chars", 4000),
         )
         await worker.start()
     except Exception:
@@ -760,6 +873,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # lifespan failure instead of exposing a half-started service.
             if startup_config.scheduler.enabled:
                 raise
+
+        # Persistent bot: seeded only after scheduler recovery/start, so a
+        # heartbeat task is never created for a poller that failed to boot.
+        # Fail-closed only while enabled; disabled means no bot work at all.
+        app.state.persistent_bot_service = None
+        if startup_config.persistent_bot.enabled:
+            await _seed_persistent_bot(app, startup_config)
+        else:
+            await _pause_leftover_persistent_bot(app)
 
         # Start IM channel service only after scheduler recovery succeeds, so a
         # fail-closed scheduler startup cannot strand channel-owned tasks before
@@ -1336,6 +1458,9 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
 
     # Scheduled tasks API is mounted at /api/scheduled-tasks
     app.include_router(scheduled_tasks.router)
+
+    # Persistent-bot status/off-switch API is mounted at /api/persistent-bot
+    app.include_router(persistent_bot.router)
 
     # Agents API is mounted at /api/agents
     app.include_router(agents.router)

@@ -672,6 +672,132 @@ class ScheduledTaskRunRepository:
             await session.commit()
             return result.rowcount == 1
 
+    async def skip_claimed_run(
+        self,
+        run_record_id: str,
+        *,
+        task_id: str,
+        lease_owner: str,
+        error: str,
+        now: datetime,
+    ) -> bool:
+        """Drop a claimed launch as skipped and advance its parent.
+
+        The busy-thread counterpart of :meth:`fail_launching_run` for
+        ``overlap_policy="skip"`` tasks: no run was created, the occurrence
+        is terminal ``skipped`` (never ``failed``), and the parent's
+        ``last_error`` is left untouched because yielding to an interactive
+        run is not an error.
+        """
+        async with self._sf() as session:
+            task = await self._lock_task(session, task_id)
+            row = await session.get(ScheduledTaskRunRow, run_record_id, with_for_update=True)
+            if row is None or row.task_id != task_id or row.status != "launching" or row.lease_owner != lease_owner:
+                await session.rollback()
+                return False
+
+            row.status = "skipped"
+            row.error = error
+            row.finished_at = now
+            row.lease_owner = None
+            row.lease_expires_at = None
+
+            if task is not None and can_project(task, row):
+                if row.trigger == "manual":
+                    task_status = task.status or "enabled"
+                    next_at = task.next_run_at
+                else:
+                    task_status = "cancelled" if task.schedule_type == "once" else "enabled"
+                    next_at = compute_next_run_at(
+                        task.schedule_type,
+                        task.schedule_spec,
+                        task.timezone,
+                        now=now,
+                    )
+                task.status = task_status
+                task.next_run_at = next_at
+                task.last_run_at = now
+                task.last_run_id = None
+                task.last_thread_id = row.thread_id
+                task.lease_owner = None
+                task.lease_expires_at = None
+                task.updated_at = datetime.now(UTC)
+
+            await session.commit()
+            return True
+
+    async def skip_queued_run(
+        self,
+        run_record_id: str,
+        *,
+        error: str,
+        now: datetime,
+    ) -> bool:
+        """Drop one still-queued occurrence as skipped and advance its parent.
+
+        Mirrors one iteration of :meth:`expire_queued_runs` with a
+        ``skipped`` outcome (stale heartbeats are not failures). Returns
+        ``False`` when the row left the queue in the meantime.
+        """
+        async with self._sf() as session:
+            probe = await session.get(ScheduledTaskRunRow, run_record_id)
+            if probe is None:
+                return False
+            task = await self._lock_task(session, probe.task_id)
+            row = await session.get(ScheduledTaskRunRow, run_record_id, with_for_update=True, populate_existing=True)
+            if row is None or row.status != "queued":
+                await session.rollback()
+                return False
+
+            row.status = "skipped"
+            row.error = error
+            row.finished_at = now
+            row.lease_owner = None
+            row.lease_expires_at = None
+
+            if task is not None and can_project(task, row):
+                if task.status == "paused":
+                    task.lease_owner = None
+                    task.lease_expires_at = None
+                elif row.trigger == "manual":
+                    task.status = task.status or "enabled"
+                    task.lease_owner = None
+                    task.lease_expires_at = None
+                else:
+                    task.status = "cancelled" if task.schedule_type == "once" else "enabled"
+                    task.next_run_at = compute_next_run_at(
+                        task.schedule_type,
+                        task.schedule_spec,
+                        task.timezone,
+                        now=now,
+                    )
+                    task.last_thread_id = row.thread_id
+                    task.lease_owner = None
+                    task.lease_expires_at = None
+                task.updated_at = datetime.now(UTC)
+
+            await session.commit()
+            return True
+
+    async def count_launched_since(self, task_id: str, *, since: datetime) -> int:
+        """Launched scheduled occurrences of a task created at/after ``since``.
+
+        Queued and skipped rows never launched, so they do not consume a
+        run budget; every other status means the occurrence left the queue.
+        """
+        stmt = (
+            select(func.count())
+            .select_from(ScheduledTaskRunRow)
+            .where(
+                ScheduledTaskRunRow.task_id == task_id,
+                ScheduledTaskRunRow.trigger == "scheduled",
+                ScheduledTaskRunRow.created_at >= since,
+                ScheduledTaskRunRow.status.not_in(("queued", "skipped")),
+            )
+        )
+        async with self._sf() as session:
+            return int(await session.scalar(stmt) or 0)
+
     async def expire_queued_runs(
         self,
         *,

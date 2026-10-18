@@ -139,10 +139,10 @@ class TestRevisionChain:
 
     def test_0028_is_ancestor_of_the_chain_head(self) -> None:
         assert REVISION in {revision.revision for revision in self._script().walk_revisions()}
-        assert bootstrap._get_head_revision() == "0040_merge_quantflow_upstream"
+        assert bootstrap._get_head_revision() == "0044_scheduled_task_notify_policy"
 
     def test_single_head_no_branches(self) -> None:
-        assert self._script().get_heads() == ["0040_merge_quantflow_upstream"]
+        assert self._script().get_heads() == ["0044_scheduled_task_notify_policy"]
 
     @staticmethod
     def _script() -> ScriptDirectory:

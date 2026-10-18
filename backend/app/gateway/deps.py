@@ -821,6 +821,7 @@ async def langgraph_runtime(app: FastAPI, startup_config: AppConfig) -> AsyncGen
         if sf is not None:
             from deerflow.persistence.cli_sessions import CliAuditRepository, CliPresetRepository, CliSessionRepository
             from deerflow.persistence.mcp_tasks import McpTaskRepository
+            from deerflow.persistence.persistent_bot import PersistentBotRepository
             from deerflow.persistence.projects import ProjectDocumentRepository, ProjectRepository
             from deerflow.persistence.scheduled_task_events import ScheduledTaskEventRepository
             from deerflow.persistence.scheduled_task_runs import (
@@ -848,6 +849,7 @@ async def langgraph_runtime(app: FastAPI, startup_config: AppConfig) -> AsyncGen
             app.state.cli_session_repo = CliSessionRepository(sf)
             app.state.cli_preset_repo = CliPresetRepository(sf)
             app.state.cli_audit_repo = CliAuditRepository(sf)
+            app.state.persistent_bot_repo = PersistentBotRepository(sf)
         else:
             app.state.cli_audit_repo = None
             app.state.cli_preset_repo = None
@@ -860,6 +862,7 @@ async def langgraph_runtime(app: FastAPI, startup_config: AppConfig) -> AsyncGen
             app.state.scheduled_task_run_repo = None
             app.state.scheduled_task_event_repo = None
             app.state.thread_read_repo = None
+            app.state.persistent_bot_repo = None
 
         # RunManager with store backing for persistence
         run_ownership_config = getattr(config, "run_ownership", None)
@@ -1019,6 +1022,12 @@ def get_scheduled_task_service(request: Request):
     if val is None:
         raise _scheduler_unavailable("Scheduled task service not available")
     return val
+
+
+def get_persistent_bot_repo(request: Request):
+    """The persistent-bot singleton repo, or None without SQL persistence."""
+    state = getattr(getattr(request, "app", None), "state", None)
+    return getattr(state, "persistent_bot_repo", None)
 
 
 def is_scheduler_running(request: Request) -> bool:

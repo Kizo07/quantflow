@@ -98,6 +98,12 @@ type SendMessageOptions = {
   additionalKwargs?: Record<string, unknown>;
   additionalInputMessages?: Message[];
   /**
+   * Concurrency strategy forwarded to `thread.submit`. Only the persistent
+   * bot's pinned thread sends `interrupt`, so a user message preempts a
+   * heartbeat run instead of being rejected while it holds the thread.
+   */
+  multitaskStrategy?: "reject" | "rollback" | "interrupt";
+  /**
    * Thread IDs of conversations the user attached for this run. They ride in
    * `context.conversation_references`, which the Gateway consumes at admission;
    * the LangGraph SDK drops unknown top-level body fields, so the top-level
@@ -2754,6 +2760,9 @@ export function useThreadStream({
           },
           {
             threadId: threadId,
+            ...(options?.multitaskStrategy
+              ? { multitaskStrategy: options.multitaskStrategy }
+              : {}),
             // No streamSubgraphs: subtask progress arrives via root-namespace
             // custom events, while subgraph frames would leak a delegated
             // subagent's values/messages into the thread view (#4399).

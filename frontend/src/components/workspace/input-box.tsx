@@ -266,6 +266,8 @@ function escapeXmlAttribute(value: string) {
 export type InputBoxSubmitOptions = {
   additionalKwargs?: Record<string, unknown>;
   additionalInputMessages?: Message[];
+  /** Forwarded to the run submit; the bot thread uses `interrupt`. */
+  multitaskStrategy?: "reject" | "rollback" | "interrupt";
   /** Thread IDs attached through the conversation picker; sent as run context. */
   conversationReferences?: string[];
   onSent?: () => void;

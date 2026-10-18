@@ -33,6 +33,7 @@ from deerflow.config.loop_detection_config import LoopDetectionConfig
 from deerflow.config.mcp_tasks_config import McpTasksConfig
 from deerflow.config.memory_config import MemoryConfig, load_memory_config_from_dict
 from deerflow.config.model_config import ModelConfig
+from deerflow.config.persistent_bot_config import PersistentBotConfig, load_persistent_bot_config_from_dict
 from deerflow.config.pii_redaction_config import PiiRedactionConfig
 from deerflow.config.projects_config import ProjectsConfig
 from deerflow.config.prompt_overlay import PromptOverlay
@@ -368,6 +369,17 @@ class AppConfig(BaseModel):
             field_doc="Scheduled task runtime configuration (background poller for one-time, cron, and interval agent runs).",
         ),
     )
+    persistent_bot: PersistentBotConfig = Field(
+        default_factory=PersistentBotConfig,
+        description=format_field_description(
+            "persistent_bot",
+            field_doc=(
+                "Persistent (always-on) bot configuration: dedicated agent, pinned thread, and one heartbeat "
+                "scheduled task seeded and repaired at startup. Disabled by default; when disabled the gateway "
+                "creates nothing and behavior is unchanged."
+            ),
+        ),
+    )
     mcp_tasks: McpTasksConfig = Field(
         default_factory=McpTasksConfig,
         description=format_field_description(
@@ -575,6 +587,7 @@ class AppConfig(BaseModel):
         load_knowledge_config_from_dict(config.knowledge.model_dump())
         load_blob_storage_config_from_dict(config.blob_storage.model_dump())
         load_agents_api_config_from_dict(config.agents_api.model_dump())
+        load_persistent_bot_config_from_dict(config.persistent_bot.model_dump())
         load_subagents_config_from_dict(config.subagents.model_dump())
         load_tool_search_config_from_dict(config.tool_search.model_dump())
         load_guardrails_config_from_dict(config.guardrails.model_dump())

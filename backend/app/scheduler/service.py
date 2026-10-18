@@ -5,6 +5,7 @@ import hashlib
 import logging
 import socket
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -21,6 +22,7 @@ from deerflow.persistence.scheduled_task_runs import ActiveScheduledRunConflict,
 from deerflow.persistence.scheduled_task_runs.finalization import LIFECYCLE_EVENTS, RUN_EVENT_BY_STATUS, lifecycle_anchor, lifecycle_reason
 from deerflow.persistence.scheduled_task_runs.model import ScheduledTaskRunRow
 from deerflow.persistence.scheduled_task_runs.sql import run_number_expression
+from deerflow.persistence.scheduled_tasks.model import DEFAULT_NOTIFY_POLICY, normalize_notify_policy
 from deerflow.persistence.thread_meta.model import ThreadMetaRow
 from deerflow.persistence.user.model import UserPreferenceRow
 from deerflow.runtime import ConflictError, RunRecord
@@ -184,6 +186,13 @@ def _notice_payload(task, occurrence, event: str, reason: str | None, *, locale:
     stop_condition = getattr(task, "stop_condition", None)
     if event == "task_stopped" and isinstance(stop_condition, str) and stop_condition.strip():
         payload["stop_condition"] = stop_condition
+    # Notify policy rides the payload only when it changes rendering, so
+    # default-policy rows keep the exact v2 shape they had before.
+    notify_policy = normalize_notify_policy(getattr(task, "notify_policy", None))
+    if notify_policy != DEFAULT_NOTIFY_POLICY:
+        payload["notify_policy"] = notify_policy
+    if getattr(task, "notify_quiet", False) is True:
+        payload["notify_quiet"] = True
     if event == "task_finished":
         payload["max_runs"] = _int_or_none(getattr(task, "max_runs", None))
     return payload
@@ -198,6 +207,12 @@ TASK_CHANGED_ERROR = "scheduled task changed before trigger admission"
 _RESTART_RECOVERY_ERROR = RUN_ERROR_RESTARTED
 _LEASE_RECOVERY_ERROR = RUN_ERROR_LEASE_LOST
 _QUEUE_TIMEOUT_ERROR = RUN_ERROR_QUEUE_TIMEOUT
+# Occurrence ``error`` values for arbitration skips. These are deliberately
+# not host notes (``deerflow.scheduler.host_notes``): a skip is routine
+# yielding, not a lifecycle event the tasks page translates.
+SKIPPED_THREAD_BUSY_ERROR = "skipped: execution thread has an active run"
+SKIPPED_STALE_ERROR = "skipped: queued occurrence exceeded its stale-drop deadline"
+SKIPPED_BUDGET_ERROR = "skipped: daily run budget reached"
 
 
 class ScheduledTaskService:
@@ -217,6 +232,7 @@ class ScheduledTaskService:
         connection_repo=None,
         notification_repo=None,
         own_stop_available: bool | None = None,
+        thread_busy_check: Callable[[str], Awaitable[bool]] | None = None,
     ) -> None:
         self._task_repo = task_repo
         self._task_run_repo = task_run_repo
@@ -246,6 +262,15 @@ class ScheduledTaskService:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._skip_next_lease_reconciliation = False
+        # Optional probe: does this thread already have an active run? When
+        # set, a scheduled reuse-thread occurrence yields to that run
+        # (skip or stay queued per overlap_policy) instead of spending a
+        # launch attempt on the 409 path. None keeps the legacy behavior.
+        self._thread_busy_check = thread_busy_check
+        # Per-task arbitration registered after construction (the
+        # persistent-bot heartbeat): task_id -> {"stale_drop_seconds": int,
+        # "max_runs_per_day": int}. Empty by default = no arbitration.
+        self._task_arbitration: dict[str, dict[str, int]] = {}
         self._install_finalization_observers()
 
     async def _can_stop_itself(self) -> bool:
@@ -270,6 +295,35 @@ class ScheduledTaskService:
     def is_running(self) -> bool:
         """Whether this process's poller is running (automatic runs fire here)."""
         return self._task is not None and not self._task.done()
+
+    def set_thread_busy_check(self, check: Callable[[str], Awaitable[bool]] | None) -> None:
+        """Install (or clear) the active-run probe used by busy arbitration."""
+        self._thread_busy_check = check
+
+    def configure_task_arbitration(
+        self,
+        task_id: str,
+        *,
+        stale_drop_seconds: int | None = None,
+        max_runs_per_day: int | None = None,
+    ) -> None:
+        """Register stale-drop / daily-budget arbitration for one task.
+
+        ``stale_drop_seconds`` drops a queued scheduled occurrence that is
+        still waiting that long past its scheduled time.
+        ``max_runs_per_day`` (UTC days) skips due occurrences once that many
+        scheduled occurrences have launched today; ``0``/``None`` disables
+        the budget. Calling with both unset removes the registration.
+        """
+        entry: dict[str, int] = {}
+        if stale_drop_seconds is not None and stale_drop_seconds > 0:
+            entry["stale_drop_seconds"] = stale_drop_seconds
+        if max_runs_per_day is not None and max_runs_per_day > 0:
+            entry["max_runs_per_day"] = max_runs_per_day
+        if entry:
+            self._task_arbitration[task_id] = entry
+        else:
+            self._task_arbitration.pop(task_id, None)
 
     def _install_finalization_observers(self) -> None:
         # Always installed: chat events need no outbox. The IM step checks the
@@ -347,6 +401,12 @@ class ScheduledTaskService:
         without proactive push get no row. Plain manual trials reach here
         without run events and send nothing; interrupted runs have no event.
         """
+        # Per-task proactive policy: quiet mode and policy "none" enqueue
+        # nothing at all (no row, so nothing can be sent or retried later).
+        if getattr(task, "notify_quiet", False) is True:
+            return
+        if normalize_notify_policy(getattr(task, "notify_policy", None)) == "none":
+            return
         now = _event_time(task, occurrence)
         selected = _notice_event(task, occurrence, events, now=now)
         if selected is None:
@@ -507,6 +567,32 @@ class ScheduledTaskService:
                 "thread_id": execution_thread_id,
                 "error": str(exc),
             }
+        arbitration = self._task_arbitration.get(task["id"]) if trigger == "scheduled" else None
+        daily_budget = arbitration.get("max_runs_per_day") if arbitration else None
+        if daily_budget:
+            count_launched = getattr(self._task_run_repo, "count_launched_since", None)
+            if callable(count_launched):
+                reference = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
+                day_start = reference.replace(hour=0, minute=0, second=0, microsecond=0)
+                if await count_launched(task["id"], since=day_start) >= daily_budget:
+                    await self._task_repo.update_after_launch(
+                        task["id"],
+                        status="enabled" if task["schedule_type"] != "once" else (task.get("status") or "enabled"),
+                        next_run_at=next_run_at(task["schedule_type"], task["schedule_spec"], task["timezone"], now=now),
+                        last_run_at=now,
+                        last_run_id=None,
+                        last_thread_id=execution_thread_id,
+                        last_error=None,
+                        increment_run_count=False,
+                        expected_lease_owner=expected_lease_owner,
+                    )
+                    return {
+                        "outcome": "skipped",
+                        "task_run_id": None,
+                        "run_id": None,
+                        "thread_id": execution_thread_id,
+                        "error": SKIPPED_BUDGET_ERROR,
+                    }
         active = await self._task_run_repo.get_active_run(task["id"])
         if active is not None:
             if trigger == "scheduled":
@@ -613,6 +699,23 @@ class ScheduledTaskService:
         if claimed is None:
             return self._queued_result(task_run_id, execution_thread_id)
 
+        # User-preempts: an arbitration-registered occurrence that reuses a
+        # thread never launches over an interactive run already on that
+        # thread. When a busy probe is installed, yield before spending a
+        # launch attempt; without one, the launch's own 409 takes the same
+        # path below. Tasks without a registered arbitration entry keep
+        # their pre-existing launch/conflict behavior untouched.
+        if trigger == "scheduled" and task["id"] in self._task_arbitration and task.get("context_mode") == "reuse_thread" and self._thread_busy_check is not None:
+            try:
+                thread_busy = await self._thread_busy_check(execution_thread_id)
+            except Exception:
+                # A broken probe must not wedge the scheduler; fall through
+                # to the launch attempt, whose conflict path still yields.
+                logger.warning("Scheduled task-run %s: thread busy check failed", task_run_id, exc_info=True)
+                thread_busy = False
+            if thread_busy:
+                return await self._yield_to_busy_thread(task, task_run_id, execution_thread_id, error=SKIPPED_THREAD_BUSY_ERROR, now=now)
+
         # Track whether _launch_run has produced a live run. A bookkeeping
         # failure after launch must retain the non-terminal slot so a later
         # poll cannot start the same occurrence twice.
@@ -686,6 +789,12 @@ class ScheduledTaskService:
             }
         except Exception as exc:
             if not launch_succeeded and self._is_overlap_conflict(exc):
+                # Skip-drop on conflict is arbitration behavior: only tasks
+                # registered via configure_task_arbitration yield here.
+                # Every other task keeps the historical requeue below, bot
+                # enabled or not.
+                if trigger == "scheduled" and task["id"] in self._task_arbitration and task.get("overlap_policy") == "skip":
+                    return await self._yield_to_busy_thread(task, task_run_id, execution_thread_id, error=SKIPPED_THREAD_BUSY_ERROR, now=now)
                 await self._task_run_repo.requeue_claimed_run(
                     task_run_id,
                     lease_owner=self._lease_owner,
@@ -897,6 +1006,56 @@ class ScheduledTaskService:
             "existing": existing,
         }
 
+    @staticmethod
+    def _skipped_result(
+        task_run_id: str,
+        thread_id: str,
+        *,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "outcome": "skipped",
+            "task_run_id": task_run_id,
+            "run_id": None,
+            "thread_id": thread_id,
+            "error": error,
+        }
+
+    async def _yield_to_busy_thread(
+        self,
+        task: dict[str, Any],
+        task_run_id: str,
+        thread_id: str,
+        *,
+        error: str,
+        now: datetime,
+    ) -> dict[str, Any]:
+        """Resolve a claimed occurrence whose execution thread is busy.
+
+        ``overlap_policy="skip"`` finalizes the occurrence as ``skipped``
+        (the interactive run wins and the next tick starts fresh); any
+        other policy keeps the durable queue row so the occurrence retries
+        once the thread frees — at most one such row can exist per task,
+        so enqueued heartbeats coalesce instead of piling up. A repository
+        without the skip primitive (test doubles) degrades to requeue.
+        """
+        if task.get("overlap_policy") == "skip":
+            skip_claimed = getattr(self._task_run_repo, "skip_claimed_run", None)
+            if callable(skip_claimed) and await skip_claimed(
+                task_run_id,
+                task_id=task["id"],
+                lease_owner=self._lease_owner,
+                error=error,
+                now=now,
+            ):
+                return self._skipped_result(task_run_id, thread_id, error=error)
+        await self._task_run_repo.requeue_claimed_run(
+            task_run_id,
+            lease_owner=self._lease_owner,
+            error=error,
+        )
+        return self._queued_result(task_run_id, thread_id, error=error)
+
     async def _drain_queue(self, *, now: datetime) -> None:
         queued_rows = await self._task_run_repo.list_queued_runs(
             limit=max(16, self._max_concurrent_runs * 4),
@@ -925,6 +1084,26 @@ class ScheduledTaskService:
                     finished_at=now,
                 )
                 continue
+            # Stale-drop: a queued heartbeat that waited past its deadline
+            # is dropped as skipped instead of launched late; the parent's
+            # next tick stays the fresh occurrence.
+            arbitration = self._task_arbitration.get(queued["task_id"])
+            stale_drop = arbitration.get("stale_drop_seconds") if arbitration and queued.get("trigger") == "scheduled" else None
+            if stale_drop:
+                scheduled_for = _as_utc(queued.get("scheduled_for")) or _as_utc(queued.get("created_at"))
+                reference = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
+                if scheduled_for is not None and (reference - scheduled_for).total_seconds() > stale_drop:
+                    skip_queued = getattr(self._task_run_repo, "skip_queued_run", None)
+                    if callable(skip_queued):
+                        await skip_queued(queued["id"], error=SKIPPED_STALE_ERROR, now=now)
+                    else:
+                        await self._task_run_repo.update_status(
+                            queued["id"],
+                            status="skipped",
+                            error=SKIPPED_STALE_ERROR,
+                            finished_at=now,
+                        )
+                    continue
             await self._attempt_queued_run(task, queued, now=now)
 
     async def _expire_waiting_runs(self, *, now: datetime) -> None:

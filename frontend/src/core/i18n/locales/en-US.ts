@@ -615,6 +615,11 @@ export const enUS: Translations = {
     cliSessions: "CLI sessions",
     usage: "Usage",
     agentsDisabledTooltip: "Feature not enabled",
+    pinnedAssistant: "Assistant",
+    pinnedAssistantNewActivity: "New activity from your assistant",
+    pinnedAssistantPause: "Pause assistant",
+    pinnedAssistantResume: "Resume assistant",
+    pinnedAssistantPaused: "Paused",
   },
 
   // Knowledge scope for custom-agent chat
@@ -1401,6 +1406,11 @@ export const enUS: Translations = {
         "A run is waiting to start. Pause the task to cancel it, then try again.",
       taskChanged: "This task just changed. Refresh and try again.",
       taskFinished: "This task has finished, so it can't be paused.",
+      taskManaged:
+        "This task is managed by the persistent bot. Pause or resume it from the pinned assistant instead.",
+      invalidNotifyPolicy:
+        "Notification policy must be none, summary, or content.",
+      invalidNotifyQuiet: "Quiet mode must be on or off.",
       taskQuotaExceeded:
         "You already have {limit} active tasks created in chats, paused ones included. Delete some to create more.",
       schedulerNotRunning:

@@ -21,6 +21,15 @@ observer): ``task_title``, ``locale`` (``None`` = the configured default),
 ``relied_on_assumption`` (present only when a goal was met), ``stop_condition``
 (``task_stopped``) and ``max_runs`` (``task_finished``). Rows written before
 version 2 render with the same templates.
+
+Content egress: a payload may carry ``notify_policy`` (present only when it
+differs from the ``summary`` default) and ``notify_quiet`` (present only when
+true). With policy ``content`` *and* the worker's content-egress gate on
+(``channel_connections.proactive_content_enabled``, off by default), the
+notice is the run's redacted output itself — title line plus the scrubbed,
+length-capped reply — instead of the canned template. Every other case
+(policy absent/``summary``, gate off, no resolvable reply) renders the
+template exactly as before.
 """
 
 from __future__ import annotations
@@ -52,8 +61,28 @@ _EGRESS_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
-    re.compile(r"(?im)\b(token|password|passwd|api[_-]?key|secret|credential)s?\b\s*[:=]\s*[\"']?([^\"'\s#]+)"),
+    # JWTs (header.payload.signature, base64url; headers start with eyJ).
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b"),
 )
+# ``name=value`` / ``name: value`` assignments. The name class is matched by
+# meaning, not one spelling: long forms ("access token", "api key",
+# "client secret", "private key") and separator variants are the same
+# protected values as their short codes, so they redact too. Quoted keys
+# (``"api_key": "…"`` in JSON) and prefixed/suffixed env names
+# (``DB_PASSWORD=…``, ``aws_secret_access_key=…``) are the same protected
+# values under other spellings, so the keyword may sit inside a longer
+# snake/kebab name and inside quotes.
+_EGRESS_ASSIGNMENT_PATTERN = re.compile(
+    r"(?im)[\"']?((?:[A-Za-z0-9]+[ _-])*(?:access[ _-]?token|auth(?:orization)?[ _-]?token|api[ _-]?key|client[ _-]?secret|private[ _-]?key|"
+    r"token|password|passwd|passphrase|secret|credentials?)(?:[ _-][A-Za-z0-9]+)*)[\"']?\s*[:=]\s*[\"']?([^\"'\s#&,}]+)"
+)
+# Credential headers. Authorization carries one token (optionally after a
+# scheme word), so only that token is scrubbed and any following text on
+# the line survives; a cookie header's whole value is credential material.
+_EGRESS_AUTHORIZATION_PATTERN = re.compile(r"(?i)\b(Authorization)(\s*:\s*)(Bearer\s+)?[^\s;]+")
+_EGRESS_HEADER_PATTERN = re.compile(r"(?im)^(Cookie|Set-Cookie|X-Api-Key)(\s*:\s*)\S.*$")
+_EGRESS_BEARER_PATTERN = re.compile(r"(?i)\b(Bearer)\s+[A-Za-z0-9._~+/=-]{8,}")
+_EGRESS_URL_SECRET_PATTERN = re.compile(r"(?i)([?&](?:access[_-]?token|api[_-]?key|token|key|secret|signature|sig|password)=)[^&\s\"']+")
 
 
 def redact_egress_text(text: str) -> str:
@@ -62,10 +91,14 @@ def redact_egress_text(text: str) -> str:
         return text
     redacted = text
     for pattern in _EGRESS_SECRET_PATTERNS:
-        if pattern.groups:
-            redacted = pattern.sub(lambda match: f"{match.group(1)}={_EGRESS_REDACTION}", redacted)
-        else:
-            redacted = pattern.sub(_EGRESS_REDACTION, redacted)
+        redacted = pattern.sub(_EGRESS_REDACTION, redacted)
+    # URL query secrets first: the assignment pass below would otherwise
+    # swallow the rest of the query string as one "value".
+    redacted = _EGRESS_URL_SECRET_PATTERN.sub(lambda match: f"{match.group(1)}{_EGRESS_REDACTION}", redacted)
+    redacted = _EGRESS_AUTHORIZATION_PATTERN.sub(lambda match: f"{match.group(1)}{match.group(2)}{match.group(3) or ''}{_EGRESS_REDACTION}", redacted)
+    redacted = _EGRESS_HEADER_PATTERN.sub(lambda match: f"{match.group(1)}{match.group(2)}{_EGRESS_REDACTION}", redacted)
+    redacted = _EGRESS_ASSIGNMENT_PATTERN.sub(lambda match: f"{match.group(1)}={_EGRESS_REDACTION}", redacted)
+    redacted = _EGRESS_BEARER_PATTERN.sub(lambda match: f"{match.group(1)} {_EGRESS_REDACTION}", redacted)
     return redacted
 
 
@@ -192,6 +225,25 @@ def wants_result_summary(delivery: dict[str, Any]) -> bool:
     return bool(delivery.get("run_id")) and delivery.get("event") in _SUMMARY_EVENTS and _run_status(delivery) in _SUMMARY_RUN_STATUSES
 
 
+#: Default cap for redacted run-output egress (worker passes the configured one).
+DEFAULT_CONTENT_MAX_CHARS = 4000
+
+
+def notify_policy_of(delivery: dict[str, Any]) -> str:
+    """The payload's notify policy; absent/invalid reads as the template default."""
+    policy = _payload(delivery).get("notify_policy")
+    return policy if policy in ("none", "summary", "content") else "summary"
+
+
+def wants_run_content(delivery: dict[str, Any]) -> bool:
+    """Whether this row asks for redacted run-output egress (policy ``content``).
+
+    Same eligibility as the result line: only a run that replied (success or
+    unmet) on a notice-carrying event has output worth pushing.
+    """
+    return notify_policy_of(delivery) == "content" and wants_result_summary(delivery)
+
+
 def resolve_locale(delivery: dict[str, Any], default_locale: str = DEFAULT_NOTIFICATION_LOCALE) -> str:
     """The row's locale (the owner's UI language), else the configured default."""
     locale = _payload(delivery).get("locale")
@@ -297,17 +349,42 @@ def _what_happened(delivery: dict[str, Any], locale: str) -> str:
     return text["sentence_gap"].join(parts)
 
 
-def render_notification_text(delivery: dict[str, Any], *, default_locale: str = DEFAULT_NOTIFICATION_LOCALE) -> str:
+def _redacted_content(reply: str, *, max_chars: int) -> str:
+    """The run output scrubbed as a whole, then capped (redact before truncating)."""
+    body = redact_egress_text(reply).strip()
+    if len(body) > max_chars:
+        body = body[: max_chars - 1].rstrip() + "…"
+    return body
+
+
+def render_notification_text(
+    delivery: dict[str, Any],
+    *,
+    default_locale: str = DEFAULT_NOTIFICATION_LOCALE,
+    content_enabled: bool = False,
+    content_max_chars: int = DEFAULT_CONTENT_MAX_CHARS,
+) -> str:
     """Render one self-contained notice: title, what happened, result, where to look.
 
     ``payload["result_summary"]`` is the run's final reply, attached by the
     delivery worker at send time; it is redacted as a whole (so a multi-line
     secret is gone before a line is taken) and reduced to the tasks page's
     one-line run summary.
+
+    With ``content_enabled`` and a ``content`` notify policy, the notice is
+    instead the title line plus the redacted run output itself (capped at
+    ``content_max_chars``). No reply, or a reply that scrubs to nothing,
+    falls back to the template.
     """
     locale = resolve_locale(delivery, default_locale)
     text = _TEXT[locale]
     payload = _payload(delivery)
+    if content_enabled and wants_run_content(delivery):
+        reply = payload.get("result_summary")
+        if isinstance(reply, str):
+            body = _redacted_content(reply, max_chars=max(1, content_max_chars))
+            if body:
+                return f"{text['title'].format(title=_title(payload, locale))}\n{body}"
     lines = [text["title"].format(title=_title(payload, locale)), _what_happened(delivery, locale)]
     reply = payload.get("result_summary")
     if wants_result_summary(delivery) and isinstance(reply, str):

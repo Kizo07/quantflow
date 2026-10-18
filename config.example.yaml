@@ -20,7 +20,7 @@
 # ============================================================================
 # Bump this number when the config schema changes.
 # Run `make config-upgrade` to merge new fields into your local config.yaml.
-config_version: 59
+config_version: 60
 
 # Optional operator-owned literal prompt extensions (see CONFIGURATION.md):
 # lead_prompt_overlay:
@@ -2891,6 +2891,49 @@ scheduler:
   recursion_limit: 1000
 
 # ============================================================================
+# Persistent Bot Configuration
+# ============================================================================
+# An always-on assistant that lives in one pinned conversation. When enabled,
+# the Gateway seeds (and repairs at every startup) a dedicated custom agent,
+# a pinned thread, a DB-backed singleton record, and one interval heartbeat
+# scheduled task that reuses that thread. The bot agent is seeded with an
+# explicit mcp_plugins: [] so it never silently inherits every MCP plugin.
+# All fields are restart-required (captured during Gateway lifespan startup,
+# after the scheduler starts). Startup fails closed while enabled if the
+# scheduler is off, the database backend is memory, or the seed fails.
+# Disabled (the default) creates nothing and changes no behavior.
+# This block is the source of truth for the bot: on every startup the seed
+# re-applies it (agent model/tool_groups/skills/allowed_subagents,
+# heartbeat prompt/schedule/notify fields), so editing those through other
+# surfaces does not stick. The heartbeat task is hidden from the Scheduled
+# tasks page and cannot be edited there; pause/resume the bot from the
+# pinned assistant in the sidebar (or POST /api/persistent-bot/pause).
+# Setting enabled=false after the bot ran pauses its heartbeat at startup.
+# Proactive IM notices (notify_policy) only reach providers with a push
+# send — currently WeCom only; other bound channels still work inbound.
+#
+# persistent_bot:
+#   enabled: false               # Master switch; requires scheduler.enabled=true
+#   agent_name: persistent-bot   # Custom-agent name (letters, digits, hyphens)
+#   owner_user_id: default       # Owner of the agent/thread/task ("default" in no-auth mode)
+#   thread_title: Persistent Bot # Display title of the pinned thread
+#   heartbeat_interval_seconds: 1800  # Heartbeat cadence; hard floor 300s
+#   heartbeat_timezone: UTC
+#   heartbeat_prompt: "Heartbeat check-in: review this conversation for anything that needs attention or a follow-up. If there is nothing actionable, reply briefly that there is nothing to report."
+#   overlap_policy: skip         # skip = drop a heartbeat while the thread is busy; enqueue = keep one queued occurrence and retry
+#   queued_stale_drop_seconds: 900    # Drop queued heartbeats older than this past their scheduled time
+#   max_heartbeat_runs_per_day: 96    # Launched-heartbeat budget per UTC day; 0 = no budget
+#   model: null                  # Optional model pinned on the bot agent
+#   tool_groups: null            # Tool policy: null = inherit all, [] = none, or an allowlist
+#   skills: null                 # Skills: null = inherit all enabled, [] = none, or an allowlist
+#   allowed_subagents: null      # Subagents: null = inherit all enabled, [] = none, or an allowlist
+#   notify_policy: none          # Heartbeat IM notices: none | summary | content (content also needs channel_connections.proactive_content_enabled)
+#   notify_quiet: false          # Quiet mode: suppress heartbeat IM notices entirely
+#   soul_text: null              # Optional SOUL.md seed; an existing SOUL.md is never overwritten
+persistent_bot:
+  enabled: false
+
+# ============================================================================
 # Long-running MCP Tasks Configuration
 # ============================================================================
 # Durable runtime for ordinary MCP submit/status/cancel task toolsets. It is
@@ -3040,6 +3083,10 @@ run_ownership:
 #   # Language of scheduled-task IM notices (en-US or zh-CN) for owners without
 #   # a web UI language preference (e.g. auth disabled). Restart-required.
 #   notification_locale: en-US
+#   # Redacted run-output egress: tasks with notify_policy=content push their
+#   # secret-scrubbed run output instead of the summary template. Restart-required.
+#   proactive_content_enabled: false
+#   proactive_content_max_chars: 4000
 #
 #   telegram:
 #     enabled: false

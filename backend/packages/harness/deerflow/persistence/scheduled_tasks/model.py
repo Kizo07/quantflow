@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Integer, String, Text, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from deerflow.persistence.base import Base
@@ -31,6 +31,12 @@ class ScheduledTaskRow(Base):
     timezone: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16), default="enabled", index=True)
     overlap_policy: Mapped[str] = mapped_column(String(16), default="enqueue")
+    # Proactive IM notice policy: "none" sends nothing, "summary" sends the
+    # canned template with a one-line result, "content" sends the redacted
+    # run output (only while channel_connections.proactive_content_enabled).
+    notify_policy: Mapped[str] = mapped_column(String(16), default="summary", server_default="summary")
+    # Quiet mode suppresses proactive IM notices entirely, whatever the policy.
+    notify_quiet: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True, nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -49,6 +55,16 @@ class ScheduledTaskRow(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+#: Accepted ``notify_policy`` values; anything else reads as the default.
+NOTIFY_POLICIES: frozenset[str] = frozenset({"none", "summary", "content"})
+DEFAULT_NOTIFY_POLICY = "summary"
+
+
+def normalize_notify_policy(value: object) -> str:
+    """The stored policy when valid, else the template default (never raises)."""
+    return value if isinstance(value, str) and value in NOTIFY_POLICIES else DEFAULT_NOTIFY_POLICY
 
 
 class ScheduledTaskRunStatus(StrEnum):

@@ -112,7 +112,10 @@ import {
   MessageTokenUsageList,
 } from "./message-token-usage";
 import { RunActivity, RunDuration } from "./run-duration";
-import { ScheduledRunPrompt } from "./scheduled-run-prompt";
+import {
+  ScheduledOriginDivider,
+  ScheduledRunPrompt,
+} from "./scheduled-run-prompt";
 import { ScheduledTaskCard } from "./scheduled-task-card";
 import { ScheduledTaskEventLine } from "./scheduled-task-event-line";
 import { MessageListSkeleton } from "./skeleton";
@@ -1248,7 +1251,10 @@ export function MessageList({
                 return withRunDuration(
                   group,
                   groupIndex,
-                  <ScheduledRunPrompt origin={group.scheduledOrigin} />,
+                  <div className="flex w-full flex-col gap-3">
+                    <ScheduledOriginDivider origin={group.scheduledOrigin} />
+                    <ScheduledRunPrompt origin={group.scheduledOrigin} />
+                  </div>,
                 );
               }
               if (group.type === "human" || group.type === "assistant") {

@@ -14,7 +14,7 @@ from deerflow.persistence.run.model import RunRow
 from deerflow.persistence.scheduled_task_runs.finalization import FinalizationObserver, automatic_runs_used, end_condition_reached, finalize_occurrence, finish_task_at_end_condition, is_host_pause_marker, utc
 from deerflow.persistence.scheduled_task_runs.model import ScheduledTaskRunRow
 from deerflow.persistence.scheduled_task_runs.projection import account_launch, can_project
-from deerflow.persistence.scheduled_tasks.model import ACTIVE_RUN_STATUSES, LIVE_TASK_STATUSES, ONCE_TASK_STATUS_BY_RUN_STATUS, TERMINAL_RUN_STATUSES, TERMINAL_TASK_STATUSES, ScheduledTaskRow
+from deerflow.persistence.scheduled_tasks.model import ACTIVE_RUN_STATUSES, DEFAULT_NOTIFY_POLICY, LIVE_TASK_STATUSES, NOTIFY_POLICIES, ONCE_TASK_STATUS_BY_RUN_STATUS, TERMINAL_RUN_STATUSES, TERMINAL_TASK_STATUSES, ScheduledTaskRow
 from deerflow.scheduler.host_notes import RUN_ERROR_END_REACHED
 from deerflow.utils.goal_objective import normalize_goal_objective
 from deerflow.utils.time import coerce_iso
@@ -149,6 +149,9 @@ class ScheduledTaskRepository:
         end_at: datetime | str | None = None,
         standing_notes: list[str] | None = None,
         stop_condition: str | None = None,
+        overlap_policy: str = "enqueue",
+        notify_policy: str = DEFAULT_NOTIFY_POLICY,
+        notify_quiet: bool = False,
     ) -> dict[str, Any]:
         if goal_objective is not None:
             normalize_goal_objective(goal_objective)
@@ -158,6 +161,12 @@ class ScheduledTaskRepository:
             raise ValueError("max_runs must be a positive integer")
         if standing_notes is not None and (len(standing_notes) > 10 or any(not isinstance(note, str) or not note.strip() or len(note) > 500 for note in standing_notes)):
             raise ValueError("standing notes allow at most 10 nonempty notes of 500 characters")
+        if overlap_policy not in ("enqueue", "skip"):
+            raise ValueError("overlap_policy must be 'enqueue' or 'skip'")
+        if notify_policy not in NOTIFY_POLICIES:
+            raise ValueError("notify_policy must be 'none', 'summary' or 'content'")
+        if not isinstance(notify_quiet, bool):
+            raise ValueError("notify_quiet must be a boolean")
         now = datetime.now(UTC)
         row = ScheduledTaskRow(
             id=task_id,
@@ -176,6 +185,9 @@ class ScheduledTaskRepository:
             schedule_type=schedule_type,
             schedule_spec=schedule_spec,
             timezone=timezone,
+            overlap_policy=overlap_policy,
+            notify_policy=notify_policy,
+            notify_quiet=notify_quiet,
             next_run_at=next_run_at,
             created_at=now,
             updated_at=now,
@@ -353,6 +365,10 @@ class ScheduledTaskRepository:
     ) -> dict[str, Any] | None:
         if updates.get("goal_objective") is not None:
             normalize_goal_objective(updates["goal_objective"])
+        if "notify_policy" in updates and updates["notify_policy"] not in NOTIFY_POLICIES:
+            raise ValueError("notify_policy must be 'none', 'summary' or 'content'")
+        if "notify_quiet" in updates and not isinstance(updates["notify_quiet"], bool):
+            raise ValueError("notify_quiet must be a boolean")
         async with self._sf() as session:
             quota_transition = False
             if updates.get("status") in LIVE_TASK_STATUSES:

@@ -41,6 +41,51 @@ function originTimeZone(origin: ScheduledOrigin): string {
 }
 
 /**
+ * Divider ahead of a scheduled launch inside a thread: a rule with the run
+ * kind and its time, so an automatic turn (e.g. a persistent-bot heartbeat
+ * in its pinned thread) reads as a separate episode from the conversation
+ * around it. Driven purely by the message-level
+ * `deerflow_scheduled_origin` the launch already carries; styled with the
+ * shared border/muted tokens, no extra palette.
+ */
+export function ScheduledOriginDivider({
+  origin,
+  className,
+}: {
+  origin: ScheduledOrigin;
+  className?: string;
+}) {
+  const { t, locale } = useI18n();
+  const st = t.scheduledTasks;
+  const rt = st.runThread;
+  const kind = origin.trigger === "manual" ? rt.trialRun : rt.scheduledRun;
+  const when = origin.scheduled_for
+    ? formatWithViewerTime(origin.scheduled_for, originTimeZone(origin), {
+        locale,
+        labels: st.time,
+      })
+    : "";
+  const label = when ? `${kind} · ${when}` : kind;
+
+  return (
+    <div
+      role="separator"
+      aria-label={label}
+      data-testid="scheduled-origin-divider"
+      data-task-id={origin.task_id}
+      className={cn("flex w-full items-center gap-3", className)}
+    >
+      <span aria-hidden className="bg-border h-px flex-1" />
+      <span className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
+        <CalendarClock className="size-3.5 shrink-0" aria-hidden />
+        {label}
+      </span>
+      <span aria-hidden className="bg-border h-px flex-1" />
+    </div>
+  );
+}
+
+/**
  * The automatic prompt of a scheduled or trial run (mockup m3): one header
  * line naming the task, the run and its time, and the task instructions in a
  * collapsed line. It renders the user-language parts from the launch origin,

@@ -25,7 +25,7 @@ OUTBOX = "0027_notification_deliveries"
 PARKED = "0028_parked_attempts"
 SCHEDULER = "0029_scheduler_agent_tasks"
 CLAIM_TOKENS = "0030_notification_claim_tokens"
-HEAD = "0040_merge_quantflow_upstream"
+HEAD = "0044_scheduled_task_notify_policy"
 PREVIOUS = "0026_mcp_task_lease_tokens"
 TABLE = "notification_deliveries"
 
@@ -35,7 +35,7 @@ async def test_0028_is_ancestor_of_the_chain_head():
     (head,) = script.get_heads()
     ancestors = {revision.revision for revision in script.walk_revisions()}
     assert PARKED in ancestors
-    assert head == "0040_merge_quantflow_upstream"
+    assert head == "0044_scheduled_task_notify_policy"
 
 
 async def test_outbox_revisions_chain_after_0026():

@@ -480,6 +480,11 @@ export interface Translations {
     usage: string;
     agentsDisabledTooltip: string;
     channels: string;
+    pinnedAssistant: string;
+    pinnedAssistantNewActivity: string;
+    pinnedAssistantPause: string;
+    pinnedAssistantResume: string;
+    pinnedAssistantPaused: string;
   };
   // Sidebar projects section
   projects: {
@@ -1185,6 +1190,9 @@ export interface Translations {
       runQueued: string;
       taskChanged: string;
       taskFinished: string;
+      taskManaged: string;
+      invalidNotifyPolicy: string;
+      invalidNotifyQuiet: string;
       taskQuotaExceeded: string;
       schedulerNotRunning: string;
       schedulerUnavailable: string;

@@ -13,6 +13,7 @@ from app.gateway.authz import require_permission
 from app.gateway.deps import (
     get_config,
     get_optional_user_from_request,
+    get_persistent_bot_repo,
     get_scheduled_task_event_repo,
     get_scheduled_task_repo,
     get_scheduled_task_run_repo,
@@ -83,6 +84,31 @@ async def resolve_scheduled_task_assistant_id(raw: str | None, *, user_id: str) 
     return normalized
 
 
+async def _bot_heartbeat_id(request: Request) -> str | None:
+    """The persistent bot's heartbeat task id, when a bot was seeded."""
+    bot_repo = get_persistent_bot_repo(request)
+    if bot_repo is None:
+        return None
+    try:
+        bot = await bot_repo.get()
+    except Exception:
+        return None
+    task_id = (bot or {}).get("heartbeat_task_id")
+    return task_id if isinstance(task_id, str) and task_id else None
+
+
+def _is_bot_managed(task_id: str, heartbeat_id: str | None) -> bool:
+    from deerflow.persistent_bot.service import HEARTBEAT_TASK_ID
+
+    return task_id == HEARTBEAT_TASK_ID and heartbeat_id is not None or task_id == heartbeat_id
+
+
+async def _ensure_not_bot_managed(request: Request, task_id: str) -> None:
+    """The heartbeat is system-managed: pause/resume via /api/persistent-bot."""
+    if _is_bot_managed(task_id, await _bot_heartbeat_id(request)):
+        raise scheduler_error(403, "task_managed", "This task is managed by the persistent bot; pause or resume it from the pinned assistant")
+
+
 async def _ensure_task_mutable(task: dict[str, Any], repo) -> None:
     if task.get("status") == "running":
         raise scheduler_error(409, "task_running", "Scheduled task is currently running; retry after the active execution finishes")
@@ -122,6 +148,9 @@ class ScheduledTaskCreateRequest(BaseModel):
     end_at: datetime | None = None
     # The user's "stop when ..." rule, stored in its own column.
     stop_condition: str | None = None
+    # Proactive IM notice policy (none|summary|content) and quiet mode.
+    notify_policy: str = "summary"
+    notify_quiet: bool = False
 
 
 class ScheduledTaskUpdateRequest(BaseModel):
@@ -139,6 +168,8 @@ class ScheduledTaskUpdateRequest(BaseModel):
     max_runs: int | bool | None = None
     end_at: datetime | None = None
     stop_condition: str | None = None
+    notify_policy: str | None = None
+    notify_quiet: bool | None = None
 
 
 class ScheduledTaskResumeRequest(BaseModel):
@@ -204,7 +235,9 @@ async def list_scheduled_tasks(request: Request):
     user = await get_optional_user_from_request(request)
     if user is None:
         return []
-    return await _with_run_state(repo, await repo.list_by_user(str(user.id)))
+    heartbeat_id = await _bot_heartbeat_id(request)
+    tasks = [task for task in await repo.list_by_user(str(user.id)) if not _is_bot_managed(task["id"], heartbeat_id)]
+    return await _with_run_state(repo, tasks)
 
 
 @router.post("/scheduled-tasks")
@@ -276,6 +309,7 @@ async def update_scheduled_task(task_id: str, request: Request, body: ScheduledT
     existing = await repo.get(task_id, user_id=str(user.id))
     if existing is None:
         raise _task_not_found()
+    await _ensure_not_bot_managed(request, task_id)
     await _ensure_task_mutable(existing, repo)
     used = (await repo.automatic_runs_used_for([task_id])).get(task_id, 0)
     fields = body.model_dump(exclude_unset=True)
@@ -315,6 +349,7 @@ async def pause_scheduled_task(task_id: str, request: Request):
     existing = await repo.get(task_id, user_id=str(user.id))
     if existing is None:
         raise _task_not_found()
+    await _ensure_not_bot_managed(request, task_id)
     if existing.get("status") == "running":
         raise scheduler_error(409, "task_running", "Scheduled task is currently running; retry after the active execution finishes")
     try:
@@ -355,6 +390,7 @@ async def resume_scheduled_task(task_id: str, request: Request, body: ScheduledT
     existing = await repo.get(task_id, user_id=str(user.id))
     if existing is None:
         raise _task_not_found()
+    await _ensure_not_bot_managed(request, task_id)
     await _ensure_task_mutable(existing, repo)
     if existing.get("status") == "enabled":
         return await _task_response(repo, existing)
@@ -388,6 +424,7 @@ async def trigger_scheduled_task(task_id: str, request: Request):
     task = await repo.get(task_id, user_id=str(user.id))
     if task is None:
         raise _task_not_found()
+    await _ensure_not_bot_managed(request, task_id)
     result = await service.dispatch_task(task, now=datetime.now(UTC), trigger="manual")
     outcome = result.get("outcome")
     if outcome == "not_found":
@@ -407,6 +444,7 @@ async def delete_scheduled_task(task_id: str, request: Request):
     user = await get_optional_user_from_request(request)
     if user is None:
         raise _authentication_required()
+    await _ensure_not_bot_managed(request, task_id)
     result = await repo.delete_with_queue_cancellation(
         task_id,
         user_id=str(user.id),
@@ -449,7 +487,9 @@ async def list_thread_scheduled_tasks(thread_id: ThreadId, request: Request):
     user = await get_optional_user_from_request(request)
     if user is None:
         raise _authentication_required()
-    return await _with_run_state(repo, await repo.list_by_user_and_thread(str(user.id), thread_id))
+    heartbeat_id = await _bot_heartbeat_id(request)
+    tasks = [task for task in await repo.list_by_user_and_thread(str(user.id), thread_id) if not _is_bot_managed(task["id"], heartbeat_id)]
+    return await _with_run_state(repo, tasks)
 
 
 @router.get("/threads/{thread_id}/scheduled-task-events")

@@ -32,6 +32,7 @@ import {
   SidecarProvider,
   SidecarTrigger,
 } from "@/components/workspace/sidecar";
+import { SlimComposer } from "@/components/workspace/slim-composer";
 import { ThreadArchiveStatus } from "@/components/workspace/thread-archive-status";
 import { ThreadBackgroundTasks } from "@/components/workspace/thread-background-tasks";
 import { ThreadExtensionActions } from "@/components/workspace/thread-extension-actions";
@@ -72,6 +73,7 @@ import {
   useThreadStream,
   useThreadTokenUsage,
 } from "@/core/threads/hooks";
+import { isPersistentBotThread } from "@/core/threads/persistent-bot";
 import {
   selectContextUsage,
   threadTokenUsageToTokenUsage,
@@ -112,6 +114,10 @@ export default function AgentChatPage() {
     enabled: !isNewThread && !isMock,
     isMock,
   });
+  // The persistent bot's singleton thread (Gateway-stamped metadata, only
+  // present when the deployment enabled the bot) gets the slim composer;
+  // every other agent chat keeps the full InputBox.
+  const isBotThread = isPersistentBotThread(threadMetadata.data);
   // A saved thread that exists on the server is being read while open:
   // clears its unread dot (sidebar and chats list) on every device.
   const markThreadRead = useMarkOpenThreadRead(threadId, {
@@ -257,15 +263,21 @@ export default function AgentChatPage() {
 
   const handleSubmit = useCallback(
     (message: PromptInputMessage, options?: InputBoxSubmitOptions) => {
+      // On the pinned bot thread a user message preempts a heartbeat run
+      // (interrupt) instead of being rejected while the heartbeat holds
+      // the thread; every other thread keeps the default strategy.
+      const withStrategy: InputBoxSubmitOptions | undefined = isBotThread
+        ? { ...options, multitaskStrategy: "interrupt" }
+        : options;
       const scopedOptions = currentKnowledgeScopeSnapshot
         ? {
-            ...options,
+            ...withStrategy,
             additionalKwargs: {
-              ...options?.additionalKwargs,
+              ...withStrategy?.additionalKwargs,
               [KNOWLEDGE_SCOPE_KEY]: currentKnowledgeScopeSnapshot,
             },
           }
-        : options;
+        : withStrategy;
       const sendPromise = sendMessage(
         threadId,
         message,
@@ -277,7 +289,13 @@ export default function AgentChatPage() {
       }
       void sendPromise;
     },
-    [currentKnowledgeScopeSnapshot, sendMessage, threadId, agent_name],
+    [
+      currentKnowledgeScopeSnapshot,
+      isBotThread,
+      sendMessage,
+      threadId,
+      agent_name,
+    ],
   );
 
   const handleSubmitHumanInput = useCallback(
@@ -534,71 +552,94 @@ export default function AgentChatPage() {
                     </div>
                   )}
 
-                  <InputBox
-                    className={cn(
-                      "bg-background/5 w-full",
-                      isWelcomeMode && "-translate-y-2 sm:-translate-y-4",
-                    )}
-                    isWelcomeMode={isWelcomeMode}
-                    threadId={threadId}
-                    projectId={
-                      !isNewThread && threadMetadata.data
-                        ? projectIdOfThread(threadMetadata.data)
-                        : null
-                    }
-                    draftThreadId={isNewThread ? "new" : threadId}
-                    draftAgentName={agent_name}
-                    agentSkillNames={agent?.skills}
-                    agentSkillsLoading={agentSkillsLoading}
-                    defaultModelName={agent?.model}
-                    knowledgeScopeControl={
-                      selectorVisible && knowledgeScope ? (
-                        <KnowledgeScopeSelector
-                          agentName={agent_name}
-                          disabled={thread.isLoading || isUploading}
-                          selection={knowledgeScope}
-                          unavailableReason={
-                            agentKnowledgeEnabled
-                              ? undefined
-                              : t.knowledge.scope.agentUnavailable
-                          }
-                          onChange={setKnowledgeScope}
-                        />
-                      ) : undefined
-                    }
-                    autoFocus={isWelcomeMode}
-                    status={
-                      thread.error
-                        ? "error"
-                        : thread.isLoading
-                          ? "streaming"
-                          : "ready"
-                    }
-                    context={settings.context}
-                    extraHeader={
-                      isWelcomeMode &&
-                      !hasGoal &&
-                      !hasTodos && (
-                        <AgentWelcome agent={agent} agentName={agent_name} />
-                      )
-                    }
-                    disabled={
-                      env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" ||
-                      isUploading ||
-                      (selectorVisible && agent === null) ||
-                      (!isNewThread && isHistoryLoading)
-                    }
-                    onContextChange={(context, options) => {
-                      if (options?.automatic)
-                        resolveThreadContext(threadId, context);
-                      else setSettings("context", context);
-                    }}
-                    onGoalChange={setLocalGoal}
-                    onSubmit={handleSubmit}
-                    onStop={handleStop}
-                    canStopStreaming={canStopStreaming}
-                    canCreateRuns={canCreateRuns}
-                  />
+                  {isBotThread ? (
+                    <SlimComposer
+                      className="bg-background/5 w-full"
+                      placeholder={t.inputBox.placeholder}
+                      status={
+                        thread.error
+                          ? "error"
+                          : thread.isLoading
+                            ? "streaming"
+                            : "ready"
+                      }
+                      disabled={
+                        env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" ||
+                        isUploading ||
+                        (!isNewThread && isHistoryLoading)
+                      }
+                      onSubmit={handleSubmit}
+                      onStop={handleStop}
+                      canStopStreaming={canStopStreaming}
+                      canCreateRuns={canCreateRuns}
+                    />
+                  ) : (
+                    <InputBox
+                      className={cn(
+                        "bg-background/5 w-full",
+                        isWelcomeMode && "-translate-y-2 sm:-translate-y-4",
+                      )}
+                      isWelcomeMode={isWelcomeMode}
+                      threadId={threadId}
+                      projectId={
+                        !isNewThread && threadMetadata.data
+                          ? projectIdOfThread(threadMetadata.data)
+                          : null
+                      }
+                      draftThreadId={isNewThread ? "new" : threadId}
+                      draftAgentName={agent_name}
+                      agentSkillNames={agent?.skills}
+                      agentSkillsLoading={agentSkillsLoading}
+                      defaultModelName={agent?.model}
+                      knowledgeScopeControl={
+                        selectorVisible && knowledgeScope ? (
+                          <KnowledgeScopeSelector
+                            agentName={agent_name}
+                            disabled={thread.isLoading || isUploading}
+                            selection={knowledgeScope}
+                            unavailableReason={
+                              agentKnowledgeEnabled
+                                ? undefined
+                                : t.knowledge.scope.agentUnavailable
+                            }
+                            onChange={setKnowledgeScope}
+                          />
+                        ) : undefined
+                      }
+                      autoFocus={isWelcomeMode}
+                      status={
+                        thread.error
+                          ? "error"
+                          : thread.isLoading
+                            ? "streaming"
+                            : "ready"
+                      }
+                      context={settings.context}
+                      extraHeader={
+                        isWelcomeMode &&
+                        !hasGoal &&
+                        !hasTodos && (
+                          <AgentWelcome agent={agent} agentName={agent_name} />
+                        )
+                      }
+                      disabled={
+                        env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" ||
+                        isUploading ||
+                        (selectorVisible && agent === null) ||
+                        (!isNewThread && isHistoryLoading)
+                      }
+                      onContextChange={(context, options) => {
+                        if (options?.automatic)
+                          resolveThreadContext(threadId, context);
+                        else setSettings("context", context);
+                      }}
+                      onGoalChange={setLocalGoal}
+                      onSubmit={handleSubmit}
+                      onStop={handleStop}
+                      canStopStreaming={canStopStreaming}
+                      canCreateRuns={canCreateRuns}
+                    />
+                  )}
                   {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" && (
                     <div className="text-muted-foreground/67 w-full translate-y-12 text-center text-xs">
                       {t.common.notAvailableInDemoMode}

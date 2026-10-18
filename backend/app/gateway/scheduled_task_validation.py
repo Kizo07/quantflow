@@ -20,6 +20,7 @@ from deerflow.utils.goal_objective import MAX_GOAL_OBJECTIVE_CHARS, normalize_go
 FREQUENT_THRESHOLD_SECONDS = 3600
 TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled"})
 CONTEXT_MODES = frozenset({"fresh_thread_per_run", "reuse_thread"})
+NOTIFY_POLICIES = frozenset({"none", "summary", "content"})
 SCHEDULE_TYPES = frozenset({"once", "cron", "interval"})
 # Fields a PATCH (or chat update) may clear by sending null.
 CLEARABLE_FIELDS = frozenset({"goal_objective", "max_runs", "end_at", "stop_condition"})
@@ -139,6 +140,16 @@ def _normalized_stop_condition(value: Any) -> str | None:
         raise scheduler_error(422, "invalid_stop_condition", str(exc), max_chars=MAX_STOP_CONDITION_CHARS) from exc
 
 
+def _validated_notify(body: Any) -> tuple[str, bool]:
+    policy = getattr(body, "notify_policy", "summary")
+    if policy not in NOTIFY_POLICIES:
+        raise scheduler_error(422, "invalid_notify_policy", "notify_policy must be 'none', 'summary' or 'content'")
+    quiet = getattr(body, "notify_quiet", False)
+    if not isinstance(quiet, bool):
+        raise scheduler_error(422, "invalid_notify_quiet", "notify_quiet must be a boolean")
+    return policy, quiet
+
+
 def _check_once_time(schedule_type: str, upcoming: datetime | None, *, scheduler_config: Any, now: datetime) -> None:
     if schedule_type != "once":
         return
@@ -198,6 +209,7 @@ async def validate_scheduled_task_create(
         raise scheduler_error(422, "invalid_schedule_type", "Unsupported schedule_type")
     schedule_spec, upcoming = await asyncio.to_thread(_validate_schedule, body.schedule_type, body.schedule_spec, body.timezone, scheduler_config=scheduler_config, now=reference)
     assistant_id = await assistant_resolver(body.assistant_id, user_id=user_id)
+    notify_policy, notify_quiet = _validated_notify(body)
     stop_condition = _normalized_stop_condition(getattr(body, "stop_condition", None))
     goal_objective = getattr(body, "goal_objective", None)
     max_runs = getattr(body, "max_runs", None)
@@ -227,6 +239,8 @@ async def validate_scheduled_task_create(
         "goal_objective": goal_objective,
         "max_runs": max_runs,
         "end_at": end_at,
+        "notify_policy": notify_policy,
+        "notify_quiet": notify_quiet,
     }
 
 
@@ -295,6 +309,10 @@ async def validate_scheduled_task_update(
         raise scheduler_error(422, "invalid_context_mode", "Unsupported context_mode")
     if "schedule_type" in updates and updates["schedule_type"] not in SCHEDULE_TYPES:
         raise scheduler_error(422, "invalid_schedule_type", "Unsupported schedule_type")
+    if "notify_policy" in updates and updates["notify_policy"] not in NOTIFY_POLICIES:
+        raise scheduler_error(422, "invalid_notify_policy", "notify_policy must be 'none', 'summary' or 'content'")
+    if "notify_quiet" in updates and not isinstance(updates["notify_quiet"], bool):
+        raise scheduler_error(422, "invalid_notify_quiet", "notify_quiet must be a boolean")
     effective_context_mode = str(updates.get("context_mode", existing["context_mode"]))
     effective_thread_id = updates.get("thread_id", existing.get("thread_id"))
     if effective_context_mode == "reuse_thread":

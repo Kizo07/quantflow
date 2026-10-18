@@ -1101,7 +1101,7 @@ function ToolCall({
         key={id}
         label={resolveLabel(scheduleToolLabel(name, args, result, t))}
         icon={stop ? CalendarX2Icon : CalendarClockIcon}
-        className={stop ? "text-sky-700 dark:text-sky-400" : undefined}
+        className={stop ? "text-primary" : undefined}
         data-testid={stop ? "scheduled-stop-step" : undefined}
       >
         {showDetails && (

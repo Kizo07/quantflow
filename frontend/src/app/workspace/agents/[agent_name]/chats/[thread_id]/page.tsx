@@ -553,9 +553,19 @@ export default function AgentChatPage() {
                   )}
 
                   {isBotThread ? (
-                    <SlimComposer
-                      className="bg-background/5 w-full"
-                      placeholder={t.inputBox.placeholder}
+                    <>
+                      {/* Bot welcome hero (C-4): the InputBox branch gets this
+                          via extraHeader; SlimComposer has no such slot. */}
+                      {isWelcomeMode && !hasGoal && !hasTodos && (
+                        <AgentWelcome
+                          agent={agent}
+                          agentName={agent_name}
+                        />
+                      )}
+                      <SlimComposer
+                        className="bg-background/5 w-full"
+                        isWelcomeMode={isWelcomeMode}
+                        placeholder={t.inputBox.placeholder}
                       status={
                         thread.error
                           ? "error"
@@ -572,7 +582,8 @@ export default function AgentChatPage() {
                       onStop={handleStop}
                       canStopStreaming={canStopStreaming}
                       canCreateRuns={canCreateRuns}
-                    />
+                      />
+                    </>
                   ) : (
                     <InputBox
                       className={cn(

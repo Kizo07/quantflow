@@ -109,9 +109,11 @@ export default function ChatsPage() {
                 </TabsTrigger>
               </TabsList>
             )}
+            {/* V-7b: autofocus kept (useful for a search-first page) but the
+                initial ring is softened to 1px so it doesn't shout. */}
             <Input
               type="search"
-              className="h-12 w-full max-w-(--container-width-md) text-xl"
+              className="h-12 w-full max-w-(--container-width-md) text-xl focus-visible:ring-1 focus-visible:ring-ring/30"
               placeholder={t.chats.searchChats}
               autoFocus
               value={search}

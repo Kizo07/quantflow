@@ -485,6 +485,7 @@ export interface Translations {
     pinnedAssistantPause: string;
     pinnedAssistantResume: string;
     pinnedAssistantPaused: string;
+    pinnedAssistantDisabledTooltip: string;
   };
   // Sidebar projects section
   projects: {
@@ -748,7 +749,8 @@ export interface Translations {
       effort: string;
       effortNone: string;
       contributorMode: string;
-      contributorUnset: string;
+      contributorInherit: string;
+      runOptions: string;
       approvalMode: string;
       approvalNone: string;
       sandboxNetwork: string;

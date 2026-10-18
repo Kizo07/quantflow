@@ -620,6 +620,8 @@ export const enUS: Translations = {
     pinnedAssistantPause: "Pause assistant",
     pinnedAssistantResume: "Resume assistant",
     pinnedAssistantPaused: "Paused",
+    pinnedAssistantDisabledTooltip:
+      "Assistant is not enabled — no session yet",
   },
 
   // Knowledge scope for custom-agent chat
@@ -909,7 +911,8 @@ export const enUS: Translations = {
       effort: "Reasoning effort",
       effortNone: "None (CLI default)",
       contributorMode: "Contributor mode",
-      contributorUnset: "Unset",
+      contributorInherit: "inherit",
+      runOptions: "Run options",
       approvalMode: "Approval mode",
       approvalNone: "None (CLI default)",
       sandboxNetwork: "Sandbox network",

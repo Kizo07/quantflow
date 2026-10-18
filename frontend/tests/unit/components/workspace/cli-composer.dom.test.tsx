@@ -191,6 +191,9 @@ describe("CliLaunchComposer", () => {
     const onStarted = rs.fn();
     renderComposer(<CliLaunchComposer onStarted={onStarted} />);
     await screen.findByTestId("cli-preset-badge");
+    // Selects, toggles, and the sandbox field live behind the
+    // default-closed Run options disclosure (V-3).
+    fireEvent.click(screen.getByTestId("cli-run-options"));
 
     fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
     fireEvent.click(await screen.findByRole("option", { name: "Custom…" }));

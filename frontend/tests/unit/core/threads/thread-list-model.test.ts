@@ -101,4 +101,24 @@ describe("thread list model", () => {
     const pages = [[thread("a", "2026-01-01T00:00:00.000Z")]];
     expect(buildThreadListModel(pages)).toBe(buildThreadListModel(pages));
   });
+
+  it("hides bootstrap design threads from lists but keeps them addressable", () => {
+    const recent = thread("recent", "2026-01-03T00:00:00.000Z");
+    const stamped = {
+      ...thread("design", "2026-01-02T00:00:00.000Z"),
+      metadata: { deerflow_bootstrap: true },
+    };
+    const legacyFlag = {
+      ...thread("design-legacy", "2026-01-01T00:00:00.000Z"),
+      context: { is_bootstrap: true } as unknown as AgentThread["context"],
+    };
+
+    const model = buildThreadListModel([[recent, stamped, legacyFlag]]);
+
+    expect(model.displayedThreads).toEqual([recent]);
+    expect(model.archivedThreads).toEqual([]);
+    // Direct URLs into the design chat must keep resolving.
+    expect(model.byId.get("design")).toBe(stamped);
+    expect(model.byId.get("design-legacy")).toBe(legacyFlag);
+  });
 });

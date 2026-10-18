@@ -15,6 +15,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useI18n } from "@/core/i18n/hooks";
 import { useInfiniteThreads } from "@/core/threads/hooks";
 import {
@@ -88,7 +93,44 @@ export function PinnedAssistantSection() {
   }, [botThread, t.sidebar.pinnedAssistantNewActivity, unreadCount]);
 
   if (!botThread) {
-    return null;
+    // Disabled-with-tooltip row (P-1) instead of null: first-run users see
+    // that the Assistant exists but is not enabled yet. Same pattern as the
+    // Agents entry in workspace-nav-chat-list.
+    return (
+      <SidebarGroup>
+        <SidebarGroupLabel>{t.sidebar.pinnedAssistant}</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="block w-full cursor-not-allowed">
+                    <SidebarMenuButton
+                      className="text-muted-foreground/50"
+                      aria-disabled
+                      aria-describedby="pinned-assistant-disabled-reason"
+                      data-testid="pinned-assistant-disabled"
+                    >
+                      <BotIcon />
+                      <span>{t.sidebar.pinnedAssistant}</span>
+                    </SidebarMenuButton>
+                    <span
+                      id="pinned-assistant-disabled-reason"
+                      className="sr-only"
+                    >
+                      {t.sidebar.pinnedAssistantDisabledTooltip}
+                    </span>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {t.sidebar.pinnedAssistantDisabledTooltip}
+                </TooltipContent>
+              </Tooltip>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    );
   }
 
   const botPath = pathOfThread(botThread);
@@ -121,6 +163,7 @@ export function PinnedAssistantSection() {
               type="button"
               disabled={botStatus.isPending || setBotPaused.isPending}
               onClick={() => setBotPaused.mutate(!isPaused)}
+              aria-pressed={isPaused}
               data-testid="pinned-assistant-pause-toggle"
             >
               {isPaused ? <PlayIcon /> : <PauseIcon />}

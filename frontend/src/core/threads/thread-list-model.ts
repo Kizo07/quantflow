@@ -1,5 +1,10 @@
 import type { AgentThread } from "./types";
-import { isThreadArchived, isThreadPinned, sortPinnedThreads } from "./utils";
+import {
+  isThreadArchived,
+  isThreadBootstrap,
+  isThreadPinned,
+  sortPinnedThreads,
+} from "./utils";
 
 const MAX_VISIBLE_THREADS = 200;
 const modelCache = new WeakMap<object, ThreadListModel>();
@@ -33,8 +38,11 @@ export function buildThreadListModel(
   // list but expose them separately so an "Archived" section and deep links
   // into archived threads still work.
   const archivedThreads = sortedThreads.filter(isThreadArchived);
+  // Bootstrap design threads are never list content (B-2): same treatment as
+  // archived — out of displayedThreads, still in `threads`/`byId` so a direct
+  // URL into the design chat keeps resolving.
   const visibleThreads = sortedThreads.filter(
-    (thread) => !isThreadArchived(thread),
+    (thread) => !isThreadArchived(thread) && !isThreadBootstrap(thread),
   );
   const pinnedThreads = visibleThreads.filter(isThreadPinned);
   const recentThreads = visibleThreads

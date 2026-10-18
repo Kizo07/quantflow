@@ -126,6 +126,11 @@ function promptMessageFiles(message: PromptInputMessage) {
   );
 }
 
+/**
+ * Research sidecar: a docked parallel-conversation panel. Intentionally not a
+ * modal Sheet like the CLI Inspector (D-2) — sidecar threads are worked
+ * alongside the main transcript, not glanced at and dismissed.
+ */
 export function SidecarPanel({ className }: { className?: string }) {
   const { t } = useI18n();
   const { user } = useAuth();

@@ -21,6 +21,11 @@ export const THREAD_PROJECT_METADATA_KEY = "deerflow_project_id";
 // constant and the E2E mock-api constant.
 export const THREAD_IMPORTED_METADATA_KEY = "deerflow_imported";
 
+// Marks an agent-design ("bootstrap") thread from /workspace/agents/new
+// (B-2): stamped client-side at create time because `is_bootstrap` is run
+// request-config the server does not persist to thread metadata.
+export const THREAD_BOOTSTRAP_METADATA_KEY = "deerflow_bootstrap";
+
 export type ChannelThreadSource = {
   type: "im_channel";
   provider: string;
@@ -101,6 +106,27 @@ export function isThreadArchived(thread: Pick<AgentThread, "metadata">) {
 
 export function isThreadImported(thread: Pick<AgentThread, "metadata">) {
   return thread.metadata?.[THREAD_IMPORTED_METADATA_KEY] === true;
+}
+
+/**
+ * Whether a thread is an agent-design ("bootstrap") chat (B-2). Matches the
+ * client-stamped marker first, then the persisted context/metadata flag (in
+ * case a future server keeps it), then the bootstrap agent name. Design
+ * threads stay openable by direct URL but are hidden from chat lists.
+ */
+export function isThreadBootstrap(
+  thread: Pick<AgentThread, "metadata" | "context">,
+) {
+  if (thread.metadata?.[THREAD_BOOTSTRAP_METADATA_KEY] === true) {
+    return true;
+  }
+  if (
+    thread.metadata?.is_bootstrap === true ||
+    thread.context?.is_bootstrap === true
+  ) {
+    return true;
+  }
+  return agentNameOfThread(thread) === "bootstrap";
 }
 
 export function projectIdOfThread(

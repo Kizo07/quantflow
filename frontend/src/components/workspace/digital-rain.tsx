@@ -214,10 +214,15 @@ export function DigitalRain() {
 
   return (
     <>
+      {/* V-5: kept as ambiance, but calmed where text lives — the center
+          (message/composer column) mask drops to 0.12 and overall opacity to
+          20% so glyphs never read as noise behind prose. Still
+          pointer-events-none below dialogs/menus; shares z-30 with composer
+          containers by design (decor never intercepts). */}
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className="pointer-events-none fixed inset-0 z-30 h-full w-full [mask-image:linear-gradient(90deg,#000,rgba(0,0,0,0.5)_25%,rgba(0,0,0,0.3)_50%,rgba(0,0,0,0.5)_75%,#000)] opacity-30"
+        className="pointer-events-none fixed inset-0 z-30 h-full w-full [mask-image:linear-gradient(90deg,#000,rgba(0,0,0,0.4)_25%,rgba(0,0,0,0.12)_50%,rgba(0,0,0,0.4)_75%,#000)] opacity-20"
       />
       <button
         ref={toggleRef}

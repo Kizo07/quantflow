@@ -214,6 +214,13 @@ async function openWelcomeComposer() {
   await screen.findByTestId("cli-launch-composer");
 }
 
+// The launch selects/toggles live behind the default-closed Run options
+// disclosure (V-3); open it before touching Model/Provider/Effort or the
+// Contributor/Trust/Yolo switches.
+function openRunOptions() {
+  fireEvent.click(screen.getByTestId("cli-run-options"));
+}
+
 describe("CliSessionsPage", () => {
   it("renders chat-shaped: no H1/tabs/aside, research message list", async () => {
     const older = session({
@@ -239,7 +246,13 @@ describe("CliSessionsPage", () => {
 
     const list = await screen.findByTestId("cli-chat-messages");
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
-    expect(screen.queryByRole("radio")).toBeNull();
+    // No tab radios: the only radios are the header harness-mode toggle's.
+    const radios = screen.queryAllByRole("radio");
+    const toggle = screen.getByTestId("cli-mode-toggle");
+    expect(radios).toHaveLength(2);
+    for (const radio of radios) {
+      expect(toggle.contains(radio)).toBe(true);
+    }
     expect(screen.queryByTestId("cli-session-list")).toBeNull();
 
     // Newest session auto-selected: user pill + assistant text via MessageList.
@@ -381,6 +394,7 @@ describe("CliSessionsPage", () => {
   it("applies the 1.3 preset defaults and shows the preset badge", async () => {
     await openWelcomeComposer();
     await screen.findByTestId("cli-preset-badge");
+    openRunOptions();
     // Preset yolo default lands on the toggle (warning shows, never gates).
     const yoloSwitch = screen.getByRole("switch", { name: "Yolo mode" });
     await waitFor(() =>
@@ -392,6 +406,7 @@ describe("CliSessionsPage", () => {
     mocks.putPreset.mockResolvedValue(PRESET_13);
     await openWelcomeComposer();
     await screen.findByTestId("cli-preset-badge");
+    openRunOptions();
     const saveButton = screen.getByTestId("cli-save-preset");
     fireEvent.click(saveButton);
     await waitFor(() => expect(mocks.putPreset).toHaveBeenCalledTimes(1));
@@ -412,6 +427,7 @@ describe("CliSessionsPage", () => {
   it("lists capability models with the CLI default and custom hatch", async () => {
     await openWelcomeComposer();
     await screen.findByTestId("cli-preset-badge");
+    openRunOptions();
     fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
     await screen.findByRole("option", { name: "CLI default" });
     expect(
@@ -428,6 +444,7 @@ describe("CliSessionsPage", () => {
   it("offers only capability providers", async () => {
     await openWelcomeComposer();
     await screen.findByTestId("cli-preset-badge");
+    openRunOptions();
     fireEvent.click(screen.getByRole("combobox", { name: "Provider" }));
     await screen.findByRole("option", { name: "Meta (meta)" });
     expect(screen.queryByRole("option", { name: "echo" })).toBeNull();
@@ -437,6 +454,7 @@ describe("CliSessionsPage", () => {
   it("scopes effort tiers to the selected model", async () => {
     await openWelcomeComposer();
     await screen.findByTestId("cli-preset-badge");
+    openRunOptions();
     // The 1.3 preset lands effort on ultra, one of its advertised tiers.
     const effortBox = () =>
       screen.getByRole("combobox", { name: "Reasoning effort" });
@@ -494,6 +512,7 @@ describe("CliSessionsPage", () => {
     mocks.fetchCapabilities.mockRejectedValue(new Error("down"));
     await openWelcomeComposer();
     await screen.findByTestId("cli-capabilities-error");
+    openRunOptions();
     // CLI default + custom stay available; providers collapse to None only.
     fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
     await screen.findByRole("option", { name: "CLI default" });
@@ -513,5 +532,67 @@ describe("CliSessionsPage", () => {
     await screen.findByTestId("cli-chat-view");
     const link = screen.getByRole("link", { name: "Operator guide" });
     expect(link.getAttribute("href")).toBe("/workspace/cli-sessions/guide");
+  });
+
+  it("renders exactly one composer on the coding welcome branch", async () => {
+    await openWelcomeComposer();
+    expect(screen.getAllByTestId("cli-launch-composer")).toHaveLength(1);
+    expect(screen.queryByTestId("cli-send-composer")).toBeNull();
+    expect(screen.queryByTestId("cli-research-hint")).toBeNull();
+  });
+
+  it("offers the mode toggle as the research dead-end remedy", async () => {
+    mocks.mode = "research";
+    mocks.search = "new=1";
+    renderPage();
+    await screen.findByTestId("cli-research-hint");
+    // Research mode keeps the hint (no coding launcher under research), but
+    // the header toggle lets users switch modes in place (V-1).
+    expect(screen.queryByTestId("cli-launch-composer")).toBeNull();
+    const toggle = screen.getByTestId("cli-mode-toggle");
+    expect(
+      within(toggle).getByRole("radio", { name: "Research" }),
+    ).toBeDefined();
+    expect(within(toggle).getByRole("radio", { name: "Coding" })).toBeDefined();
+  });
+
+  it("keeps run options behind a default-closed disclosure", async () => {
+    await openWelcomeComposer();
+    // Visible surface: textarea + submit + starters, no option controls.
+    expect(
+      screen.getByPlaceholderText("What should the run do?"),
+    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Start run" })).toBeDefined();
+    expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: "Yolo mode" })).toBeNull();
+    fireEvent.click(screen.getByTestId("cli-run-options"));
+    expect(screen.getByRole("combobox", { name: "Model" })).toBeDefined();
+    expect(screen.getByRole("switch", { name: "Yolo mode" })).toBeDefined();
+  });
+
+  it("labels an unset contributor mode as inherited", async () => {
+    mocks.fetchPreset.mockResolvedValue({
+      ...PRESET_13,
+      contributor_mode: null,
+      yolo: false,
+    });
+    mocks.fetchSessions.mockResolvedValue([]);
+    renderPage();
+    await screen.findByTestId("cli-launch-composer");
+    openRunOptions();
+    expect(
+      screen.getByRole("switch", { name: "Contributor mode: inherit" }),
+    ).toBeDefined();
+  });
+
+  it("shows distinct title and action labels with no session selected", async () => {
+    mocks.fetchSessions.mockResolvedValue([]);
+    renderPage();
+    await screen.findByTestId("cli-launch-composer");
+    // V-7a: the header title reads "CLI sessions" while the action keeps
+    // "New session" — previously both rendered the same string.
+    const title = screen.getByText("CLI sessions");
+    expect(title.tagName).toBe("SPAN");
+    expect(screen.getByRole("button", { name: "New session" })).toBeDefined();
   });
 });

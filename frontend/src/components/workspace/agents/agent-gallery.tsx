@@ -1,7 +1,7 @@
 "use client";
 
 import { BotIcon, PlusIcon, UploadIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { type ChangeEvent, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -23,7 +23,6 @@ import { AgentCard } from "./agent-card";
 export function AgentGallery() {
   const { t } = useI18n();
   const { agents, isLoading } = useAgents();
-  const router = useRouter();
   const importAgent = useImportAgentPackage();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [packageDocument, setPackageDocument] = useState<unknown>(null);
@@ -71,9 +70,9 @@ export function AgentGallery() {
     }
   };
 
-  const handleNewAgent = () => {
-    router.push("/workspace/agents/new");
-  };
+  // B4 hardening: plain Links stay pre-hydration-safe, so a first click
+  // before hydration still navigates (no router.push dead click).
+  const newAgentHref = "/workspace/agents/new";
 
   return (
     <div className="flex size-full flex-col">
@@ -100,9 +99,11 @@ export function AgentGallery() {
             <UploadIcon className="mr-1.5 h-4 w-4" />
             {t.agents.importAgent}
           </Button>
-          <Button onClick={handleNewAgent}>
-            <PlusIcon className="mr-1.5 h-4 w-4" />
-            {t.agents.newAgent}
+          <Button asChild>
+            <Link href={newAgentHref}>
+              <PlusIcon className="mr-1.5 h-4 w-4" />
+              {t.agents.newAgent}
+            </Link>
           </Button>
         </div>
       </div>
@@ -124,9 +125,11 @@ export function AgentGallery() {
                 {t.agents.emptyDescription}
               </p>
             </div>
-            <Button variant="outline" className="mt-2" onClick={handleNewAgent}>
-              <PlusIcon className="mr-1.5 h-4 w-4" />
-              {t.agents.newAgent}
+            <Button variant="outline" className="mt-2" asChild>
+              <Link href={newAgentHref}>
+                <PlusIcon className="mr-1.5 h-4 w-4" />
+                {t.agents.newAgent}
+              </Link>
             </Button>
           </div>
         ) : (

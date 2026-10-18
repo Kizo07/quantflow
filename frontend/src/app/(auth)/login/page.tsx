@@ -189,6 +189,9 @@ export default function LoginPage() {
         // (#4063 gap 3): the backend message is not localized. Login-only:
         // sign-up keeps the backend message verbatim so a suspended
         // account's email cannot be probed through the register surface.
+        // (V-7c decision: the wordy "special-use or reserved name" copy can
+        // only be shortened gateway-side; mapping backend codes to local
+        // signup strings here would re-open that enumeration probe.)
         setError(
           isLogin && authError.code === "account_disabled"
             ? t.login.errors.account_disabled

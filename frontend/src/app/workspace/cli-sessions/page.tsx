@@ -13,6 +13,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { CliModeToggle } from "@/components/workspace/cli-mode-toggle";
 import {
   CliChatView,
   type CliRunStats,
@@ -26,7 +27,6 @@ import { useHarnessMode } from "@/core/cli-sessions/harness-mode";
 import { useCliChatMessages, useCliSessions } from "@/core/cli-sessions/hooks";
 import type { CliSession } from "@/core/cli-sessions/types";
 import { useI18n } from "@/core/i18n/hooks";
-import { cn } from "@/lib/utils";
 
 function sessionTime(session: CliSession): number {
   const value = session.started_at ?? session.created_at;
@@ -81,9 +81,11 @@ function CliHeaderTitle({ session }: { session: CliSession | null }) {
   const { t } = useI18n();
   const backfill = useCliChatMessages(session?.id);
   if (!session) {
+    // V-7a: the page title reads "CLI sessions" while the action button keeps
+    // "New session" — previously both rendered the same string.
     return (
       <span className="min-w-0 flex-1 truncate text-sm font-medium">
-        {t.cliSessions.newSession}
+        {t.cliSessions.title}
       </span>
     );
   }
@@ -218,6 +220,9 @@ export default function CliSessionsPage() {
             <CliHeaderTitle session={selectedSession} />
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {/* Mode toggle: without it, default research users land on an
+                input-less welcome with no in-page remedy (V-1). */}
+            <CliModeToggle />
             {mode === "coding" ? (
               <Button
                 type="button"
@@ -235,6 +240,9 @@ export default function CliSessionsPage() {
             {selectedSession && (
               <CliHeaderStats session={selectedSession} live={live} />
             )}
+            {/* D-2: the CLI Inspector is intentionally a modal Sheet, not the
+                research sidecar panel — a session inspector is transient
+                run metadata, not a parallel conversation surface. */}
             {selectedSession && (
               <Sheet open={inspectorOpen} onOpenChange={setInspectorOpen}>
                 <SheetTrigger asChild>
@@ -278,38 +286,32 @@ export default function CliSessionsPage() {
               />
             </div>
           ) : (
-            <>
-              <div className="flex min-h-0 flex-1 justify-center" />
-              <div className="absolute right-0 bottom-0 left-0 z-30 flex justify-center px-3 sm:px-4">
-                <div
-                  className={cn(
-                    "relative w-full max-w-(--container-width-sm)",
-                    "-translate-y-[calc(50vh-48px)] sm:-translate-y-[calc(50vh-96px)]",
-                  )}
-                >
-                  <Welcome />
-                  {mode === "coding" ? (
-                    <CliLaunchComposer
-                      isWelcomeMode
-                      onStarted={(session) => selectSession(session.id)}
-                      className="-translate-y-2 sm:-translate-y-4"
-                    />
-                  ) : (
-                    <>
-                      <p
-                        className="text-muted-foreground pb-2 text-center text-xs"
-                        data-testid="cli-research-hint"
-                      >
-                        {t.cliSessions.researchNewSessionHint}
-                      </p>
-                      <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
-                        {t.cliSessions.selectHint}
-                      </p>
-                    </>
-                  )}
-                </div>
+            // Normal flow with pt-12 like the selected-session branch: the
+            // old absolute+translate trick pushed the tall coding welcome
+            // under the h-12 header (V-2).
+            <div className="flex min-h-0 flex-1 justify-center overflow-y-auto px-3 pt-12 sm:px-4">
+              <div className="w-full max-w-(--container-width-sm)">
+                <Welcome />
+                {mode === "coding" ? (
+                  <CliLaunchComposer
+                    isWelcomeMode
+                    onStarted={(session) => selectSession(session.id)}
+                  />
+                ) : (
+                  <>
+                    <p
+                      className="text-muted-foreground pb-2 text-center text-xs"
+                      data-testid="cli-research-hint"
+                    >
+                      {t.cliSessions.researchNewSessionHint}
+                    </p>
+                    <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
+                      {t.cliSessions.selectHint}
+                    </p>
+                  </>
+                )}
               </div>
-            </>
+            </div>
           )}
         </main>
       </div>

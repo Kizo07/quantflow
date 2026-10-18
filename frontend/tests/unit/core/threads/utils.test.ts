@@ -5,12 +5,14 @@ import type { AgentThread } from "@/core/threads/types";
 import {
   channelSourceOfThread,
   isThreadArchived,
+  isThreadBootstrap,
   isThreadImported,
   isThreadPinned,
   pathOfThread,
   sortPinnedThreads,
   textOfMessage,
   THREAD_ARCHIVED_METADATA_KEY,
+  THREAD_BOOTSTRAP_METADATA_KEY,
   THREAD_IMPORTED_METADATA_KEY,
   THREAD_PINNED_METADATA_KEY,
   titleOfThread,
@@ -269,6 +271,35 @@ test("textOfMessage returns null when array content has no text", () => {
   } as unknown as Message;
 
   expect(textOfMessage(message)).toBeNull();
+});
+
+test("matches bootstrap design threads by marker, flag, or agent name", () => {
+  expect(
+    isThreadBootstrap(
+      makeThread("stamped", { [THREAD_BOOTSTRAP_METADATA_KEY]: true }),
+    ),
+  ).toBe(true);
+  expect(
+    isThreadBootstrap(makeThread("meta-flag", { is_bootstrap: true })),
+  ).toBe(true);
+  expect(
+    isThreadBootstrap({
+      ...makeThread("ctx-flag"),
+      context: { is_bootstrap: true },
+    } as unknown as AgentThread),
+  ).toBe(true);
+  expect(
+    isThreadBootstrap({
+      ...makeThread("agent"),
+      context: { agent_name: "bootstrap" },
+    } as unknown as AgentThread),
+  ).toBe(true);
+  expect(
+    isThreadBootstrap(
+      makeThread("false", { [THREAD_BOOTSTRAP_METADATA_KEY]: false }),
+    ),
+  ).toBe(false);
+  expect(isThreadBootstrap(makeThread("missing"))).toBe(false);
 });
 
 test("titleOfThread falls back to the given label for an untitled thread", () => {

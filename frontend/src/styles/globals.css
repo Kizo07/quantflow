@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Token source of truth (T-2): `km-*` is the landing-page theme
+   (`app/page.tsx`, `components/landing/**`) — landing-scoped, not legacy.
+   Chat/workspace TSX stays on the shadcn tokens below (`--background`,
+   `--primary`, ...) plus the fixed decorative ledger palette in `@theme`
+   (T-1). Do not adopt `km-*` in chat components. */
+
 @source "../../node_modules/streamdown/dist/index.js";
 @source "../../node_modules/@streamdown/code/dist/*.js";
 @source "../../node_modules/@streamdown/mermaid/dist/*.js";
@@ -105,6 +111,18 @@
   --color-km-gold: #b57d2e;
   --color-km-gold-bright: #cf9440;
   --color-km-line: rgba(17, 93, 133, 0.17);
+
+  /* Fixed decorative ledger palette (T-1): identical in both modes, so
+     tokenizing preserves exact appearance. Gold stays decorative-only
+     (≤2.9:1 contrast, never body text). */
+  --color-gold-soft: #f1d59c;
+  --color-gold-pale: #ecc374;
+  --color-gold: #e3ac55;
+  --color-gold-deep: #cf9440;
+  --color-gold-dark: #b57d2e;
+  --color-ledger-cyan: #08bfff;
+  --color-ledger-cyan-bright: #36ceff;
+  --color-ledger-cyan-soft: #6bdbff;
 
   --animate-fade-in: fade-in 1.1s;
   @keyframes fade-in {
@@ -391,16 +409,16 @@ html.dark .shiki span {
     top: 0;
     background: linear-gradient(
       45deg,
-      #08bfff,
-      #e3ac55,
-      #36ceff,
-      #cf9440,
-      #6bdbff,
-      #08bfff,
-      #e3ac55,
-      #36ceff,
-      #cf9440,
-      #6bdbff
+      var(--color-ledger-cyan),
+      var(--color-gold),
+      var(--color-ledger-cyan-bright),
+      var(--color-gold-deep),
+      var(--color-ledger-cyan-soft),
+      var(--color-ledger-cyan),
+      var(--color-gold),
+      var(--color-ledger-cyan-bright),
+      var(--color-gold-deep),
+      var(--color-ledger-cyan-soft)
     );
     background-size: 400%;
     width: 100%;
@@ -443,7 +461,12 @@ html.dark .shiki span {
   }
 
   .golden-text {
-    background: linear-gradient(135deg, #b57d2e 0%, #ecc374 50%, #e3ac55 100%);
+    background: linear-gradient(
+      135deg,
+      var(--color-gold-dark) 0%,
+      var(--color-gold-pale) 50%,
+      var(--color-gold) 100%
+    );
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;

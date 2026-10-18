@@ -581,6 +581,7 @@ export const zhCN: Translations = {
     pinnedAssistantPause: "暂停助手",
     pinnedAssistantResume: "恢复助手",
     pinnedAssistantPaused: "已暂停",
+    pinnedAssistantDisabledTooltip: "助手尚未启用——暂无会话",
   },
 
   // 自定义智能体聊天中的知识库范围
@@ -850,7 +851,8 @@ export const zhCN: Translations = {
       effort: "推理强度",
       effortNone: "无（CLI 默认）",
       contributorMode: "贡献者模式",
-      contributorUnset: "未设置",
+      contributorInherit: "继承",
+      runOptions: "运行选项",
       approvalMode: "审批模式",
       approvalNone: "无（CLI 默认）",
       sandboxNetwork: "沙箱网络",

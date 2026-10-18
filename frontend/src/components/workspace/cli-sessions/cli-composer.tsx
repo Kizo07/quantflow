@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -13,6 +14,11 @@ import {
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -198,6 +204,7 @@ export function CliLaunchComposer({
   const [presetApplied, setPresetApplied] = useState(false);
   const [presetSaved, setPresetSaved] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [optionsOpen, setOptionsOpen] = useState(false);
 
   const capabilitiesQuery = useCliCapabilities();
   const capabilities: CliCapabilities | null = capabilitiesQuery.data ?? null;
@@ -343,94 +350,132 @@ export function CliLaunchComposer({
           onChange={(event) => setPrompt(event.target.value)}
         />
         <PromptInputFooter className="flex flex-wrap gap-2">
-          <PromptInputTools className="min-w-0 flex-1 flex-wrap gap-x-3 gap-y-2">
-            <CliFooterSelect
-              label={st.model}
-              value={modelChoice}
-              onChange={handleModelChoice}
-              options={[
-                { value: NONE_VALUE, label: st.modelCliDefault },
-                ...(capabilities?.models ?? []).map((entry) => ({
-                  value: entry.id,
-                  label: capabilityLabel(entry.id, entry.label),
-                })),
-                { value: CUSTOM_MODEL_VALUE, label: st.modelCustom },
-              ]}
-            />
-            <CliFooterSelect
-              label={st.effort}
-              value={effort}
-              onChange={setEffort}
-              options={[
-                { value: NONE_VALUE, label: st.effortNone },
-                ...effortTiers.map((value) => ({ value, label: value })),
-              ]}
-            />
-            <CliFooterSelect
-              label={st.provider}
-              value={provider}
-              onChange={setProvider}
-              options={[
-                { value: NONE_VALUE, label: st.providerNone },
-                ...(capabilities?.providers ?? []).map((entry) => ({
-                  value: entry.id,
-                  label: capabilityLabel(entry.id, entry.label),
-                })),
-              ]}
-            />
-            <CliFooterSelect
-              label={st.approvalMode}
-              value={approvalMode}
-              onChange={setApprovalMode}
-              options={[
-                { value: NONE_VALUE, label: st.approvalNone },
-                ...CLI_APPROVAL_MODES.map((value) => ({
-                  value,
-                  label: value,
-                })),
-              ]}
-            />
-            <span className="inline-flex min-w-0 items-center gap-1">
-              {contributorMode !== null && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={() => setContributorMode(null)}
-                >
-                  {st.contributorUnset}
-                </Button>
-              )}
-              <CliFooterToggle
-                label={
-                  contributorMode === null
-                    ? `${st.contributorMode} (${st.contributorUnset})`
-                    : st.contributorMode
-                }
-                checked={contributorMode === true}
-                onChange={(checked) => setContributorMode(checked)}
-              />
-            </span>
-            <CliFooterToggle
-              label={st.trustWorkspace}
-              checked={trustWorkspace}
-              onChange={setTrustWorkspace}
-            />
-            <CliFooterToggle
-              label={st.yolo}
-              checked={yolo}
-              onChange={setYolo}
-            />
-            <PromptInputSubmit
-              aria-label={st.startRun}
-              className="rounded-full"
-              variant="outline"
-              disabled={!canSubmit}
-              status={launch.isPending ? "submitted" : undefined}
-            />
-          </PromptInputTools>
+          <PromptInputTools />
+          <PromptInputSubmit
+            aria-label={st.startRun}
+            className="rounded-full"
+            variant="outline"
+            disabled={!canSubmit}
+            status={launch.isPending ? "submitted" : undefined}
+          />
         </PromptInputFooter>
+        {/* Run options live behind a default-closed disclosure so the
+            visible surface stays textarea + submit + disclaimer + starters
+            (V-3); the sandbox field moved in here from below the card. */}
+        <Collapsible
+          open={optionsOpen}
+          onOpenChange={setOptionsOpen}
+          className="border-t"
+        >
+          <CollapsibleTrigger
+            data-testid="cli-run-options"
+            className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1 px-3 py-2 text-xs transition-colors"
+          >
+            <ChevronDown
+              className={cn(
+                "size-3.5 transition-transform",
+                optionsOpen && "rotate-180",
+              )}
+            />
+            {st.runOptions}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="flex flex-wrap gap-x-3 gap-y-2 px-3 pb-1">
+              <CliFooterSelect
+                label={st.model}
+                value={modelChoice}
+                onChange={handleModelChoice}
+                options={[
+                  { value: NONE_VALUE, label: st.modelCliDefault },
+                  ...(capabilities?.models ?? []).map((entry) => ({
+                    value: entry.id,
+                    label: capabilityLabel(entry.id, entry.label),
+                  })),
+                  { value: CUSTOM_MODEL_VALUE, label: st.modelCustom },
+                ]}
+              />
+              <CliFooterSelect
+                label={st.effort}
+                value={effort}
+                onChange={setEffort}
+                options={[
+                  { value: NONE_VALUE, label: st.effortNone },
+                  ...effortTiers.map((value) => ({ value, label: value })),
+                ]}
+              />
+              <CliFooterSelect
+                label={st.provider}
+                value={provider}
+                onChange={setProvider}
+                options={[
+                  { value: NONE_VALUE, label: st.providerNone },
+                  ...(capabilities?.providers ?? []).map((entry) => ({
+                    value: entry.id,
+                    label: capabilityLabel(entry.id, entry.label),
+                  })),
+                ]}
+              />
+              <CliFooterSelect
+                label={st.approvalMode}
+                value={approvalMode}
+                onChange={setApprovalMode}
+                options={[
+                  { value: NONE_VALUE, label: st.approvalNone },
+                  ...CLI_APPROVAL_MODES.map((value) => ({
+                    value,
+                    label: value,
+                  })),
+                ]}
+              />
+              <span className="inline-flex min-w-0 items-center gap-1">
+                {contributorMode !== null && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setContributorMode(null)}
+                  >
+                    {st.contributorInherit}
+                  </Button>
+                )}
+                <CliFooterToggle
+                  label={
+                    contributorMode === null
+                      ? `${st.contributorMode}: ${st.contributorInherit}`
+                      : st.contributorMode
+                  }
+                  checked={contributorMode === true}
+                  onChange={(checked) => setContributorMode(checked)}
+                />
+              </span>
+              <CliFooterToggle
+                label={st.trustWorkspace}
+                checked={trustWorkspace}
+                onChange={setTrustWorkspace}
+              />
+              <CliFooterToggle
+                label={st.yolo}
+                checked={yolo}
+                onChange={setYolo}
+              />
+            </div>
+            <div className="px-3 pt-1 pb-3">
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="text-muted-foreground font-medium">
+                  {st.sandboxNetwork}
+                </span>
+                <Input
+                  aria-label={st.sandboxNetwork}
+                  placeholder={st.sandboxNetworkPlaceholder}
+                  value={sandboxNetwork}
+                  onChange={(event) => setSandboxNetwork(event.target.value)}
+                  className="h-8 text-xs"
+                />
+              </label>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </PromptInput>
 
       {modelChoice === CUSTOM_MODEL_VALUE && (
@@ -444,21 +489,6 @@ export function CliLaunchComposer({
           />
         </label>
       )}
-
-      <div className="flex flex-col gap-1.5 pt-2">
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground font-medium">
-            {st.sandboxNetwork}
-          </span>
-          <Input
-            aria-label={st.sandboxNetwork}
-            placeholder={st.sandboxNetworkPlaceholder}
-            value={sandboxNetwork}
-            onChange={(event) => setSandboxNetwork(event.target.value)}
-            className="h-8 text-xs"
-          />
-        </label>
-      </div>
 
       {capabilitiesQuery.isError && (
         <div className="pt-2">

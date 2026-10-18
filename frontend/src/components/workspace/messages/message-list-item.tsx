@@ -253,7 +253,9 @@ export function MessageListItem({
               ? "absolute right-0 -bottom-9 left-0 justify-end"
               : "absolute right-0 bottom-0 left-0",
             // focus-within: a keyboard user tabbing to a button sees it.
-            "z-20 opacity-0 transition-opacity delay-200 duration-300 group-hover/conversation-message:opacity-100 focus-within:opacity-100",
+            // Visible by default on touch (no hover there); hover-reveal only
+            // on sm+ screens, mirroring the assistant-turn toolbar (X-1/A1).
+            "z-20 opacity-100 transition-opacity delay-200 duration-300 focus-within:opacity-100 sm:opacity-0 sm:group-hover/conversation-message:opacity-100",
           )}
           data-testid="message-toolbar"
         >

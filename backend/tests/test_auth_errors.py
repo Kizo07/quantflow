@@ -73,3 +73,31 @@ def test_decode_token_returns_payload_on_valid():
     result = decode_token(token)
     assert not isinstance(result, TokenError)
     assert result.sub == "user-123"
+
+
+# ── Concise email validation copy (V-7c) ────────────────────────────
+
+
+def test_register_rejects_invalid_email_with_concise_copy():
+    """Reserved/special-use domains fail with the short signup message."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.gateway.routers.auth import RegisterRequest
+
+    with pytest.raises(ValidationError) as exc_info:
+        RegisterRequest(email="x@test.local", password="LongEnough123!", remember_me=True)
+    error = exc_info.value.errors()[0]
+    assert error["msg"] == "Enter a valid email address."
+    # The frontend ErrorDetailSchema only accepts the value_error shape.
+    assert error["type"] == "value_error"
+
+
+def test_register_normalizes_valid_email_like_emailstr():
+    """Valid addresses keep EmailStr normalization (domain lowercased)."""
+    from app.gateway.routers.auth import RegisterRequest
+
+    assert (
+        RegisterRequest(email="User@Example.COM", password="LongEnough123!", remember_me=True).email
+        == "User@example.com"
+    )

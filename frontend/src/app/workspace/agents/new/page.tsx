@@ -193,16 +193,22 @@ export default function NewAgentPage() {
       },
       { agent_name: trimmed },
     );
-    // Stamp the bootstrap marker (B-2): the first send created the thread
-    // server-side, so the design chat can now be hidden from chat lists.
-    // Best-effort — the list filter also matches the persisted context flag
-    // and the bootstrap agent name if this PATCH fails.
-    try {
-      await patchThreadMetadata(threadId, {
-        [THREAD_BOOTSTRAP_METADATA_KEY]: true,
-      });
-    } catch {
-      // The design chat still works; it may show up in chat lists.
+    // Stamp the bootstrap marker (B-2) so the design chat hides from chat
+    // lists. sendMessage resolves before the server thread row exists, so a
+    // single PATCH races creation (404, verified live) — retry until the
+    // row settles. Best-effort: the design chat still works unstamped.
+    for (const delay of [0, ...AGENT_READ_RETRY_DELAYS_MS]) {
+      if (delay > 0) {
+        await wait(delay);
+      }
+      try {
+        await patchThreadMetadata(threadId, {
+          [THREAD_BOOTSTRAP_METADATA_KEY]: true,
+        });
+        break;
+      } catch {
+        // Retry until the thread exists or the attempts are exhausted.
+      }
     }
   }, [
     nameInput,

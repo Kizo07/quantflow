@@ -10,6 +10,7 @@ import {
   MESSAGE_LIST_DEFAULT_PADDING_BOTTOM,
   MessageList,
 } from "@/components/workspace/messages";
+import { MessageListSkeleton } from "@/components/workspace/messages/skeleton";
 import { mergeCliChatMessages } from "@/core/cli-sessions/chat";
 import {
   useCliChatMessages,
@@ -94,7 +95,6 @@ export function CliChatView({
 }) {
   const { t } = useI18n();
   const ct = t.cliSessions.chat;
-  const st = t.cliSessions.detail;
   const backfill = useCliChatMessages(session.id);
   const stop = useStopCliSession();
 
@@ -184,13 +184,22 @@ export function CliChatView({
     >
       <div className="flex min-h-0 flex-1 justify-center">
         {backfill.isPending ? (
-          <p role="status" className="text-muted-foreground p-4 text-sm">
-            {ct.loading}
-          </p>
+          <div
+            role="status"
+            aria-label={ct.loading}
+            className="flex min-h-0 flex-1 justify-center"
+          >
+            <MessageListSkeleton />
+          </div>
         ) : backfill.isError ? (
-          <p role="alert" className="text-destructive p-4 text-sm">
-            {t.cliSessions.errors.chatLoadFailed}
-          </p>
+          <div className="flex min-h-0 flex-1 items-start justify-center">
+            <p
+              role="alert"
+              className="text-destructive mx-auto w-full max-w-(--container-width-md) p-4 text-center text-sm"
+            >
+              {t.cliSessions.errors.chatLoadFailed}
+            </p>
+          </div>
         ) : visibleMessages.length === 0 && !streaming ? (
           <ConversationEmptyState
             role="status"
@@ -204,7 +213,7 @@ export function CliChatView({
               <p
                 role="note"
                 data-testid="cli-chat-truncated"
-                className="text-muted-foreground px-4 pt-2 text-xs"
+                className="text-muted-foreground mx-auto w-full max-w-(--container-width-md) px-4 pt-2 text-center text-xs"
               >
                 {ct.truncated}
               </p>
@@ -252,18 +261,6 @@ export function CliChatView({
             {ct.reconnect}
           </Button>
         )}
-        {streaming && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={handleStop}
-            disabled={stop.isPending}
-          >
-            {stop.isPending ? st.stopping : st.stop}
-          </Button>
-        )}
       </div>
       {stopError && (
         <p role="alert" className="text-destructive px-3 pb-1 text-sm sm:px-4">
@@ -277,6 +274,8 @@ export function CliChatView({
           session={session}
           streaming={streaming}
           onSent={handleSent}
+          onStop={handleStop}
+          stopping={stop.isPending}
           className="max-w-(--container-width-md)"
         />
       </div>

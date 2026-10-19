@@ -27,6 +27,7 @@ import { threadOriginOf } from "@/core/threads/origin";
 import { buildThreadListModel } from "@/core/threads/thread-list-model";
 import {
   channelSourceOfThread,
+  isThreadBootstrap,
   pathOfThread,
   titleOfThread,
 } from "@/core/threads/utils";
@@ -53,6 +54,13 @@ export default function ChatsPage() {
     [infiniteThreads?.pages],
   );
   const { threads } = threadListModel;
+  // B-2: bootstrap design threads are never list content. (displayedThreads
+  // can't be used here: it also strips archived threads, which this page
+  // lists on its Archived tab.)
+  const listedThreads = useMemo(
+    () => threads.filter((thread) => !isThreadBootstrap(thread)),
+    [threads],
+  );
   const [search, setSearch] = useState("");
   const isSearching = search.trim().length > 0;
 
@@ -61,12 +69,12 @@ export default function ChatsPage() {
   }, [t.pages.chats, t.pages.appName]);
 
   const filteredThreads = useMemo(() => {
-    return threads.filter((thread) => {
+    return listedThreads.filter((thread) => {
       return titleOfThread(thread, t.pages.untitled)
         .toLowerCase()
         .includes(search.toLowerCase());
     });
-  }, [threads, search, t.pages.untitled]);
+  }, [listedThreads, search, t.pages.untitled]);
 
   // Sentinel-based auto load-more for the unfiltered list (issue #3482).
   // In search mode we deliberately do NOT auto-paginate, otherwise an empty
@@ -113,7 +121,7 @@ export default function ChatsPage() {
                 initial ring is softened to 1px so it doesn't shout. */}
             <Input
               type="search"
-              className="h-12 w-full max-w-(--container-width-md) text-xl focus-visible:ring-1 focus-visible:ring-ring/30"
+              className="focus-visible:ring-ring/30 h-12 w-full max-w-(--container-width-md) text-xl focus-visible:ring-1"
               placeholder={t.chats.searchChats}
               autoFocus
               value={search}

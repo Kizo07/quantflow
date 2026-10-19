@@ -141,7 +141,12 @@ describe("CliSendComposer", () => {
     mocks.sendChat.mockResolvedValue(session({ id: "session-bbb" }));
     const onSent = rs.fn();
     renderComposer(
-      <CliSendComposer session={session()} streaming={false} onSent={onSent} />,
+      <CliSendComposer
+        session={session()}
+        streaming={false}
+        onSent={onSent}
+        onStop={rs.fn()}
+      />,
     );
     await screen.findByTestId("cli-send-composer");
 
@@ -165,23 +170,46 @@ describe("CliSendComposer", () => {
     expect(onSent).toHaveBeenCalledWith("session-bbb", "next step");
   });
 
-  it("warns when yolo is effective and blocks sends while streaming", async () => {
+  it("warns when yolo is effective and morphs submit into stop while streaming", async () => {
+    const onStop = rs.fn();
     renderComposer(
       <CliSendComposer
         session={session({ yolo: true })}
         streaming={true}
         onSent={rs.fn()}
+        onStop={onStop}
       />,
     );
     await screen.findByTestId("cli-yolo-warning");
     fireEvent.change(screen.getByPlaceholderText("Follow-up prompt…"), {
       target: { value: "next step" },
     });
-    expect(screen.getByRole("button", { name: "Send" })).toHaveProperty(
+    // C-1: the submit affordance is the stop button while streaming — it
+    // stays enabled and never queues a second send.
+    const stopButton = screen.getByRole("button", { name: "Stop" });
+    expect(stopButton).toHaveProperty("disabled", false);
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    fireEvent.click(stopButton);
+    await waitFor(() => expect(onStop).toHaveBeenCalledTimes(1));
+    expect(mocks.sendChat).not.toHaveBeenCalled();
+    expect(screen.getByText(/still active/)).toBeDefined();
+  });
+
+  it("disables the stop state while a stop is in flight", async () => {
+    renderComposer(
+      <CliSendComposer
+        session={session()}
+        streaming={true}
+        onSent={rs.fn()}
+        onStop={rs.fn()}
+        stopping={true}
+      />,
+    );
+    await screen.findByTestId("cli-send-composer");
+    expect(screen.getByRole("button", { name: "Stopping…" })).toHaveProperty(
       "disabled",
       true,
     );
-    expect(screen.getByText(/still active/)).toBeDefined();
   });
 });
 

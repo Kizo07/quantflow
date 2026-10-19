@@ -45,7 +45,11 @@ import { useInfiniteThreads } from "@/core/threads/hooks";
 import { flattenThreadBranches } from "@/core/threads/thread-branch-tree";
 import { buildThreadListModel } from "@/core/threads/thread-list-model";
 import type { AgentThread } from "@/core/threads/types";
-import { pathOfThread, projectIdOfThread } from "@/core/threads/utils";
+import {
+  isThreadBootstrap,
+  pathOfThread,
+  projectIdOfThread,
+} from "@/core/threads/utils";
 import { env } from "@/env";
 import { isIMEComposing } from "@/lib/ime";
 
@@ -167,7 +171,10 @@ function GroupedProjectList() {
   );
   // Same value flat mode passes to `ThreadSidebarItem` — the global most-recent
   // thread, NOT the capped displayedThreads or any group-local first entry.
-  const globalRecentThreadId = threadListModel.threads[0]?.thread_id;
+  // Skips bootstrap design threads (B-2): they are never list content.
+  const globalRecentThreadId = threadListModel.threads.find(
+    (thread) => !isThreadBootstrap(thread),
+  )?.thread_id;
   // Mirror `RecentChatList`'s active-thread exception: the path-active thread
   // is appended even when it falls beyond the unpinned display cap, so it
   // must join the partition input too — otherwise an active assigned chat

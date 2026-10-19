@@ -9,9 +9,11 @@ import time
 import urllib.parse
 from ipaddress import ip_address, ip_network
 
+from email_validator import EmailNotValidError, validate_email
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
+from pydantic_core import PydanticCustomError
 from starlette.responses import RedirectResponse
 
 from app.gateway.auth import (
@@ -127,14 +129,35 @@ def _validate_strong_password(value: str) -> str:
     return value
 
 
+def _validate_concise_email(value: str) -> str:
+    """Same ``email_validator`` check as ``EmailStr`` with concise user copy.
+
+    V-7c: the library's detail ("special-use or reserved name ...") is too
+    wordy for the signup form, and the frontend must keep backend messages
+    verbatim (account-enumeration probe). ``PydanticCustomError`` renders the
+    message template exactly (a plain ``ValueError`` would leak pydantic's
+    "Value error, " prefix); the ``value_error`` type keeps the frontend
+    ``ErrorDetailSchema`` contract. Returns the normalized address like
+    ``EmailStr`` did.
+    """
+    if not isinstance(value, str):
+        raise PydanticCustomError("value_error", "Enter a valid email address.")
+    try:
+        # Same options pydantic's EmailStr uses: syntax-only, no MX lookup.
+        return validate_email(value, check_deliverability=False).normalized
+    except EmailNotValidError:
+        raise PydanticCustomError("value_error", "Enter a valid email address.")
+
+
 class RegisterRequest(BaseModel):
     """Request model for user registration."""
 
-    email: EmailStr
+    email: str = Field(..., json_schema_extra={"format": "email"})
     password: str = Field(..., min_length=8)
     remember_me: bool = True
 
     _strong_password = field_validator("password")(classmethod(lambda cls, v: _validate_strong_password(v)))
+    _concise_email = field_validator("email")(classmethod(lambda cls, v: _validate_concise_email(v)))
 
 
 class ChangePasswordRequest(BaseModel):
@@ -142,10 +165,13 @@ class ChangePasswordRequest(BaseModel):
 
     current_password: str
     new_password: str = Field(..., min_length=8)
-    new_email: EmailStr | None = None
+    new_email: str | None = Field(default=None, json_schema_extra={"format": "email"})
     remember_me: bool | None = None
 
     _strong_password = field_validator("new_password")(classmethod(lambda cls, v: _validate_strong_password(v)))
+    _concise_new_email = field_validator("new_email")(
+        classmethod(lambda cls, v: v if v is None else _validate_concise_email(v))
+    )
 
 
 class MessageResponse(BaseModel):
@@ -807,11 +833,12 @@ async def setup_status(request: Request):
 class InitializeAdminRequest(BaseModel):
     """Request model for first-boot admin account creation."""
 
-    email: EmailStr
+    email: str = Field(..., json_schema_extra={"format": "email"})
     password: str = Field(..., min_length=8)
     remember_me: bool = True
 
     _strong_password = field_validator("password")(classmethod(lambda cls, v: _validate_strong_password(v)))
+    _concise_email = field_validator("email")(classmethod(lambda cls, v: _validate_concise_email(v)))
 
 
 @router.post("/initialize", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

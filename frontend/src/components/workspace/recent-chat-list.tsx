@@ -75,6 +75,7 @@ import { buildThreadListModel } from "@/core/threads/thread-list-model";
 import type { AgentThread, AgentThreadState } from "@/core/threads/types";
 import {
   channelSourceOfThread,
+  isThreadBootstrap,
   isThreadPinned,
   pathOfThread,
   projectIdOfThread,
@@ -633,7 +634,10 @@ export function RecentChatList() {
                     thread={thread}
                     isActive={pathOfThread(thread) === pathname}
                     branchEntry={branchList.entriesById.get(thread.thread_id)}
-                    recentThreadId={threads[0]?.thread_id}
+                    recentThreadId={
+                      threads.find((candidate) => !isThreadBootstrap(candidate))
+                        ?.thread_id
+                    }
                   />
                 )}
               />

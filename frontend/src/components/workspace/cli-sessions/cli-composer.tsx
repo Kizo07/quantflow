@@ -6,12 +6,12 @@ import { useEffect, useState } from "react";
 import {
   PromptInput,
   PromptInputFooter,
+  PromptInputProvider,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
-import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,14 +21,10 @@ import {
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Tooltip } from "@/components/workspace/tooltip";
+  ComposerOptionSelect,
+  ComposerOptionToggle,
+} from "@/components/workspace/composer-options";
+import { SuggestionList } from "@/components/workspace/input-box";
 import { GatewayApiError } from "@/core/api/errors";
 import {
   CLI_CHAT_DEFAULT_CONTROLS,
@@ -76,68 +72,6 @@ function modelIdForChoice(
   return modelChoice === NONE_VALUE ? null : modelChoice;
 }
 
-/** Compact footer select mirroring the research composer's picker pills. */
-function CliFooterSelect({
-  label,
-  value,
-  onChange,
-  options,
-  testId,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
-  testId?: string;
-}) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1">
-      <span aria-hidden="true" className="text-muted-foreground text-xs">
-        {label}
-      </span>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger
-          aria-label={label}
-          data-testid={testId}
-          className="h-7 w-auto min-w-0 gap-1 px-2 text-xs"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </span>
-  );
-}
-
-/** Compact footer toggle mirroring the research composer's tool buttons. */
-function CliFooterToggle({
-  label,
-  checked,
-  onChange,
-  tooltip,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  tooltip?: string;
-}) {
-  const control = (
-    <span className="inline-flex items-center gap-1.5">
-      <Switch aria-label={label} checked={checked} onCheckedChange={onChange} />
-      <span aria-hidden="true" className="text-muted-foreground text-xs">
-        {label}
-      </span>
-    </span>
-  );
-  return tooltip ? <Tooltip content={tooltip}>{control}</Tooltip> : control;
-}
-
 function CliCapabilitiesError() {
   const { t } = useI18n();
   return (
@@ -162,15 +96,21 @@ function CliStarterSuggestions({
       data-testid="cli-starter-suggestions"
       className="flex items-center justify-center pt-2"
     >
-      <Suggestions className="min-h-16 w-full max-w-full justify-center px-4 sm:w-fit sm:px-0">
-        {t.cliSessions.chatStarters.map((starter) => (
-          <Suggestion
-            key={starter}
-            suggestion={starter}
-            onClick={() => onSelect(starter)}
-          />
-        ))}
-      </Suggestions>
+      {/* Shared research SuggestionList with CLI starter strings (C-2). This
+          renders outside the composer's PromptInput, so it gets a detached
+          provider for the hook contract; the real effect flows through
+          onSelectPlaceholder into the CLI controlled prompt state. */}
+      <PromptInputProvider>
+        <SuggestionList
+          items={t.cliSessions.chatStarters.map((starter) => ({
+            suggestion: starter,
+            prompt: starter,
+          }))}
+          showSurpriseMe={false}
+          showCreateMenu={false}
+          onSelectPlaceholder={onSelect}
+        />
+      </PromptInputProvider>
     </div>
   );
 }
@@ -381,7 +321,7 @@ export function CliLaunchComposer({
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="flex flex-wrap gap-x-3 gap-y-2 px-3 pb-1">
-              <CliFooterSelect
+              <ComposerOptionSelect
                 label={st.model}
                 value={modelChoice}
                 onChange={handleModelChoice}
@@ -394,7 +334,7 @@ export function CliLaunchComposer({
                   { value: CUSTOM_MODEL_VALUE, label: st.modelCustom },
                 ]}
               />
-              <CliFooterSelect
+              <ComposerOptionSelect
                 label={st.effort}
                 value={effort}
                 onChange={setEffort}
@@ -403,7 +343,7 @@ export function CliLaunchComposer({
                   ...effortTiers.map((value) => ({ value, label: value })),
                 ]}
               />
-              <CliFooterSelect
+              <ComposerOptionSelect
                 label={st.provider}
                 value={provider}
                 onChange={setProvider}
@@ -415,7 +355,7 @@ export function CliLaunchComposer({
                   })),
                 ]}
               />
-              <CliFooterSelect
+              <ComposerOptionSelect
                 label={st.approvalMode}
                 value={approvalMode}
                 onChange={setApprovalMode}
@@ -439,7 +379,7 @@ export function CliLaunchComposer({
                     {st.contributorInherit}
                   </Button>
                 )}
-                <CliFooterToggle
+                <ComposerOptionToggle
                   label={
                     contributorMode === null
                       ? `${st.contributorMode}: ${st.contributorInherit}`
@@ -449,12 +389,12 @@ export function CliLaunchComposer({
                   onChange={(checked) => setContributorMode(checked)}
                 />
               </span>
-              <CliFooterToggle
+              <ComposerOptionToggle
                 label={st.trustWorkspace}
                 checked={trustWorkspace}
                 onChange={setTrustWorkspace}
               />
-              <CliFooterToggle
+              <ComposerOptionToggle
                 label={st.yolo}
                 checked={yolo}
                 onChange={setYolo}
@@ -546,16 +486,22 @@ export function CliSendComposer({
   session,
   streaming,
   onSent,
+  onStop,
+  stopping = false,
   className,
 }: {
   session: CliSession;
   streaming: boolean;
   onSent: (runId: string, prompt: string) => void;
+  /** Stop the streaming run; the submit button becomes stop while streaming. */
+  onStop: () => void;
+  stopping?: boolean;
   className?: string;
 }) {
   const { t } = useI18n();
   const ct = t.cliSessions.chat;
   const lt = t.cliSessions.launch;
+  const st = t.cliSessions.detail;
   const send = useSendCliChatMessage();
   const capabilitiesQuery = useCliCapabilities();
   const capabilities: CliCapabilities | null = capabilitiesQuery.data ?? null;
@@ -578,6 +524,12 @@ export function CliSendComposer({
   );
 
   const handleSend = (message: PromptInputMessage) => {
+    // While a run streams, the submit affordance is the stop button (same
+    // contract as SlimComposer/InputBox): never queue a second send.
+    if (streaming) {
+      onStop();
+      return;
+    }
     setSendError(null);
     const built = buildCliChatSendPayload(
       { ...controls, model: effectiveModel, prompt: message.text },
@@ -632,7 +584,7 @@ export function CliSendComposer({
         />
         <PromptInputFooter className="flex flex-wrap gap-2">
           <PromptInputTools className="min-w-0 flex-1 flex-wrap gap-x-3 gap-y-2">
-            <CliFooterSelect
+            <ComposerOptionSelect
               label={lt.model}
               value={controls.model}
               onChange={(value) => setControl("model", value)}
@@ -646,7 +598,7 @@ export function CliSendComposer({
                 { value: CUSTOM_MODEL_VALUE, label: lt.modelCustom },
               ]}
             />
-            <CliFooterSelect
+            <ComposerOptionSelect
               label={lt.provider}
               value={controls.provider}
               onChange={(value) => setControl("provider", value)}
@@ -659,7 +611,7 @@ export function CliSendComposer({
                 })),
               ]}
             />
-            <CliFooterSelect
+            <ComposerOptionSelect
               label={lt.effort}
               value={controls.effort}
               onChange={(value) => setControl("effort", value)}
@@ -672,7 +624,7 @@ export function CliSendComposer({
                 })),
               ]}
             />
-            <CliFooterSelect
+            <ComposerOptionSelect
               label={lt.yolo}
               value={controls.yolo}
               onChange={(value) =>
@@ -688,23 +640,29 @@ export function CliSendComposer({
               ]}
             />
             <PromptInputSubmit
-              aria-label={ct.send}
+              aria-label={stopping ? st.stopping : streaming ? st.stop : ct.send}
               className="rounded-full"
               variant="outline"
-              disabled={!canSend}
-              status={send.isPending ? "submitted" : undefined}
+              disabled={streaming ? stopping : !canSend}
+              status={
+                streaming
+                  ? "streaming"
+                  : send.isPending
+                    ? "submitted"
+                    : undefined
+              }
             />
           </PromptInputTools>
         </PromptInputFooter>
       </PromptInput>
 
       {controls.model === CUSTOM_MODEL_VALUE && (
-        <input
+        <Input
           aria-label={lt.customModelPlaceholder}
           placeholder={lt.customModelPlaceholder}
           value={customModel}
           onChange={(event) => setCustomModel(event.target.value)}
-          className="border-input bg-background mt-2 h-8 rounded-md border px-2 text-xs"
+          className="mt-2 h-8 text-xs"
         />
       )}
 

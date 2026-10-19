@@ -14,6 +14,44 @@ investment-committee style reports.
 > top. For the generic framework docs, see the
 > [upstream README](https://github.com/bytedance/deer-flow/blob/main/README.md).
 
+## Workspace tour
+
+The workspace at a glance: research chats, persistent agents, CLI coding
+sessions, scheduled tasks, usage, and plugin management in one theme and
+one design language.
+
+**New chat** — the research starting point: welcome, composer with model /
+reasoning-effort footer, starter chips.
+![New chat](docs/images/readme-chat-new.png)
+
+**Thread** — an agent conversation: user bubble, answer, per-turn tokens,
+run duration.
+![Conversation thread](docs/images/readme-thread.png)
+
+**Chats** — recent conversations with search (plus an Archived tab).
+![Chats list](docs/images/readme-chats.png)
+
+**Agents** — gallery of persistent custom agents with one-click chat.
+![Agents gallery](docs/images/readme-agents.png)
+
+**Agent chat** — a persistent agent's welcome: same composer, same chips.
+![Agent chat](docs/images/readme-bot-chat.png)
+
+**CLI sessions** — coding harness launch state: prompt composer with
+collapsed run options, starter chips, preset badge.
+![CLI sessions](docs/images/readme-cli-sessions.png)
+
+**Scheduled tasks** — recurring runs with history (shown: empty state with
+the scheduler-off notice).
+![Scheduled tasks](docs/images/readme-scheduled-tasks.png)
+
+**Usage** — runs, chats, tokens, and cost, total and by model.
+![Usage](docs/images/readme-usage.png)
+
+**Capability Center** — platform tools plus your configured MCP servers
+(`alpha_engine`, `kizonlp`, `kizollms`, `reportforge` shown enabled).
+![Capability Center](docs/images/readme-capabilities.png)
+
 ## Features
 
 **Quant desk** (`skills/custom/quant-desk/`) — a CIO-style evidence-first

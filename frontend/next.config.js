@@ -34,6 +34,18 @@ const config = {
   allowedDevOrigins: getAllowedDevOrigins(),
   async rewrites() {
     const rewrites = [];
+    // Legacy absolute-filesystem report links pasted into chat history
+    // (e.g. ".../backend/Audit/spark-mcp-architecture.html") resolve as
+    // site-absolute URLs; serve the public copy instead of 404ing.
+    rewrites.push({
+      source:
+        "/home/fire/Documents/deer-flow/backend/Audit/spark-mcp-architecture.html",
+      destination: "/spark-mcp-architecture.html",
+    });
+    rewrites.push({
+      source: "/home/fire/Documents/Audit/spark-mcp-architecture.html",
+      destination: "/spark-mcp-architecture.html",
+    });
     const gatewayURL = getInternalServiceURL(
       "DEER_FLOW_INTERNAL_GATEWAY_BASE_URL",
       "http://127.0.0.1:8001",

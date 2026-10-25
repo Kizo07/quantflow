@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>spark-mcp Architecture Audit — DeerFlow MCP Subsystem</title>
+<style>
+:root { --ink:#1c2228; --muted:#5b6570; --line:#dfe5ea; --accent:#0f766e; --accent-dark:#0b5954; --bg:#ffffff; --panel:#f3f6f7; --warn:#8a5a00; --warn-bg:#fdf3dd; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; line-height:1.6; }
+.wrap { max-width:960px; margin:0 auto; padding:32px 24px 64px; }
+header.report-head { border-bottom:3px solid var(--accent); padding-bottom:16px; margin-bottom:24px; }
+h1 { font-family:Georgia,"Times New Roman",serif; font-size:30px; line-height:1.25; margin:0 0 8px; letter-spacing:-0.01em; }
+.subtitle { color:var(--muted); font-size:15px; margin:0; }
+.meta { display:flex; flex-wrap:wrap; gap:8px 20px; margin:16px 0 0; padding:0; list-style:none; font-size:13px; color:var(--muted); }
+.meta strong { color:var(--ink); font-weight:600; }
+.notice { background:var(--warn-bg); border:1px solid #e8cf8f; border-left:5px solid var(--warn); padding:12px 16px; margin:20px 0; font-size:14px; }
+.notice strong { display:block; margin-bottom:4px; }
+h2 { font-family:Georgia,serif; font-size:21px; margin:36px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:16px; margin:22px 0 8px; }
+p, li { font-size:14.5px; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.8px; background:#eef2f3; padding:1px 5px; border-radius:4px; }
+pre { background:#10181d; color:#d9e4e8; padding:14px 16px; border-radius:8px; overflow:auto; font-size:12.5px; line-height:1.55; }
+table { width:100%; border-collapse:collapse; margin:12px 0 18px; font-size:13.5px; }
+th, td { text-align:left; padding:8px 10px; border:1px solid var(--line); vertical-align:top; }
+th { background:var(--panel); font-weight:600; }
+.flow { display:grid; grid-template-columns:1fr; gap:0; margin:14px 0; }
+.step { border:1px solid var(--line); border-left:5px solid var(--accent); background:var(--panel); padding:10px 14px; margin:0 0 8px; }
+.step b { display:block; font-size:14px; }
+.step span { font-size:13.5px; color:var(--muted); }
+.arrow { text-align:center; color:var(--accent-dark); font-weight:700; margin:-4px 0 4px; }
+footer { margin-top:40px; padding-top:14px; border-top:1px solid var(--line); color:var(--muted); font-size:12.5px; }
+a { color:var(--accent-dark); }
+@media print { .wrap { max-width:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="report-head">
+<h1>spark-mcp Architecture Audit</h1>
+<p class="subtitle">DeerFlow backend MCP integration — structure, runtime, auth, cache, durable tasks, and ops. Researched by three parallel subagents against the live checkout.</p>
+<ul class="meta">
+<li><strong>Date</strong> 2026-10-25</li>
+<li><strong>Scope</strong> <code>packages/harness/deerflow/mcp/</code>, <code>app/gateway/routers/mcp*.py</code>, config + tests</li>
+<li><strong>Method</strong> structure map / runtime trace / config-docs sweep</li>
+<li><strong>Checkout</strong> <code>/home/fire/Documents/deer-flow/backend</code></li>
+</ul>
+</header>
+<div class="notice"><strong>Naming finding — read first</strong>There is no <code>spark-mcp</code> package, provider, or module in this repository. Full-repo grep finds <code>spark-mcp / spark_mcp</code> only in example and eval-fixture prose; <code>muse-spark</code> hits refer to the unrelated Meta model family. The system documented here is DeerFlow's actual MCP subsystem, which is the closest in-repo match to the requested subject.</div>
+<h2>1. System overview</h2>
+<p>DeerFlow embeds a LangGraph super-agent in the Gateway (<code>app/gateway</code>) and exposes Model Context Protocol servers as ordinary agent tools plus a separate durable runtime for long-running remote work. The harness owns protocol, pooling, caching, and auth; the app owns HTTP deployment APIs, per-user personal servers, and the task service that runs outside the LLM loop.</p>
+<div class="flow">
+<div class="step"><b>1 · Operator config</b><span><code>extensions_config.json → mcpServers.*</code> + <code>config.yaml → mcp_tasks</code>; edited via Gateway admin API under write locks.</span></div>
+<div class="arrow">↓</div>
+<div class="step"><b>2 · Discovery and cache</b><span><code>mcp/cache.py + tools.py</code> via <code>MultiServerMCPClient</code> (langchain-mcp-adapters); two-stage staleness check, selective binding reconciliation.</span></div>
+<div class="arrow">↓</div>
+<div class="step"><b>3 · Agent calls</b><span>Pooled stdio sessions or ephemeral SSE/HTTP calls through interceptor chain; routing hints feed <code>tool_search</code>.</span></div>
+<div class="arrow">↓</div>
+<div class="step"><b>4 · Long work leaves the loop</b><span>Submit returns a local task ID; <code>McpTaskService</code> + SQL rows own polling, retries, notifications, and cancel.</span></div>
+</div>
+<h2>2. Component map</h2>
+<table>
+<tr><th>Area</th><th>Path</th><th>Role</th></tr>
+<tr><td>Harness core</td><td><code>packages/harness/deerflow/mcp/__init__.py</code></td><td>Public surface; re-exports cache, client, tools.</td></tr>
+<tr><td>Discovery</td><td><code>mcp/client.py</code>, <code>mcp/tools.py</code></td><td>Build server params, load tools, prefix names, assemble agent toolset.</td></tr>
+<tr><td>Cache + reconcile</td><td><code>mcp/cache.py</code>, <code>mcp/lifecycle.py</code></td><td>Signature + effective-slice staleness; applied-revision baseline; cross-worker reset marker.</td></tr>
+<tr><td>Stdio pool</td><td><code>mcp/session_pool.py</code></td><td>Loop- and domain-isolated sessions keyed by server + scope + loop + domain; LRU cap, binding fence, disconnect eviction.</td></tr>
+<tr><td>Auth chain</td><td><code>mcp/oauth.py</code>, <code>user_scoped_auth.py</code>, <code>context_headers.py</code>, <code>headers.py</code>, <code>interceptors.py</code></td><td>Static &lt; OAuth &lt; per-user &lt; per-request precedence; fail-closed, transport-safe header checks.</td></tr>
+<tr><td>Task runtime</td><td><code>mcp/tasks/ordinary.py</code>, <code>runtime.py</code>, <code>driver.py</code>, <code>task_tool_caller.py</code></td><td>Submit/status/cancel binding; structuredContent mapping; versioned scope; HTTP timeouts.</td></tr>
+<tr><td>Gateway deploy API</td><td><code>app/gateway/routers/mcp.py</code></td><td>GET/PUT config, per-server CRUD, PATCH enabled, POST cache reset; stdio allowlist enforced.</td></tr>
+<tr><td>Personal servers</td><td><code>app/gateway/routers/personal_mcp.py</code>, <code>mcp/personal_access.py</code>, <code>personal_network.py</code></td><td>Per-user servers isolated from deployment domain; never share pooled stdio sessions.</td></tr>
+<tr><td>Durable service</td><td><code>app/mcp_tasks/McpTaskService</code>, <code>mcp_tasks.py</code> router</td><td>Lease-fenced polling, backoff, dead-lettering, cancel; SQL is source of truth.</td></tr>
+<tr><td>Guards</td><td><code>mcp/config_normalization.py</code>, <code>user_config.py</code></td><td>Transport alias normalization, prefix defaults, task_toolsets role validation.</td></tr>
+</table>
+<h2>3. Request paths</h2>
+<h3>3.1 Discovery (lazy, cached)</h3>
+<p><code>initialize_mcp_tools()</code> reads one <code>ExtensionsConfig</code> snapshot and calls <code>get_mcp_tools()</code>. Tools publish only if the effective MCP slice that produced them still equals the current slice, closing the superseded-revision window. A skills-only edit adopts the new file signature and keeps pooled sessions.</p>
+<h3>3.2 Ordinary tool call</h3>
+<p>Stdio calls reuse the pooled session for <code>(server, scope, loop, domain)</code> with thread-workspace <code>cwd</code> and <code>TMPDIR</code> pinned under <code>workspace/.mcp/tmp/</code>; SSE/HTTP calls are ephemeral with per-call timeouts. Interceptors resolve credentials on every call. <code>Connection closed</code> evicts only the session that failed; timeouts and <code>isError</code> results do not.</p>
+<h3>3.3 Durable task call</h3>
+<p>Submit is awaited inside the agent run and persists a bounded row (errors capped at 4,000 chars; artifacts at 64 KiB). Status and cancel run after the run ends under static/OAuth or the persisted owner's credential. Poll timestamps use remote completion time; transient errors back off without a max attempt count; five notification failures stop retries. Cancel of an in-flight poll releases only the fenced lease.</p>
+<h2>4. Cache invalidation and reconciliation</h2>
+<p>Stage one compares resolved path plus <code>(mtime, size, sha256)</code> signature, catching same-second edits, backward mtime moves, and file swaps. Stage two serializes the effective MCP slice (enabled servers in order plus <code>mcpInterceptors</code>) and retires state only when that slice changed. Claims install the recorded revision; unchanged stdio bindings survive while changed or removed ones advance epochs or take tombstones. Gateway writers use <code>prepare_mcp_reconciliation()</code> then <code>finish_mcp_reconciliation()</code>; failure falls back to a conservative full reset and a 500.</p>
+<h2>5. Auth precedence and stdio safety</h2>
+<p>Header precedence is static <code>headers</code> &lt; OAuth &lt; <code>user_auth</code> &lt; <code>headers_from_context</code>, applied through case-insensitive override so a stale <code>authorization</code> spelling cannot shadow the winner. Missing or transport-illegal values fail closed without echoing secrets. At the HTTP boundary, API-registered stdio servers must name a bare allowlisted launcher (<code>npx</code>, <code>uvx</code> plus <code>DEER_FLOW_MCP_STDIO_COMMAND_ALLOWLIST</code>), avoid exec args and code-injecting env names, with package-launcher option-region screening. This is defense in depth; <code>npx/uvx</code> still fetch remote code, so admin auth remains the real boundary.</p>
+<h2>6. Configuration and operations</h2>
+<table>
+<tr><th>Surface</th><th>Key</th><th>Notes</th></tr>
+<tr><td><code>config.example.yaml</code></td><td><code>tool_search</code>, <code>mcp_tasks</code></td><td>Routing auto-promote tuning; task runtime startup snapshot, disabled until a driver registers.</td></tr>
+<tr><td><code>extensions_config.example.json</code></td><td><code>mcpServers.*</code></td><td>Transport, headers, OAuth, user_auth, headers_from_context, routing hints, tool_name_prefix, task_toolsets.</td></tr>
+<tr><td>Gateway writes</td><td>write locks + atomic replace</td><td>Process-local plus sidecar file lock; temp-file fsync then <code>os.replace()</code>; failed writes keep prior config.</td></tr>
+<tr><td>Ops endpoints</td><td><code>/api/mcp/config</code>, <code>/api/mcp/cache/reset</code></td><td>Full PUT vs single-field PATCH validation; reset publishes a shared generation marker for multi-worker convergence.</td></tr>
+</table>
+<h2>7. Tests that pin this behavior</h2>
+<p>Representative offline tests in <code>backend/tests/</code>: <code>test_mcp_cache.py</code>, <code>test_mcp_cache_reconciliation.py</code>, <code>test_mcp_binding_fencing.py</code>, <code>test_mcp_oauth.py</code>, <code>test_mcp_context_headers.py</code>, <code>test_mcp_cwd.py</code>, <code>test_mcp_file_migration.py</code>, <code>test_mcp_lifecycle*.py</code>, <code>test_mcp_routing_*.py</code>, <code>test_background_task_status_filter.py</code>. Run with <code>make test</code> (four offline shards) from <code>backend/</code>.</p>
+<h2>8. Limits and open questions</h2>
+<ul>
+<li>No <code>spark-mcp</code> implementation exists here; if the request meant an external Spark MCP server, its code was not in this checkout.</li>
+<li>Durable recovery needs a SQL backend; the in-memory backend leaves the task repository unavailable.</li>
+<li>Per-request secrets cover submit but not later background polls, which is flagged at startup.</li>
+<li>Users cannot submit an answer back to an <code>input_required</code> remote task in the current driver.</li>
+</ul>
+<footer>Sources: <code>packages/harness/deerflow/mcp/AGENTS.md</code>; <code>mcp/cache.py</code>, <code>session_pool.py</code>, <code>interceptors.py</code>, <code>tasks/ordinary.py</code>; <code>app/gateway/routers/mcp.py</code>, <code>personal_mcp.py</code>, <code>mcp_tasks.py</code>; <code>config.example.yaml</code>, <code>extensions_config.example.json</code>; tests listed above. Evidence gathered by three read-only subagents; synthesis verified against the files above.</footer>
+</div>
+</body>
+</html>

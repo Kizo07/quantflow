@@ -64,6 +64,12 @@ Every code change must keep docs accurate and current: update `README.md` for
 user-facing behavior and the relevant `AGENTS.md` for development changes.
 `CLAUDE.md` imports `AGENTS.md`; do not edit the shim.
 
+### Generated Output Location
+Store generated audit reports, HTML exhibits, and screenshot sets in
+`/home/fire/Documents/Audit/` (e.g. `quantflow-*-2026-10-18.md`,
+`screenshots-*/`). Never create an `Audit/` directory inside the repo
+working tree (such as `backend/Audit/`).
+
 ### Backend Benchmarks
 
 `scripts/benchmark/context_snapshot/`: explicit `run-live` needs provider env

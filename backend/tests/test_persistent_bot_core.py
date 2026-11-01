@@ -538,7 +538,7 @@ async def test_migration_0043_upgrade_downgrade_cycle(tmp_path: Path) -> None:
     engine = create_async_engine(url)
     try:
         await asyncio.to_thread(alembic_command.upgrade, cfg, "head")
-        assert _get_head_revision() == "0044_scheduled_task_notify_policy"
+        assert _get_head_revision() == "0050_merge_quantflow_upstream"
         async with engine.connect() as conn:
             tables = await conn.run_sync(lambda sync: set(sa.inspect(sync).get_table_names()))
             columns = await conn.run_sync(lambda sync: {c["name"] for c in sa.inspect(sync).get_columns("persistent_bot")})

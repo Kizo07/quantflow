@@ -2,8 +2,9 @@
 
 Empty merge revision joining the upstream chain (0029_scheduler_agent_tasks
 -> ... -> 0039_user_disabled) with the QuantFlow leg
-(0029_merge_knowledge_outbox). This file owns the chain-head pin, moved
-on from ``test_migration_0029_merge_knowledge_outbox``.
+(0029_merge_knowledge_outbox). The chain-head pin moved on to
+``test_migration_0050_merge_quantflow_upstream`` with the 2026-11-01
+QuantFlow/upstream merge revision.
 """
 
 from __future__ import annotations

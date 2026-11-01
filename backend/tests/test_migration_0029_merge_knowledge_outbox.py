@@ -3,7 +3,7 @@
 Empty merge revision joining the upstream notification-outbox leg
 (0028_parked_attempts) with the QuantFlow knowledge leg
 (0028_knowledge_experiment_embeddings). The chain-head pin moved on to
-``test_migration_0040_merge_quantflow_upstream`` with the 2026-10-11
+``test_migration_0050_merge_quantflow_upstream`` with the 2026-11-01
 QuantFlow/upstream merge revision.
 """
 
@@ -32,6 +32,6 @@ def test_0029_remains_in_the_single_migration_chain():
     config = Config()
     config.set_main_option("script_location", migrations_dir.as_posix())
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["0044_scheduled_task_notify_policy"]
+    assert script.get_heads() == ["0050_merge_quantflow_upstream"]
     ancestors = {revision.revision for revision in script.walk_revisions()}
     assert REVISION in ancestors

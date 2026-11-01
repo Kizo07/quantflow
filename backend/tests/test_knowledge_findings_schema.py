@@ -142,14 +142,15 @@ class TestRevisionChain:
     def test_single_head_is_new_revision(self) -> None:
         # The upstream merge (0022-0026) forked the chain; merge revision
         # 0027 rejoins it, Phase 3 revision 0028 extends it, merge
-        # revision 0029 joins the notification-outbox leg, and the
+        # revision 0029 joins the notification-outbox leg, the
         # 2026-10-11 merge revision 0040 joins the upstream 0029-0039
-        # leg (single head, no branches).
+        # leg, and the 2026-11-01 merge revision 0050 joins the
+        # upstream 0040-0049 leg (single head, no branches).
         migrations_dir = Path(migration.__file__).resolve().parent.parent
         config = Config()
         config.set_main_option("script_location", migrations_dir.as_posix())
         script = ScriptDirectory.from_config(config)
-        assert script.get_heads() == ["0044_scheduled_task_notify_policy"]
+        assert script.get_heads() == ["0050_merge_quantflow_upstream"]
 
     def test_vocabulary_matches_kb_contract(self) -> None:
         assert FINDING_TYPES == ("empirical", "methodological", "data_quality", "failure", "prior")

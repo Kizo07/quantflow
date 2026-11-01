@@ -49,8 +49,9 @@ from deerflow.knowledge.agent_tools.bootstrap import (
     format_context_packet,
     knowledge_bootstrap,
 )
-from deerflow.knowledge.agent_tools.lookup import get_knowledge_backends
+from deerflow.knowledge.agent_tools.lookup import get_knowledge_backends, resolve_tool_scope
 from deerflow.knowledge.config import get_knowledge_config
+from deerflow.knowledge.contract import KnowledgeRequestContext
 from deerflow.runtime.user_context import resolve_runtime_user_id
 
 logger = logging.getLogger(__name__)
@@ -222,7 +223,14 @@ class KnowledgeBootstrapMiddleware(AgentMiddleware[KnowledgeBootstrapMiddlewareS
                     return text
         return None
 
-    def _build_packet_text(self, task_text: str, stores: BootstrapStores, runtime: Runtime, user_id: str) -> str | None:
+    def _build_packet_text(
+        self,
+        task_text: str,
+        stores: BootstrapStores,
+        runtime: Runtime,
+        user_id: str,
+        request_context: KnowledgeRequestContext | None = None,
+    ) -> str | None:
         """Run bootstrap for ``task_text`` and render the packet (None on failure)."""
         research_intent: Any = task_text
         if self._intent_builder is not None:
@@ -232,7 +240,7 @@ class KnowledgeBootstrapMiddleware(AgentMiddleware[KnowledgeBootstrapMiddlewareS
                 logger.warning("KnowledgeBootstrapMiddleware: intent_builder failed; falling back to raw task text", exc_info=True)
                 research_intent = task_text
         try:
-            packet = knowledge_bootstrap(research_intent, stores=stores, budget=self._budget)
+            packet = knowledge_bootstrap(research_intent, stores=stores, budget=self._budget, request_context=request_context)
         except Exception:
             logger.warning("KnowledgeBootstrapMiddleware: knowledge_bootstrap failed; running without the packet", exc_info=True)
             return None
@@ -243,8 +251,22 @@ class KnowledgeBootstrapMiddleware(AgentMiddleware[KnowledgeBootstrapMiddlewareS
             return None
 
     def _inject(self, state: KnowledgeBootstrapMiddlewareState, runtime: Runtime) -> dict | None:
-        """Compute the run-start injection update (sync; no hook side effects)."""
+        """Compute the run-start injection update (sync; no hook side effects).
+
+        Phase 3c: the runtime execution scope resolves exactly like the
+        ``@tool`` wrappers (:func:`resolve_tool_scope
+        <deerflow.knowledge.agent_tools.lookup.resolve_tool_scope>`); the
+        constructed context threads into :func:`knowledge_bootstrap` so
+        document channels constrain server-side. A refusing scope (disabled
+        or invalid) skips injection with a debug log — the middleware stays
+        fail-open and never injects unscoped knowledge into a denied turn.
+        Absent scopes keep the legacy unconstrained packet unchanged.
+        """
         if not self._is_enabled():
+            return None
+        request_context, refusal = resolve_tool_scope(runtime)
+        if refusal is not None:
+            logger.debug("KnowledgeBootstrapMiddleware: knowledge scope refuses bootstrap; skipping injection")
             return None
         messages = list(state.get("messages", []))
         if not messages:
@@ -261,7 +283,7 @@ class KnowledgeBootstrapMiddleware(AgentMiddleware[KnowledgeBootstrapMiddlewareS
             return None
         thread_id = self._resolve_thread_id(runtime)
         user_id = resolve_runtime_user_id(runtime)
-        packet_text = self._build_packet_text(task_text, stores, runtime, user_id)
+        packet_text = self._build_packet_text(task_text, stores, runtime, user_id, request_context)
         if not packet_text:
             return None
         logger.info(

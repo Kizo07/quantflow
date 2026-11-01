@@ -68,7 +68,7 @@ test-knowledge-2:
 		tests/test_knowledge_phase2_wiring.py \
 		packages/harness/deerflow/knowledge/test_retrieval_plane.py \
 		packages/harness/deerflow/knowledge/test_embeddings.py \
-		packages/harness/deerflow/knowledge/tools/test_knowledge_tools.py
+		packages/harness/deerflow/knowledge/agent_tools/test_knowledge_tools.py
 
 # Research Knowledge Plane Phase 2 eval wiring: seeder self-test (must
 # pass), judgment-coverage check (exit 2 on coverage failure), and the

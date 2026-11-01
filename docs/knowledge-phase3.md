@@ -40,3 +40,27 @@ HF_HUB_OFFLINE=1 PYTHONPATH=. .venv/bin/python -m pytest tests/test_knowledge_ph
 
 The gate skips when `sentence_transformers` or the checkpoint is
 unavailable; mechanics stay covered by the fake-backed retrieval tests.
+
+## Phase 5 status notes (provider / scope / alias)
+
+Verified against code on 2026-11-01 (Phase 5c, docs consolidation).
+
+- **Provider.** The fork ships exactly one knowledge provider,
+  `PROVIDER_NAME = "quantflow-pg"`
+  (`backend/packages/harness/deerflow/knowledge/quantflow_provider.py`,
+  registered via `ensure_quantflow_provider_registered`). It
+  implements the six read-only operations (`search`, `sources`,
+  `catalog`, `documents`, `dataset_filter`, `document_filter`) over
+  the fork KB tables; the in-tree RAGFlow/LightRAG adapters and the
+  separately packaged WeKnora extension stay unregistered
+  (`backend/tests/test_knowledge_local_only_guard.py`).
+- **Scope.** `dataset_filter` / `document_filter` range over the four
+  fixed datasets (`findings`, `experiments`, `failures`,
+  `assumptions`); see the dataset→kind→table mapping in the fork
+  section of `backend/docs/KNOWLEDGE.md`. `disabled` blocks every
+  fork tool and the bootstrap packet.
+- **Aliases.** No `ledger_*` one-release aliases were ever created
+  (Phase 4a kept ledger ops on the backend path with no compat
+  shim), so there was nothing to retire. The provider alias
+  `QuantflowKnowledgeProvider = QuantflowPgProvider` is deliberate
+  and stays (same provider module, also in its `__all__`).

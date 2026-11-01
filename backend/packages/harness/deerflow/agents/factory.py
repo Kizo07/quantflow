@@ -360,13 +360,21 @@ def _assemble_from_features(
         if isinstance(feat.knowledge, AgentMiddleware):
             chain.append(feat.knowledge)
         else:
-            from deerflow.knowledge.agent_tools.lookup import get_knowledge_tools, knowledge_tools_available
+            from deerflow.knowledge.agent_tools.lookup import get_knowledge_tools, get_upstream_knowledge_tools, knowledge_tools_available
             from deerflow.knowledge.agent_tools.middleware import KnowledgeBootstrapMiddleware
 
             chain.append(KnowledgeBootstrapMiddleware(agent_name=name))
             if knowledge_tools_available():
+                from deerflow.knowledge.quantflow_provider import ensure_quantflow_provider_registered
+
+                # Built-in fork provider for the generic knowledge tools: same
+                # bound-backends gate as the recall tools, so it is never
+                # registered dead (idempotent across repeated builds).
+                ensure_quantflow_provider_registered()
+                # Phase 4a converged set: the upstream generic search tool
+                # (served by quantflow-pg) alongside the fork recall tools.
                 existing_names = {tool.name for tool in extra_tools}
-                for knowledge_tool in get_knowledge_tools():
+                for knowledge_tool in (*get_upstream_knowledge_tools(), *get_knowledge_tools()):
                     if knowledge_tool.name in existing_names:
                         logger.warning("Knowledge tool name %r already exists and was skipped.", knowledge_tool.name)
                         continue

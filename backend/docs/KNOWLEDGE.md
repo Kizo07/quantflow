@@ -343,3 +343,77 @@ that tool's operation. Capability resolution rejects an invalid pair and logs th
 tool name, provider registration name and missing operation for the operator;
 it does not silently intersect it into an empty capability set. Model-visible
 errors remain generic so provider details are not exposed in tool results.
+
+## Fork extension: QuantFlow evidence plane (quantflow-pg)
+
+Migration contract for the fork-owned provider, which implements the six
+read-only operations above against the fork KB tables. Nothing here changes
+the upstream sections.
+
+### Dataset to kind mapping
+
+Four fixed datasets; each dataset ID maps to retrieval kinds backed by the
+listed tables:
+
+| Dataset | Kind | Tables (migration) |
+| --- | --- | --- |
+| `findings` | `finding` | `finding` (0023) |
+| `experiments` | `experiment` | `experiment` (0022; embedding column 0028) |
+| `failures` | `failure` | `finding` + `experiment` (0022/0023) |
+| `assumptions` | `assumption` | `assumption` (0022) |
+
+Row mapping: `finding` rows yield `finding` except
+`finding_type == "failure"`; `experiment` rows yield `experiment` except
+`outcome == "failure"`; `assumption` rows yield `assumption`. The `failure`
+kind therefore draws from both tables.
+
+### Advertised capabilities
+
+- `search`: fused retrieval via `plan_retrieval`/`execute_retrieval`
+  over directly built SQL channel stores (the provider does not go
+  through `KnowledgeRetrievalService`).
+- `sources`: shared v1 evidence envelope, no native sidecar.
+- `catalog`: paginated listing of the four datasets above.
+- `documents`: paginated documents within one dataset.
+- `dataset_filter`: `search_scoped` restricted to selected datasets' kinds.
+- `document_filter`: `search_scoped` restricted to document IDs within
+  selected datasets.
+
+### Scope rules
+
+- Admitted scope `dataset_ids` must be a subset of the four dataset IDs;
+  unknown IDs are rejected, never mapped.
+- `disabled` blocks every fork tool and the bootstrap packet.
+- An inaccessible or missing selection fails the whole constrained request;
+  no best-effort fallback, no unrestricted retry.
+
+### Local-only deployment
+
+- Single registered provider: `quantflow-pg`. The in-tree RAGFlow/LightRAG
+  community adapters and the separately packaged WeKnora extension stay
+  unregistered and unconfigured.
+- Canonical store is PostgreSQL (`DEER_FLOW_KNOWLEDGE_DSN`); SQLite keeps
+  dev/test parity only.
+- Embeddings are local MPNet (`sentence-transformers/all-mpnet-base-v2`,
+  768-d) from the local HuggingFace cache with no implicit downloads; set
+  `HF_HUB_OFFLINE=1` for hermetic runs.
+
+### Phase 5 status: aliases + new config keys
+
+Verified against code on 2026-11-01 (Phase 5, docs consolidation +
+review fixes):
+
+- No `ledger_*` one-release aliases were ever created (Phase 4a kept
+  ledger ops on the backend path with no compat shim), so there was
+  nothing to retire.
+- The provider alias `QuantflowKnowledgeProvider =
+  QuantflowPgProvider` is deliberate and stays: it is the name the
+  conformance/catalog/gate/guard suites bind to, and both names are in
+  the module `__all__`. Canonical implementation name remains
+  `QuantflowPgProvider`.
+- New `knowledge:` config keys (see `knowledge/config.py`):
+  `intent_parser` (`"keyword"` default | `"muse"`,
+  `DEER_FLOW_KNOWLEDGE_INTENT_PARSER`); `artifact_store` (URI or
+  `None`, `DEER_FLOW_KNOWLEDGE_ARTIFACT_STORE`); `fusion_weights`
+  (mapping merged over `DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS` JSON,
+  unknown keys fail closed).

@@ -33,6 +33,25 @@ process-wide and no agent ``@tool`` wrappers exist for them. The ledger
 is therefore operator-curated at runtime: runs read via the lookup
 tools below and record outcomes through Spark (``log_outcome``), not
 the KB.
+
+Phase 4a entry-path routing: the generic upstream search tool
+(``knowledge_search`` via :func:`execute_knowledge_search
+<deerflow.knowledge.tools.execute_knowledge_search>` with the
+``quantflow-pg`` provider bound) is registered alongside — not instead
+of — the ledger tools below (see :func:`get_upstream_knowledge_tools`
+and the factory / lead-agent assembly). The per-operation routing lives
+in :data:`LEDGER_SEARCH_ROUTES`: every ledger operation keeps the
+bound-backend path because the upstream entry cannot serve its frozen
+semantics — the seven-kind paged search with structured filters and
+``documents``/``count``/``total`` JSON page (``ledger_search``), the
+order-preserving per-id batch fetch with per-id misses and
+``include_evidence`` (``ledger_get``), and the id-or-execution-hash
+lookup returning full experiment records (``experiment_get``). The
+upstream entry returns citation-marked text, not JSON pages; provider
+hits carry content-hash source ids, not KB ids, kinds, statuses or
+payloads, so shaping them back into the frozen agent API would be lossy.
+Citation-text rendering already converges (see :func:`format_ledger_hits` /
+:func:`prune_ledger_text`, which run through upstream budgeting).
 """
 
 import json
@@ -41,6 +60,7 @@ import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import Any, Protocol, runtime_checkable
 
 from langchain.tools import tool
@@ -48,8 +68,11 @@ from langchain.tools import tool
 from deerflow.knowledge.artifacts.models import ArtifactNotFoundError, ArtifactRecord
 from deerflow.knowledge.artifacts.store import ArtifactStore, parse_artifact_uri
 from deerflow.knowledge.config import get_knowledge_config
+from deerflow.knowledge.contract import KnowledgeRequestContext, KnowledgeSource, RetrievalHit, RetrievalResult
 from deerflow.knowledge.search import ExperimentSearchStore
+from deerflow.knowledge.sources import format_result, prune_sources, truncate
 from deerflow.knowledge.write_api import ExperimentRecord, KnowledgeError, KnowledgeValidationError
+from deerflow.knowledge_scope import KNOWLEDGE_SCOPE_RUNTIME_KEY, execution_scope
 from deerflow.runtime.user_context import resolve_runtime_user_id
 from deerflow.tools.types import Runtime
 
@@ -68,8 +91,25 @@ __all__ = [
     "RetrievalDocument",
     "RetrievalPage",
     "ArtifactSlice",
+    "LEDGER_EVIDENCE_PROVIDER",
+    "ledger_doc_to_hit",
+    "ledger_page_to_retrieval_result",
+    "format_ledger_hits",
+    "prune_ledger_text",
     "KnowledgeRetrievalBackend",
+    "ScopedKnowledgeRetrievalBackend",
     "ExperimentLookupStore",
+    "ScopedExperimentLookupStore",
+    "SCOPE_DISABLED_MESSAGE",
+    "SCOPE_INACCESSIBLE_MESSAGE",
+    "SCOPE_NOT_APPLICABLE_MESSAGE",
+    "SEARCH_ROUTE_BACKEND",
+    "SEARCH_ROUTE_UPSTREAM",
+    "LEDGER_SEARCH_ROUTES",
+    "resolve_search_route",
+    "resolve_tool_scope",
+    "scope_from_request_context",
+    "resolve_scoped_method",
     "ArtifactReadStore",
     "ArtifactStoreReader",
     "KnowledgeBackends",
@@ -89,6 +129,7 @@ __all__ = [
     "artifact_manifest_tool",
     "artifact_open_tool",
     "get_knowledge_tools",
+    "get_upstream_knowledge_tools",
 ]
 
 #: Default page size for ``ledger_search`` when the caller passes no limit.
@@ -139,6 +180,66 @@ _STATUSES = frozenset({"validated", "candidate", "superseded", "rejected"})
 _HASH_RE = re.compile(r"[0-9a-f]{64}")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _LOCATOR_RE = re.compile(r"^(bytes|lines|head|tail):(\d+)(?:-(\d+))?$")
+
+#: Evidence provider label for ledger documents adapted to upstream retrieval hits.
+LEDGER_EVIDENCE_PROVIDER = "quantflow-pg"
+
+#: Phase 3b refusal when knowledge is disabled for the turn. Same message as
+#: the upstream scope refusal (``knowledge/tools.py``, ``knowledge_scope_middleware.py``)
+#: minus the ``"Error: "`` prefix, which the fork JSON ``{"error": ...}`` envelope carries.
+SCOPE_DISABLED_MESSAGE = "Knowledge search is disabled for this turn."
+#: Phase 3b refusal when the selected scope is invalid, unknown, or otherwise not
+#: applicable. Mirrors the upstream ``PermissionError`` mapping (``knowledge/tools.py``).
+SCOPE_INACCESSIBLE_MESSAGE = "The selected knowledge scope is not accessible."
+#: Phase 3b error when a selected scope meets a backend without the scoped entry
+#: point. Mirrors upstream ``search_provider``; raised, never an unconstrained retry.
+SCOPE_NOT_APPLICABLE_MESSAGE = "Knowledge provider cannot apply the selected scope"
+
+#: Phase 4a entry-path route: the operation calls the bound fork backend
+#: directly (``KnowledgeRetrievalBackend`` / ``ExperimentLookupStore``).
+SEARCH_ROUTE_BACKEND = "backend"
+#: Phase 4a entry-path route: the operation goes through the upstream entry
+#: (:func:`execute_knowledge_search <deerflow.knowledge.tools.execute_knowledge_search>`
+#: with provider resolution rebound to ``quantflow-pg``).
+SEARCH_ROUTE_UPSTREAM = "upstream"
+
+#: Phase 4a per-operation entry-path routing (operation name → route).
+#:
+#: Every ledger operation routes ``backend``: the upstream entry returns
+#: citation-marked text shaped from content-hash hits, so it cannot serve
+#: the frozen JSON semantics — ``ledger_search`` (seven-kind paged search
+#: with structured filters and a ``documents``/``count``/``total`` page),
+#: ``ledger_get`` (order-preserving per-id fetch with per-id misses and
+#: ``include_evidence``), ``experiment_get`` (id-or-execution-hash lookup
+#: returning full experiment records). Convergence happens at assembly
+#: instead: :func:`get_upstream_knowledge_tools` registers the generic
+#: upstream search tool alongside these backend-path tools.
+LEDGER_SEARCH_ROUTES: dict[str, str] = {
+    "ledger_search": SEARCH_ROUTE_BACKEND,
+    "ledger_get": SEARCH_ROUTE_BACKEND,
+    "experiment_get": SEARCH_ROUTE_BACKEND,
+}
+
+
+def resolve_search_route(operation: str) -> str:
+    """Return the Phase 4a entry path for a ledger operation.
+
+    Args:
+        operation: One of ``ledger_search`` / ``ledger_get`` /
+            ``experiment_get``.
+
+    Returns:
+        :data:`SEARCH_ROUTE_BACKEND` or :data:`SEARCH_ROUTE_UPSTREAM`
+        from :data:`LEDGER_SEARCH_ROUTES`.
+
+    Raises:
+        KnowledgeValidationError: On an unknown operation name (typos
+            fail loudly instead of silently taking a default route).
+    """
+    try:
+        return LEDGER_SEARCH_ROUTES[operation]
+    except KeyError:
+        raise KnowledgeValidationError(f"unknown ledger operation {operation!r}; expected one of {sorted(LEDGER_SEARCH_ROUTES)}.") from None
 
 
 @dataclass(frozen=True)
@@ -218,6 +319,78 @@ class ArtifactSlice:
         return self.offset + len(self.data) < self.total_size
 
 
+def ledger_doc_to_hit(doc: RetrievalDocument) -> RetrievalHit | None:
+    """Adapt one ledger document to an upstream retrieval hit with verbatim evidence.
+
+    The hit content pairs the document title with its summary and the
+    source excerpt is that same text, so upstream :func:`format_result`
+    keeps the attribution (it drops sources whose excerpt differs from
+    the hit). The source id is content-hashed by :class:`KnowledgeSource`
+    from provider/title/excerpt. Returns ``None`` for documents with no
+    evidence text (upstream skips empty hits the same way).
+    """
+    title = (doc.title or doc.id).strip().replace("\n", " ")
+    summary = (doc.summary or "").strip().replace("\n", " ")
+    if summary and summary != title:
+        content = f"{title} — {summary}" if title else summary
+    else:
+        content = title or summary
+    content = truncate(content.strip(), 100_000)
+    if not content:
+        return None
+    label = truncate(title or doc.id, 500)
+    source = KnowledgeSource(provider=LEDGER_EVIDENCE_PROVIDER, title=label, excerpt=content)
+    score = doc.score if isinstance(doc.score, (int, float)) and not isinstance(doc.score, bool) and isfinite(doc.score) else None
+    return RetrievalHit(content=content, source=source, score=score)
+
+
+def ledger_page_to_retrieval_result(documents: Sequence[RetrievalDocument]) -> RetrievalResult:
+    """Adapt ledger documents, in order, to an upstream retrieval result."""
+    hits: list[RetrievalHit] = []
+    for doc in documents:
+        hit = ledger_doc_to_hit(doc)
+        if hit is not None:
+            hits.append(hit)
+    return RetrievalResult(hits=hits)
+
+
+def format_ledger_hits(
+    documents: Sequence[RetrievalDocument],
+    *,
+    max_chars_per_chunk: int = 800,
+    max_total_chars: int = 8000,
+) -> tuple[str, dict[str, Any]]:
+    """Render a ledger hit list as evidence-paired text through upstream budgeting.
+
+    Phase 1b hit-list renderer: per-hit chunk caps and the total budget
+    come from upstream :func:`format_result`, which drops whole hits
+    that cannot fit with real evidence instead of cutting a citation in
+    half. The JSON payloads from :func:`ledger_search`/:func:`ledger_get`
+    stay byte-frozen (parity-tested) as the stable agent API; this is
+    the citation-marked text rendering of the same hits.
+    """
+    return format_result(
+        ledger_page_to_retrieval_result(documents),
+        max_chars_per_chunk=max_chars_per_chunk,
+        max_total_chars=max_total_chars,
+    )
+
+
+def prune_ledger_text(text: str, documents: Sequence[RetrievalDocument]) -> tuple[str, dict[str, Any]]:
+    """Prune ledger-derived text through upstream evidence pairing.
+
+    Builds the evidence artifact for ``documents`` via upstream
+    :func:`format_result` (with a budget that provably fits every hit)
+    and passes ``text`` through upstream :func:`prune_sources`, so any
+    citation whose excerpt is no longer visible degrades to plain text
+    instead of dangling. Use this wherever ledger text is truncated.
+    """
+    hits = ledger_page_to_retrieval_result(documents).hits
+    budget = sum(len(hit.content) + 1024 for hit in hits) + 64
+    _, evidence_artifact = format_result(RetrievalResult(hits=hits), max_chars_per_chunk=100_000, max_total_chars=budget)
+    return prune_sources(text, evidence_artifact)
+
+
 @runtime_checkable
 class KnowledgeRetrievalBackend(Protocol):
     """Read boundary for hybrid KB retrieval; the integration step binds PG.
@@ -250,6 +423,50 @@ class KnowledgeRetrievalBackend(Protocol):
 
 
 @runtime_checkable
+class ScopedKnowledgeRetrievalBackend(KnowledgeRetrievalBackend, Protocol):
+    """Phase 3b scoped-search extension of :class:`KnowledgeRetrievalBackend`.
+
+    Optional: backends without these methods keep serving absent/all scopes
+    through the legacy entry points, and fail closed (``SCOPE_NOT_APPLICABLE_MESSAGE``,
+    never an unconstrained retry) when a selected scope arrives. The backend owns
+    the dataset-to-kind mapping and the document-id allowlist — fork service
+    functions pass the request context through and never reimplement filtering.
+    """
+
+    def search_scoped(
+        self,
+        query: str,
+        *,
+        kinds: tuple[str, ...],
+        filters: Mapping[str, str],
+        limit: int,
+        offset: int,
+        context: KnowledgeRequestContext,
+    ) -> RetrievalPage:
+        """Return one page of fused hits constrained by ``context.scope``.
+
+        The caller-validated ``kinds``/``filters``/``limit``/``offset`` narrow first;
+        the selected scope narrows further (unknown dataset ids fail the whole
+        call with ``PermissionError``). ``all`` scopes behave as the legacy search.
+        """
+        ...
+
+    def get_documents_scoped(
+        self,
+        ids: Sequence[str],
+        *,
+        include_evidence: bool,
+        context: KnowledgeRequestContext,
+    ) -> list[RetrievalDocument | None]:
+        """Return one entry per requested id under ``context.scope`` (order preserved).
+
+        Unknown AND out-of-scope ids both read as ``None`` so a miss never
+        confirms whether an id exists outside the scope.
+        """
+        ...
+
+
+@runtime_checkable
 class ExperimentLookupStore(ExperimentSearchStore, Protocol):
     """Experiment read boundary: ``search.py`` queries plus id lookup.
 
@@ -261,6 +478,25 @@ class ExperimentLookupStore(ExperimentSearchStore, Protocol):
 
     def find_by_id(self, experiment_id: str) -> ExperimentRecord | None:
         """Return the experiment with this id, or None (primary-key lookup)."""
+        ...
+
+
+@runtime_checkable
+class ScopedExperimentLookupStore(ExperimentLookupStore, Protocol):
+    """Phase 3b scoped-lookup extension of :class:`ExperimentLookupStore`.
+
+    Optional, with the same fail-closed rule as
+    :class:`ScopedKnowledgeRetrievalBackend`: selected scopes require these
+    methods, absent/all scopes may use the legacy finds. Out-of-scope refs
+    read as ``None`` (indistinguishable from unknown), never as errors.
+    """
+
+    def find_by_id_scoped(self, experiment_id: str, *, context: KnowledgeRequestContext) -> ExperimentRecord | None:
+        """Return the experiment with this id under ``context.scope``, or None."""
+        ...
+
+    def find_by_execution_hash_scoped(self, execution_hash: str, *, context: KnowledgeRequestContext) -> ExperimentRecord | None:
+        """Return the experiment with this execution hash under ``context.scope``, or None."""
         ...
 
 
@@ -552,6 +788,7 @@ def ledger_search(
     limit: int = DEFAULT_LIMIT,
     offset: int = 0,
     backend: KnowledgeRetrievalBackend,
+    request_context: KnowledgeRequestContext | None = None,
 ) -> dict[str, Any]:
     """Search KB documents by query text plus structured scope filters.
 
@@ -566,26 +803,48 @@ def ledger_search(
         limit: Page size (1..:data:`MAX_LIMIT`); oversized values raise.
         offset: Zero-based page offset.
         backend: Retrieval implementation (integration binds PG).
+        request_context: Phase 3b per-message scope (built by
+            :func:`resolve_tool_scope` in the ``@tool`` wrappers; ``None``
+            keeps the legacy unconstrained path for direct callers). A
+            selected scope routes through the backend's ``search_scoped``
+            entry point, which owns the dataset/kind enforcement.
 
     Returns:
         JSON-safe page dict (``documents``/``count``/``limit``/``offset``/
         ``total`` plus the echoed ``query``/``kinds``/``filters``).
+        This JSON shape is the frozen agent API (byte-parity tested);
+        render the same hits as citation-marked text via
+        :func:`format_ledger_hits`.
 
     Raises:
-        KnowledgeValidationError: On invalid query, kinds, filters or
-            pagination.
+        KnowledgeValidationError: On invalid query, kinds, filters,
+            pagination, or request context.
+        KnowledgeError: When knowledge is disabled for the turn, or a
+            selected scope meets a backend without ``search_scoped``.
     """
     validated_query = _require_query(query)
     validated_kinds = _require_kinds(kinds)
     validated_filters = _require_filters(filters)
     validated_limit, validated_offset = _require_pagination(limit, offset)
-    page = backend.search(
-        validated_query,
-        kinds=validated_kinds,
-        filters=validated_filters,
-        limit=validated_limit,
-        offset=validated_offset,
-    )
+    scope = scope_from_request_context(request_context)
+    scoped = resolve_scoped_method(backend, "search_scoped", scope)
+    if scope is not None and scoped is not None:
+        page = scoped(
+            validated_query,
+            kinds=validated_kinds,
+            filters=validated_filters,
+            limit=validated_limit,
+            offset=validated_offset,
+            context=request_context,
+        )
+    else:
+        page = backend.search(
+            validated_query,
+            kinds=validated_kinds,
+            filters=validated_filters,
+            limit=validated_limit,
+            offset=validated_offset,
+        )
     payload = page.to_dict()
     payload["query"] = validated_query
     payload["kinds"] = list(validated_kinds)
@@ -598,6 +857,7 @@ def ledger_get(
     *,
     include_evidence: bool = False,
     backend: KnowledgeRetrievalBackend,
+    request_context: KnowledgeRequestContext | None = None,
 ) -> dict[str, Any]:
     """Fetch KB documents by id, optionally with their evidence rows.
 
@@ -613,6 +873,10 @@ def ledger_get(
             (KB: cite only opened evidence) is enforced by the caller/run
             state, not here.
         backend: Retrieval implementation (integration binds PG).
+        request_context: Phase 3b per-message scope (``None`` keeps the
+            legacy path). A selected scope routes through the backend's
+            ``get_documents_scoped`` entry point; out-of-scope ids read
+            as ``not_found``, indistinguishable from unknown ids.
 
     Returns:
         JSON-safe dict with ``documents`` (resolved hits in request order)
@@ -621,7 +885,12 @@ def ledger_get(
     if not isinstance(include_evidence, bool):
         raise KnowledgeValidationError(f"include_evidence must be a bool, got {type(include_evidence).__name__}.")
     validated_ids = _require_ids(ids)
-    rows = backend.get_documents(validated_ids, include_evidence=include_evidence)
+    scope = scope_from_request_context(request_context)
+    scoped = resolve_scoped_method(backend, "get_documents_scoped", scope)
+    if scope is not None and scoped is not None:
+        rows = scoped(validated_ids, include_evidence=include_evidence, context=request_context)
+    else:
+        rows = backend.get_documents(validated_ids, include_evidence=include_evidence)
     documents: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     for requested, row in zip(validated_ids, list(rows)):
@@ -634,7 +903,7 @@ def ledger_get(
     return {"documents": documents, "errors": errors, "include_evidence": include_evidence}
 
 
-def experiment_get(ref: str, *, store: ExperimentLookupStore) -> dict[str, Any]:
+def experiment_get(ref: str, *, store: ExperimentLookupStore, request_context: KnowledgeRequestContext | None = None) -> dict[str, Any]:
     """Fetch one experiment by id (UUID) or exact execution hash (64-hex).
 
     The ``ref`` form is auto-detected: a 64-character lowercase hex digest
@@ -646,6 +915,11 @@ def experiment_get(ref: str, *, store: ExperimentLookupStore) -> dict[str, Any]:
     Args:
         ref: Experiment UUID or execution hash.
         store: Experiment read implementation (integration binds PG).
+        request_context: Phase 3b per-message scope (``None`` keeps the
+            legacy path). A selected scope routes through the store's
+            ``find_by_id_scoped`` / ``find_by_execution_hash_scoped``
+            entry points; out-of-scope refs read as not-found,
+            indistinguishable from unknown refs.
 
     Returns:
         JSON-safe dict with the ``experiment`` record, the ``ref`` as
@@ -654,15 +928,24 @@ def experiment_get(ref: str, *, store: ExperimentLookupStore) -> dict[str, Any]:
     if not isinstance(ref, str) or not ref.strip():
         raise KnowledgeValidationError(f"ref must be a non-empty string, got {ref!r}.")
     text = ref.strip()
+    scope = scope_from_request_context(request_context)
     if _HASH_RE.fullmatch(text):
-        record = store.find_by_execution_hash(text)
+        scoped = resolve_scoped_method(store, "find_by_execution_hash_scoped", scope)
+        if scope is not None and scoped is not None:
+            record = scoped(text, context=request_context)
+        else:
+            record = store.find_by_execution_hash(text)
         lookup = "execution_hash"
     else:
         try:
             experiment_id = str(uuid.UUID(text))
         except ValueError:
             raise KnowledgeValidationError(f"ref must be an experiment UUID or a 64-char execution hash, got {ref!r}.") from None
-        record = store.find_by_id(experiment_id)
+        scoped = resolve_scoped_method(store, "find_by_id_scoped", scope)
+        if scope is not None and scoped is not None:
+            record = scoped(experiment_id, context=request_context)
+        else:
+            record = store.find_by_id(experiment_id)
         lookup = "id"
     if record is None:
         raise KnowledgeError(f"Experiment not found: {text}")
@@ -939,10 +1222,88 @@ def _tool_error(exc: BaseException, *, log_message: str) -> str:
     """Map a tool failure to a JSON ``{"error": ...}`` payload (cf. memory/tools.py)."""
     if isinstance(exc, NotImplementedError):
         return json.dumps({"error": f"knowledge backend does not support this operation: {exc}"})
+    if isinstance(exc, PermissionError):
+        # Phase 3b: backend scope denials (e.g. unknown dataset ids) map to the
+        # fixed inaccessible-scope message, mirroring upstream knowledge/tools.py.
+        return json.dumps({"error": SCOPE_INACCESSIBLE_MESSAGE})
     if isinstance(exc, KnowledgeError):
         return json.dumps({"error": str(exc)})
     logger.exception(log_message)
     return json.dumps({"error": str(exc)})
+
+
+def resolve_tool_scope(runtime: Runtime | None) -> tuple[KnowledgeRequestContext | None, str | None]:
+    """Resolve the tool-call knowledge scope (Phase 3b; upstream ``tools.py`` pattern).
+
+    Reads the admitted execution scope from the tool runtime context
+    (``KNOWLEDGE_SCOPE_RUNTIME_KEY``), canonicalizes it via
+    :func:`execution_scope`, and builds the request context the retrieval
+    call carries.
+
+    Returns:
+        ``(request_context, refusal)``: ``refusal`` is a JSON
+        ``{"error": ...}`` payload and the call must not proceed when set
+        (disabled scope, or an invalid scope failing closed);
+        ``request_context`` is ``None`` when no scope is in force (legacy
+        unconstrained path, byte-identical).
+    """
+    context = getattr(runtime, "context", None)
+    mapping = context if isinstance(context, Mapping) else {}
+    raw = mapping.get(KNOWLEDGE_SCOPE_RUNTIME_KEY)
+    if raw is None:
+        return None, None
+    try:
+        scope = execution_scope(raw)
+    except Exception as exc:
+        # Scope validation details stay out of the tool result (cf. upstream
+        # tools.py, which logs the exception type only); the call fails closed.
+        logger.warning("knowledge tool scope invalid; refusing (%s)", type(exc).__name__)
+        return None, json.dumps({"error": SCOPE_INACCESSIBLE_MESSAGE})
+    if scope["mode"] == "disabled":
+        return None, json.dumps({"error": SCOPE_DISABLED_MESSAGE})
+    agent_name, user_id = _resolve_scope(runtime)
+    return KnowledgeRequestContext(user_id=user_id, agent_name=agent_name, scope=scope), None
+
+
+def scope_from_request_context(request_context: KnowledgeRequestContext | None) -> dict[str, Any] | None:
+    """Canonicalize the execution scope carried by a request context (Phase 3b).
+
+    Returns ``None`` when no scope is in force (legacy unconstrained path).
+    Raises :class:`KnowledgeError` when knowledge is disabled for the turn
+    and :class:`KnowledgeValidationError` on malformed scopes — both fail
+    closed with no data for direct service callers. The ``@tool`` wrappers
+    pre-refuse these cases via :func:`resolve_tool_scope`.
+    """
+    if request_context is None:
+        return None
+    if not isinstance(request_context, KnowledgeRequestContext):
+        raise KnowledgeValidationError(f"request_context must be a KnowledgeRequestContext or None, got {type(request_context).__name__}.")
+    if request_context.scope is None:
+        return None
+    try:
+        scope = execution_scope(request_context.scope)
+    except Exception as exc:
+        raise KnowledgeValidationError(f"invalid knowledge scope: {exc}") from None
+    if scope["mode"] == "disabled":
+        raise KnowledgeError(SCOPE_DISABLED_MESSAGE)
+    return scope
+
+
+def resolve_scoped_method(backend: Any, name: str, scope: Mapping[str, Any] | None) -> Any | None:
+    """Resolve an optional scoped backend method for an execution scope (Phase 3b).
+
+    Returns the bound method when the backend implements ``name`` (callers
+    use it whenever ``scope`` is not ``None``, so ``all`` scopes also
+    supply context, mirroring upstream ``search_provider``). Returns
+    ``None`` for absent scopes (legacy path, byte-identical) and for
+    ``all`` scopes on legacy backends. Raises :class:`KnowledgeError`
+    when a selected scope meets a backend without the scoped method —
+    fail closed, never an unconstrained retry.
+    """
+    method = getattr(backend, name, None)
+    if scope is not None and scope.get("mode") == "selected" and not callable(method):
+        raise KnowledgeError(SCOPE_NOT_APPLICABLE_MESSAGE)
+    return method if callable(method) else None
 
 
 @tool("ledger_search", parse_docstring=True)
@@ -976,7 +1337,9 @@ def ledger_search_tool(
         JSON string with "documents" (retrieval hits), "count", paging
         fields, and the echoed query/kinds/filters — or "error".
     """
-    _agent_name, _user_id = _resolve_scope(runtime)
+    request_context, refusal = resolve_tool_scope(runtime)
+    if refusal is not None:
+        return refusal
     try:
         backend = get_knowledge_backends().retrieval
         if backend is None:
@@ -997,6 +1360,7 @@ def ledger_search_tool(
             limit=limit,
             offset=offset,
             backend=backend,
+            request_context=request_context,
         )
         return json.dumps(payload, ensure_ascii=False)
     except Exception as exc:
@@ -1023,12 +1387,14 @@ def ledger_get_tool(
         JSON string with "documents" (resolved hits) and "errors"
         (per-id misses) — or "error" for a malformed call.
     """
-    _agent_name, _user_id = _resolve_scope(runtime)
+    request_context, refusal = resolve_tool_scope(runtime)
+    if refusal is not None:
+        return refusal
     try:
         backend = get_knowledge_backends().retrieval
         if backend is None:
             return json.dumps({"error": "knowledge retrieval backend is not bound"})
-        payload = ledger_get(ids, include_evidence=include_evidence, backend=backend)
+        payload = ledger_get(ids, include_evidence=include_evidence, backend=backend, request_context=request_context)
         return json.dumps(payload, ensure_ascii=False)
     except Exception as exc:
         return _tool_error(exc, log_message="ledger_get_tool failed")
@@ -1049,12 +1415,14 @@ def experiment_get_tool(runtime: Runtime, ref: str) -> str:
         JSON string with the "experiment" record and the "lookup" path
         used ("id" or "execution_hash") — or "error".
     """
-    _agent_name, _user_id = _resolve_scope(runtime)
+    request_context, refusal = resolve_tool_scope(runtime)
+    if refusal is not None:
+        return refusal
     try:
         store = get_knowledge_backends().experiments
         if store is None:
             return json.dumps({"error": "knowledge experiment store is not bound"})
-        payload = experiment_get(ref, store=store)
+        payload = experiment_get(ref, store=store, request_context=request_context)
         return json.dumps(payload, ensure_ascii=False)
     except Exception as exc:
         return _tool_error(exc, log_message="experiment_get_tool failed")
@@ -1074,7 +1442,13 @@ def artifact_manifest_tool(runtime: Runtime, ref: str) -> str:
         JSON string manifest (uri, sha256, kind, media_type, byte_size,
         locator schemes, open limits) — or "error".
     """
-    _agent_name, _user_id = _resolve_scope(runtime)
+    # Phase 3b: disabled/invalid scopes refuse here; selected scopes pass through —
+    # artifact refs are unguessable capability locators minted by scoped reads, and
+    # no dataset mapping exists for the artifact store, so there is no scoped entry
+    # point to route through.
+    _, refusal = resolve_tool_scope(runtime)
+    if refusal is not None:
+        return refusal
     try:
         artifacts = get_knowledge_backends().artifacts
         if artifacts is None:
@@ -1102,7 +1476,11 @@ def artifact_open_tool(runtime: Runtime, ref: str, locator: str) -> str:
         JSON string with the window "content", "encoding", paging flags,
         and the limits in force — or "error".
     """
-    _agent_name, _user_id = _resolve_scope(runtime)
+    # Phase 3b: same gating as artifact_manifest (disabled/invalid refuse; selected
+    # passes through on unguessable capability locators).
+    _, refusal = resolve_tool_scope(runtime)
+    if refusal is not None:
+        return refusal
     try:
         artifacts = get_knowledge_backends().artifacts
         if artifacts is None:
@@ -1128,3 +1506,26 @@ def get_knowledge_tools() -> list:
         artifact_manifest_tool,
         artifact_open_tool,
     ]
+
+
+def get_upstream_knowledge_tools() -> list:
+    """Return the upstream generic search tools served by ``quantflow-pg``.
+
+    Phase 4a convergence set: exactly the generic tools from
+    ``deerflow.knowledge.tools`` whose operation the fork provider
+    advertises — today only ``knowledge_search`` (operation ``search``).
+    ``knowledge_entries_search`` / ``entity_relations_search`` are
+    deliberately excluded: ``quantflow-pg`` advertises neither
+    ``entries_search`` nor ``relations_search``, so ``search_provider``
+    would refuse them ("operation is unavailable") and registering them
+    would register dead tools. Assembly appends these alongside
+    :func:`get_knowledge_tools` with skip-on-conflict, so an operator- or
+    user-provided same-name tool always wins.
+
+    The import stays function-local: ``deerflow.knowledge.tools`` pulls
+    in ``deerflow.config``, which this module must never import at top
+    level (see the import-cycle contract above).
+    """
+    from deerflow.knowledge.tools import knowledge_search_tool
+
+    return [knowledge_search_tool]

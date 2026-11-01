@@ -31,9 +31,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import Any
 
+from deerflow.knowledge.contract import KnowledgeSource, RetrievalHit, RetrievalResult
 from deerflow.knowledge.retrieval.fusion import FusedCandidate, FusionResult
+from deerflow.knowledge.sources import format_result, prune_sources, truncate
 from deerflow.knowledge.write_api import KnowledgeValidationError
 
 __all__ = [
@@ -62,6 +65,10 @@ __all__ = [
     "estimate_tokens",
     "utf8_bytes",
     "build_context_packet",
+    "PACKET_EVIDENCE_PROVIDER",
+    "packet_item_to_hit",
+    "packet_to_retrieval_result",
+    "render_packet_evidence",
 ]
 
 #: Findings the run can treat as current consensus (validated first by score).
@@ -125,6 +132,9 @@ DEFAULT_MAX_TOKENS = 4000
 DEFAULT_MAX_BYTES = 16384
 #: Default per-item snippet cap (characters; longer text truncates with an ellipsis marker).
 DEFAULT_MAX_SNIPPET_CHARS = 600
+
+#: Evidence provider label for packet rows adapted to upstream retrieval hits.
+PACKET_EVIDENCE_PROVIDER = "knowledge-packet"
 
 
 def estimate_tokens(text: str) -> int:
@@ -375,15 +385,72 @@ class ContextPacket:
             lines.append(f"  {placeholder.to_text()}")
         lines.append("")
         lines.append(f"[budget: {self.tokens_used}/{self.budget.max_tokens} tokens, {self.bytes_used}/{self.budget.max_bytes} bytes]")
-        return "\n".join(lines)
+        rendered = "\n".join(lines)
+        # Phase 1b: the pre-formatted packet passes through upstream
+        # prune_sources with the packet's format_result-built evidence
+        # artifact, so no future citation-marked line can dangle past its
+        # excerpt. Legacy section lines carry no citation markers, hence
+        # this pass is byte-identical today by construction (parity-tested);
+        # citation-marked line rendering is a later phase.
+        hits = packet_to_retrieval_result(self).hits
+        _, evidence_artifact = format_result(RetrievalResult(hits=hits), max_chars_per_chunk=100_000, max_total_chars=_fitting_budget(hits))
+        rendered, _ = prune_sources(rendered, evidence_artifact)
+        return rendered
+
+
+def packet_item_to_hit(item: PacketItem) -> RetrievalHit:
+    """Adapt one packet row to an upstream retrieval hit with verbatim evidence.
+
+    The hit content is the rendered packet line and the source excerpt is
+    that same text, so upstream :func:`format_result` keeps the
+    attribution (it drops sources whose excerpt differs from the hit).
+    The source id is content-hashed by :class:`KnowledgeSource` from
+    provider/title/excerpt. Defensive caps mirror the upstream field
+    limits (title 500, excerpt 100_000 chars); packet lines are bounded
+    by the snippet cap in practice, so evidence passes through uncut.
+    """
+    content = truncate(item.to_text(), 100_000)
+    label = truncate(item.title.strip() or item.id, 500)
+    source = KnowledgeSource(provider=PACKET_EVIDENCE_PROVIDER, title=label, excerpt=content)
+    score = item.score if isinstance(item.score, (int, float)) and not isinstance(item.score, bool) and isfinite(item.score) else None
+    return RetrievalHit(content=content, source=source, score=score)
+
+
+def packet_to_retrieval_result(packet: ContextPacket) -> RetrievalResult:
+    """Adapt every kept packet row, in render order, to an upstream result."""
+    return RetrievalResult(hits=[packet_item_to_hit(item) for part in packet.sections for item in part.items])
+
+
+def _fitting_budget(hits: Sequence[RetrievalHit]) -> int:
+    """Return a total-char budget that provably fits every given hit.
+
+    Each upstream entry costs its content plus a header (``[i]`` ordinal,
+    citation marker over a <=500-char label, newline); 1024 chars of
+    headroom per hit covers it with room to spare, so the evidence
+    artifact built for :meth:`ContextPacket.to_text` never drops a row.
+    """
+    return sum(len(hit.content) + 1024 for hit in hits) + 64
+
+
+def render_packet_evidence(packet: ContextPacket, *, max_chars_per_chunk: int = 800, max_total_chars: int = 8000) -> tuple[str, dict[str, Any]]:
+    """Render packet rows as evidence-paired text through upstream budgeting.
+
+    Unlike :meth:`ContextPacket.to_text` (legacy plain lines, byte-frozen),
+    this is the citation-marked rendering: per-hit chunk caps and the
+    total budget come from upstream :func:`format_result`, which drops
+    whole hits that cannot fit with real evidence instead of cutting a
+    citation in half.
+    """
+    return format_result(packet_to_retrieval_result(packet), max_chars_per_chunk=max_chars_per_chunk, max_total_chars=max_total_chars)
 
 
 def _clip_snippet(text: str, max_chars: int) -> str:
     """Clip snippet text to the per-item cap with an explicit ellipsis marker."""
-    cleaned = " ".join(text.split())
-    if len(cleaned) <= max_chars:
-        return cleaned
-    return cleaned[: max_chars - 1].rstrip() + "…"
+    # Phase 1b: whitespace collapsing stays local (packet lines are
+    # single-line by contract) while the cut itself delegates to upstream
+    # truncate — identical bytes for max_chars >= 1 (the PacketBudget
+    # floor), so the fork-rolled clip is gone but rendering is unchanged.
+    return truncate(" ".join(text.split()), max_chars)
 
 
 def _flags_for(item: FusedCandidate) -> tuple[str, ...]:

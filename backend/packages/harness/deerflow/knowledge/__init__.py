@@ -81,7 +81,7 @@ from deerflow.knowledge.config import (
 # collisions with the Quantflow side (verified: disjoint __all__ sets), so
 # upstream keeps its plain names. Near-miss (NOT a collision): Quantflow's
 # Phase 2 planner type lives at
-# ``deerflow.knowledge.retrieval.planner.RetrievalResult`` while upstream's
+# ``deerflow.knowledge.retrieval.planner.FusedRetrieval`` while upstream's
 # contract model is re-exported here as ``deerflow.knowledge.RetrievalResult``;
 # both keep their names in their own modules.
 from deerflow.knowledge.contract import (
@@ -160,6 +160,7 @@ __all__ = [
     "retrieval",
     "embeddings",
     "agent_tools",
+    "quantflow_provider",
     "ENV_DSN",
     "ENV_ENABLED",
     "ENV_S3_BUCKET",
@@ -233,7 +234,7 @@ __all__ = [
     "sources_from_messages",
 ]
 
-_LAZY_SUBMODULES = frozenset({"pg_store", "pg_retrieval", "schema", "retrieval", "embeddings", "agent_tools", "contract", "providers", "sources", "tools"})
+_LAZY_SUBMODULES = frozenset({"pg_store", "pg_retrieval", "schema", "retrieval", "embeddings", "agent_tools", "quantflow_provider", "contract", "providers", "sources", "tools"})
 
 
 def __getattr__(name: str) -> Any:

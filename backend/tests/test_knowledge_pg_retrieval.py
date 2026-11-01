@@ -8,7 +8,9 @@ dialect per the schema conventions):
   failure markers);
 * the four channel stores (structured kinds filter + newest-first order,
   lexical portable ranking, vector brute-force cosine, failure-set
-  restriction) including hard-filter screening and limit trimming;
+  restriction) including hard-filter screening and limit trimming —
+  Phase 1a: hits assert via the upstream evidence shape (``content`` +
+  verbatim ``KnowledgeSource`` excerpt, content-hash ids, fork datasets);
 * ``SQLExperimentLookupStore.find_by_id``;
 * the embedding plane binding (text source, vector store, backfill
   round-trip, search-document refresh);
@@ -25,10 +27,12 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 import sqlalchemy as sa
@@ -51,6 +55,7 @@ from deerflow.knowledge.config import (
     get_knowledge_config,
     set_knowledge_config,
 )
+from deerflow.knowledge.contract import KnowledgeSource, RetrievalHit, RetrievalResult
 from deerflow.knowledge.embeddings import (
     EMBEDDING_DIM,
     FAKE_MODEL_ID,
@@ -62,6 +67,7 @@ from deerflow.knowledge.embeddings import (
 )
 from deerflow.knowledge.retrieval.planner import (
     EDGE_TYPES,
+    Candidate,
     FailureSearchStore,
     LexicalSearchStore,
     RelationalExpansionStore,
@@ -73,7 +79,9 @@ from deerflow.knowledge.retrieval.planner import (
 )
 from deerflow.knowledge.schema.experiments import AssumptionRow, ExperimentRow
 from deerflow.knowledge.schema.findings import FindingRow
-from deerflow.knowledge.write_api import KnowledgeError, KnowledgeValidationError
+from deerflow.knowledge.search import ExperimentFilter
+from deerflow.knowledge.sources import format_result
+from deerflow.knowledge.write_api import ExperimentRecord, KnowledgeError, KnowledgeValidationError
 from deerflow.persistence.base import Base
 
 KB_TABLES: tuple[str, ...] = (
@@ -239,6 +247,25 @@ def _scope(**overrides) -> ScopeFilter:
     return ScopeFilter(**kwargs)
 
 
+def _titles(hits: Sequence[Any]) -> list[str]:
+    """Upstream evidence titles in hit order (Phase 1a: row identity via source)."""
+    titles: list[str] = []
+    for hit in hits:
+        assert hit.source is not None  # Phase 1a: every channel hit carries upstream evidence
+        titles.append(hit.source.title)
+    return titles
+
+
+def _datasets(hits: Sequence[Any]) -> list[str]:
+    """Upstream dataset names in hit order (Phase 1a: kind travels as dataset)."""
+    names: list[str] = []
+    for hit in hits:
+        assert hit.source is not None  # Phase 1a: every channel hit carries upstream evidence
+        assert hit.source.dataset_name is not None
+        names.append(hit.source.dataset_name)
+    return names
+
+
 class TestRowMapping:
     def test_finding_mapping(self, store: dict) -> None:
         with store["factory"]() as session:
@@ -317,37 +344,42 @@ class TestStructuredStore:
         backend = pg.SQLStructuredLookupStore(store["factory"])
         # No scope declared: every row is compatible; kind "failure" covers
         # failed experiments and failure findings alike, newest-first.
+        # Phase 1a: order and kind assert via the upstream evidence shape.
         found = backend.structured_lookup(ScopeFilter(), kinds=["experiment", "failure"], limit=10)
-        assert [item.id for item in found] == [
-            str(store["failure_finding_id"]),  # recorded 2026-03-11
-            str(store["failure_experiment_id"]),  # started 2026-02-10
-            str(store["experiment_id"]),  # started 2026-01-10
+        assert _titles(found) == [
+            "failure:borrow-costs-short-leg",  # recorded 2026-03-11
+            "Short-horizon reversal backtest with borrow costs",  # started 2026-02-10
+            "Cross-sectional momentum 126-day backtest",  # started 2026-01-10
         ]
-        assert [item.kind for item in found] == ["failure", "failure", "experiment"]
+        assert _datasets(found) == ["failures", "failures", "experiments"]
         experiments_only = backend.structured_lookup(ScopeFilter(), kinds=["experiment"], limit=10)
-        assert [item.id for item in experiments_only] == [str(store["experiment_id"])]
+        assert _titles(experiments_only) == ["Cross-sectional momentum 126-day backtest"]
 
     def test_findings_and_assumptions(self, store: dict) -> None:
         backend = pg.SQLStructuredLookupStore(store["factory"])
         found = backend.structured_lookup(ScopeFilter(), kinds=["finding", "assumption"], limit=10)
-        by_id = {item.id: item for item in found}
-        assert by_id[str(store["finding_id"])].kind == "finding"
-        assert by_id[str(store["assumption_id"])].kind == "assumption"
-        assert str(store["failure_finding_id"]) not in by_id  # kind "failure" not requested
+        # Phase 1a: membership and kind assert via the evidence shape.
+        by_title = dict(zip(_titles(found), _datasets(found), strict=True))
+        assert by_title == {
+            "empirical:momentum-persists-net-costs": "findings",
+            "Closing auction volume absorbs the rebalanced notional without material slippage.": "assumptions",
+        }
+        assert "failure:borrow-costs-short-leg" not in by_title  # kind "failure" not requested
 
     def test_scope_screening_matches_fusion(self, store: dict) -> None:
         backend = pg.SQLStructuredLookupStore(store["factory"])
         scoped = backend.structured_lookup(_scope(), kinds=["finding", "experiment", "failure", "assumption"], limit=10)
-        assert {item.id for item in scoped} == {
-            str(store["finding_id"]),
-            str(store["failure_finding_id"]),
-            str(store["experiment_id"]),
-            str(store["failure_experiment_id"]),
-            str(store["assumption_id"]),
+        # Phase 1a: same survivor set, identified by evidence titles.
+        assert set(_titles(scoped)) == {
+            "empirical:momentum-persists-net-costs",
+            "failure:borrow-costs-short-leg",
+            "Cross-sectional momentum 126-day backtest",
+            "Short-horizon reversal backtest with borrow costs",
+            "Closing auction volume absorbs the rebalanced notional without material slippage.",
         }
         mismatched = backend.structured_lookup(_scope(asset_class="credit"), kinds=["finding", "experiment", "failure", "assumption"], limit=10)
         # Only the scope-neutral assumption survives an asset-class mismatch.
-        assert [item.id for item in mismatched] == [str(store["assumption_id"])]
+        assert _titles(mismatched) == ["Closing auction volume absorbs the rebalanced notional without material slippage."]
         disjoint = backend.structured_lookup(_scope(valid_from="1990-01-01", valid_to="1990-12-31"), kinds=["finding", "experiment"], limit=10)
         assert disjoint == []
 
@@ -377,12 +409,13 @@ class TestStructuredStore:
         # finding + experiment match 5 scope fields (6m horizon); both
         # failures match 4 (5d horizon). Strength beats recency: the older
         # experiment outranks the newer failure_finding.
+        # Phase 1a: same strength-then-recency order, read via evidence titles.
         found = backend.structured_lookup(_scope(), kinds=["finding", "experiment", "failure"], limit=10)
-        assert [item.id for item in found] == [
-            str(store["finding_id"]),  # 5 matches, recorded 2026-03-10
-            str(store["experiment_id"]),  # 5 matches, started 2026-01-10
-            str(store["failure_finding_id"]),  # 4 matches, recorded 2026-03-11
-            str(store["failure_experiment_id"]),  # 4 matches, started 2026-02-10
+        assert _titles(found) == [
+            "empirical:momentum-persists-net-costs",  # 5 matches, recorded 2026-03-10
+            "Cross-sectional momentum 126-day backtest",  # 5 matches, started 2026-01-10
+            "failure:borrow-costs-short-leg",  # 4 matches, recorded 2026-03-11
+            "Short-horizon reversal backtest with borrow costs",  # 4 matches, started 2026-02-10
         ]
 
     def test_prunes_zero_match_rows_but_keeps_scope_neutral(self, store: dict) -> None:
@@ -393,7 +426,8 @@ class TestStructuredStore:
         backend = pg.SQLStructuredLookupStore(store["factory"])
         alien = ScopeFilter(markets=("JP",), universe="nikkei", horizon="99d", frequency="hourly")
         found = backend.structured_lookup(alien, kinds=["finding", "experiment", "failure", "assumption"], limit=10)
-        assert [item.id for item in found] == [str(store["assumption_id"])]
+        # Phase 1a: same sole survivor, identified by evidence title.
+        assert _titles(found) == ["Closing auction volume absorbs the rebalanced notional without material slippage."]
         # An empty filter constrains nothing: no pruning, recency order.
         found = backend.structured_lookup(ScopeFilter(), kinds=["finding", "experiment", "failure", "assumption"], limit=10)
         assert len(found) == 5
@@ -404,8 +438,9 @@ class TestLexicalStore:
         backend = pg.SQLLexicalSearchStore(store["factory"])
         found = backend.lexical_search("momentum backtest sharpe", ScopeFilter(), kinds=["finding", "experiment", "failure", "assumption"], limit=10)
         assert found, "expected lexical matches for fixture vocabulary"
-        assert found[0].id == str(store["experiment_id"])
-        assert all(item.id != str(store["assumption_id"]) for item in found)  # zero overlap excluded
+        # Phase 1a: top hit and exclusion assert via the evidence shape.
+        assert _titles(found)[0] == "Cross-sectional momentum 126-day backtest"
+        assert "Closing auction volume absorbs the rebalanced notional without material slippage." not in _titles(found)  # zero overlap excluded
 
     def test_zero_overlap_returns_nothing(self, store: dict) -> None:
         backend = pg.SQLLexicalSearchStore(store["factory"])
@@ -414,7 +449,8 @@ class TestLexicalStore:
     def test_kinds_and_scope_apply(self, store: dict) -> None:
         backend = pg.SQLLexicalSearchStore(store["factory"])
         found = backend.lexical_search("borrow costs", ScopeFilter(), kinds=["failure"], limit=10)
-        assert {item.id for item in found} == {str(store["failure_finding_id"]), str(store["failure_experiment_id"])}
+        # Phase 1a: same failure set, identified by evidence titles.
+        assert set(_titles(found)) == {"failure:borrow-costs-short-leg", "Short-horizon reversal backtest with borrow costs"}
         scoped_out = backend.lexical_search("borrow costs", _scope(asset_class="credit"), kinds=["failure"], limit=10)
         assert scoped_out == []
 
@@ -431,7 +467,8 @@ class TestVectorStore:
         assert query_text is not None
         [query_vector] = provider.embed_batch([query_text])
         found = backend.vector_search(query_vector, ScopeFilter(), kinds=["finding", "failure"], limit=10)
-        assert [item.id for item in found] == [str(store["finding_id"]), str(store["failure_finding_id"])]
+        # Phase 1a: same nearest-first order, read via evidence titles.
+        assert _titles(found) == ["empirical:momentum-persists-net-costs", "failure:borrow-costs-short-leg"]
 
     def test_unembedded_rows_never_match(self, store: dict) -> None:
         backend = pg.SQLVectorSearchStore(store["factory"])
@@ -461,9 +498,10 @@ class TestVectorStore:
         experiment_vectors.upsert_embedding(str(store["experiment_id"]), experiment_vector, model_id=provider.model_id)
         backend = pg.SQLVectorSearchStore(store["factory"])
         found = backend.vector_search(experiment_vector, ScopeFilter(), kinds=["finding", "experiment"], limit=10)
-        assert [item.id for item in found] == [str(store["experiment_id"]), str(store["finding_id"])]
+        # Phase 1a: same nearest-first order, read via evidence titles.
+        assert _titles(found) == ["Cross-sectional momentum 126-day backtest", "empirical:momentum-persists-net-costs"]
         experiments_only = backend.vector_search(experiment_vector, ScopeFilter(), kinds=["experiment"], limit=10)
-        assert [item.id for item in experiments_only] == [str(store["experiment_id"])]
+        assert _titles(experiments_only) == ["Cross-sectional momentum 126-day backtest"]
 
     def test_failure_kind_draws_from_both_tables(self, store: dict) -> None:
         provider = DeterministicEmbeddingProvider()
@@ -482,8 +520,9 @@ class TestVectorStore:
         assert query_text is not None
         [query_vector] = provider.embed_batch([query_text])
         found = backend.vector_search(query_vector, ScopeFilter(), kinds=["failure"], limit=10)
-        assert [item.id for item in found] == [str(store["failure_experiment_id"]), str(store["failure_finding_id"])]
-        assert all(item.kind == "failure" for item in found)
+        # Phase 1a: same cross-table order and kind, read via the evidence shape.
+        assert _titles(found) == ["Short-horizon reversal backtest with borrow costs", "failure:borrow-costs-short-leg"]
+        assert _datasets(found) == ["failures", "failures"]
 
     def test_unembedded_experiments_never_match(self, store: dict) -> None:
         provider = DeterministicEmbeddingProvider()
@@ -498,7 +537,8 @@ class TestVectorStore:
         # the embedded finding still matches the shared query.
         assert backend.vector_search(query_vector, ScopeFilter(), kinds=["experiment"], limit=10) == []
         found = backend.vector_search(query_vector, ScopeFilter(), kinds=["finding", "experiment"], limit=10)
-        assert [item.id for item in found] == [str(store["finding_id"])]
+        # Phase 1a: same sole match, identified by evidence title.
+        assert _titles(found) == ["empirical:momentum-persists-net-costs"]
 
     def test_scope_screening_applies_to_experiments(self, store: dict) -> None:
         provider = DeterministicEmbeddingProvider()
@@ -528,7 +568,8 @@ class TestVectorStore:
         backend = pg.SQLVectorSearchStore(store["factory"])
         with caplog.at_level("WARNING", logger="deerflow.knowledge.pg_retrieval"):
             found = backend.vector_search(query_vector, ScopeFilter(), kinds=["experiment", "failure"], limit=10)
-        assert [item.id for item in found] == [str(store["failure_experiment_id"])]
+        # Phase 1a: same sole survivor, identified by evidence title.
+        assert _titles(found) == ["Short-horizon reversal backtest with borrow costs"]
         assert "malformed stored embedding" in caplog.text
 
     def test_limit_trims_merged_tables(self, store: dict) -> None:
@@ -553,8 +594,9 @@ class TestFailureStore:
     def test_only_failures_ranked_by_relevance(self, store: dict) -> None:
         backend = pg.SQLFailureSearchStore(store["factory"])
         found = backend.search_failures("borrow costs short leg", ScopeFilter(), limit=10)
-        assert {item.id for item in found} == {str(store["failure_finding_id"]), str(store["failure_experiment_id"])}
-        assert all(item.kind == "failure" for item in found)
+        # Phase 1a: same failure set and kind, read via the evidence shape.
+        assert set(_titles(found)) == {"failure:borrow-costs-short-leg", "Short-horizon reversal backtest with borrow costs"}
+        assert _datasets(found) == ["failures"] * len(found)
 
     def test_scope_screening_applies(self, store: dict) -> None:
         backend = pg.SQLFailureSearchStore(store["factory"])
@@ -569,12 +611,144 @@ class TestExperimentLookup:
         assert record.hypothesis == "Cross-sectional momentum 126-day backtest"
         assert record.family_hash == FAMILY_A
         assert record.execution_hash == EXEC_A
+        # Phase 1a: the lookup hit also carries upstream evidence.
+        assert isinstance(record, ExperimentRecord)
+        assert record.source is not None
+        assert record.source.excerpt == record.content
+        assert "Cross-sectional momentum 126-day backtest" in record.content
+        assert record.source.title == "Cross-sectional momentum 126-day backtest"
+        assert record.source.dataset_name == "experiments"
         assert backend.find_by_id(str(uuid.uuid4())) is None
 
     def test_find_by_id_rejects_non_uuid(self, store: dict) -> None:
         backend = pg.SQLExperimentLookupStore(store["factory"])
         with pytest.raises(KnowledgeValidationError):
             backend.find_by_id("not-a-uuid")
+
+
+class TestEvidenceShape:
+    """Phase 1a: channel hits carry upstream retrieval evidence.
+
+    Every store search boundary returns hits with ``content`` plus an
+    upstream ``KnowledgeSource`` whose excerpt equals the content verbatim
+    (so ``format_result`` never strips the attribution) and whose id is the
+    content hash computed by ``KnowledgeSource`` itself — never invented,
+    never the row UUID.
+    """
+
+    def test_ranked_channel_hits_carry_verbatim_sources(self, store: dict) -> None:
+        factory = store["factory"]
+        structured = pg.SQLStructuredLookupStore(factory).structured_lookup(ScopeFilter(), kinds=["finding", "experiment", "failure", "assumption"], limit=10)
+        lexical = pg.SQLLexicalSearchStore(factory).lexical_search("momentum backtest borrow costs slippage", ScopeFilter(), kinds=["finding", "experiment", "failure", "assumption"], limit=10)
+        failures = pg.SQLFailureSearchStore(factory).search_failures("borrow costs", ScopeFilter(), limit=10)
+        assert structured and lexical and failures
+        for hit in [*structured, *lexical, *failures]:
+            assert isinstance(hit, Candidate)  # planner/fusion still see Candidates
+            assert hit.source is not None
+            assert hit.source.excerpt == hit.content
+            assert hit.content == hit.content.strip()
+            assert hit.source.provider == pg.EVIDENCE_PROVIDER
+            assert hit.source.dataset_name in {"findings", "experiments", "failures", "assumptions"}
+            assert hit.source.url is None and hit.source.page is None
+        assert {hit.source.dataset_name for hit in failures if hit.source is not None} == {"failures"}
+
+    def test_vector_and_relational_hits_carry_verbatim_sources(self, store: dict, linked: dict) -> None:
+        provider = DeterministicEmbeddingProvider()
+        backfill_findings_embeddings(
+            provider,
+            pg.SQLFindingTextSource(store["factory"]),
+            pg.SQLEmbeddingVectorStore(store["factory"], model_id=provider.model_id),
+            [str(store["finding_id"])],
+        )
+        [query_vector] = provider.embed_batch(["momentum"])
+        vector_hits = pg.SQLVectorSearchStore(store["factory"]).vector_search(query_vector, ScopeFilter(), kinds=["finding"], limit=10)
+        neighbors = pg.SQLRelationalExpansionStore(linked["factory"]).expand_neighbors([str(linked["parent_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50)
+        assert vector_hits and neighbors
+        for hit in [*vector_hits, *neighbors]:
+            assert isinstance(hit, Candidate)  # planner/fusion still see Candidates
+            assert hit.source is not None and hit.source.excerpt == hit.content
+            assert hit.source.provider == pg.EVIDENCE_PROVIDER
+            assert hit.source.dataset_name in {"findings", "experiments", "failures", "assumptions"}
+
+    def test_source_ids_are_content_hashes(self, store: dict) -> None:
+        found = pg.SQLStructuredLookupStore(store["factory"]).structured_lookup(ScopeFilter(), kinds=["finding", "experiment", "failure", "assumption"], limit=10)
+        assert len(found) == 5
+        seen: set[str] = set()
+        for hit in found:
+            assert hit.source is not None
+            rebuilt = KnowledgeSource(
+                provider=hit.source.provider,
+                title=hit.source.title,
+                excerpt=hit.source.excerpt,
+                dataset_name=hit.source.dataset_name,
+                url=hit.source.url,
+                page=hit.source.page,
+            )
+            assert hit.source.id == rebuilt.id  # KnowledgeSource content-hash rule, no invented ids
+            assert re.fullmatch(r"[0-9a-f]{32}", hit.source.id)
+            assert hit.source.id != hit.id  # upstream identity is the content hash, not the row UUID
+            seen.add(hit.source.id)
+        assert len(seen) == 5  # distinct rows hash distinctly
+
+    def test_format_result_keeps_channel_attribution(self, store: dict) -> None:
+        found = pg.SQLLexicalSearchStore(store["factory"]).lexical_search("momentum backtest", ScopeFilter(), kinds=["finding", "experiment"], limit=2)
+        assert found
+        result = RetrievalResult(hits=[pg.candidate_to_retrieval_hit(hit, score=1.0 / (rank + 1)) for rank, hit in enumerate(found)])
+        assert all(isinstance(hit, RetrievalHit) for hit in result.hits)
+        text, artifact = format_result(result)
+        assert "[citation:" in text
+        assert artifact["knowledge_sources_version"] == 1
+        assert len(artifact["knowledge_sources"]) == len(found)  # nothing stripped
+        for entry, hit in zip(artifact["knowledge_sources"], found, strict=True):
+            assert hit.source is not None
+            assert entry["id"] == hit.source.id
+
+    def test_candidate_converter_is_idempotent_and_fail_closed(self, store: dict) -> None:
+        with store["factory"]() as session:
+            row = session.get(FindingRow, store["finding_id"])
+            assert row is not None
+            bare = pg.finding_row_to_candidate(row)
+        assert type(bare) is Candidate  # the row mapper still emits bare candidates
+        hit = pg.candidate_to_evidence_hit(bare)
+        assert isinstance(hit, pg.EvidenceCandidate)
+        assert hit.id == bare.id and hit.text == bare.text and hit.scope == bare.scope
+        assert hit.scope is not bare.scope  # the hit never aliases the source payload
+        assert hit.source is not None and hit.source.excerpt == hit.content
+        assert pg.candidate_to_evidence_hit(hit) is hit  # idempotent
+        rendered = pg.candidate_to_retrieval_hit(bare)
+        assert isinstance(rendered, RetrievalHit)
+        assert rendered.content == hit.content and rendered.source == hit.source and rendered.score is None
+        with pytest.raises(KnowledgeValidationError):
+            pg.candidate_to_evidence_hit("not-a-candidate")  # type: ignore[arg-type]
+        with pytest.raises(KnowledgeValidationError):
+            pg.EvidenceCandidate(**bare.to_dict(), content="  ", source=None)  # empty content refused
+        with pytest.raises(KnowledgeValidationError):
+            pg.EvidenceCandidate(
+                **bare.to_dict(),
+                content="real content",
+                source=KnowledgeSource(provider="quantflow-pg", title="t", excerpt="other text"),
+            )  # non-verbatim excerpt refused
+
+    def test_experiment_store_methods_return_evidence_hits(self, store: dict) -> None:
+        backend = pg.SQLExperimentLookupStore(store["factory"])
+        by_id = backend.find_by_id(str(store["failure_experiment_id"]))
+        assert by_id is not None
+        assert isinstance(by_id, ExperimentRecord)
+        assert by_id.source is not None and by_id.source.excerpt == by_id.content
+        assert by_id.source.dataset_name == "failures"  # outcome == "failure" maps to failures
+        assert "reversal" in by_id.content
+        by_hash = backend.find_by_execution_hash(EXEC_B)
+        assert by_hash is not None and by_hash.id == by_id.id and by_hash.source == by_id.source
+        family = backend.find_by_family_hash(FAMILY_A, limit=10, offset=0)
+        assert [record.source.dataset_name for record in family if record.source is not None] == ["experiments"]
+        searched = backend.search_experiments(ExperimentFilter(outcome="failure"), limit=10, offset=0)
+        assert len(searched) == 1 and searched[0].source is not None
+        assert searched[0].source.excerpt == searched[0].content
+        assert searched[0].source.dataset_name == "failures"
+        assert pg.record_to_evidence_hit(by_id) is by_id  # idempotent
+        assert backend.find_by_execution_hash("zz" * 32) is None
+        with pytest.raises(KnowledgeValidationError):
+            pg.record_to_evidence_hit("not-a-record")  # type: ignore[arg-type]
 
 
 class TestEmbeddingPlane:
@@ -1211,37 +1385,42 @@ class TestRelationalExpansion:
         # (related_to), other (uses, via both the shared dataset and the
         # shared artifact — deduped to one hit), assumption (applies_to).
         # The failed child is included: expansion has no kinds filter.
-        assert [item.id for item in found].count(str(linked["other_id"])) == 1
-        assert {item.id for item in found} == {
-            str(linked["child_id"]),
-            str(linked["rescue_id"]),
-            str(linked["replica_id"]),
-            str(linked["sibling_id"]),
-            str(linked["other_id"]),
-            str(linked["linked_assumption_id"]),
+        # Phase 1a: same neighbor set and kind, read via the evidence shape.
+        titles = _titles(found)
+        assert titles.count("Corporate bond liquidity provision study") == 1
+        assert set(titles) == {
+            "Momentum turnover stress test",
+            "Overnight reversal microstructure examination",
+            "Momentum 126-day independent replication",
+            "Sector-neutral momentum variant backtest",
+            "Corporate bond liquidity provision study",
+            "Closing auction volume absorbs the rebalanced notional.",
         }
-        assert {item.id: item.kind for item in found}[str(linked["child_id"])] == "failure"
+        assert dict(zip(titles, _datasets(found), strict=True))["Momentum turnover stress test"] == "failures"
 
     def test_finding_supersedes_edges_run_both_directions(self, linked: dict) -> None:
         backend = pg.SQLRelationalExpansionStore(linked["factory"])
         forward = backend.expand_neighbors([str(linked["new_id"])], _scope(), edge_types=["supersedes"], limit=10)
-        assert [item.id for item in forward] == [str(linked["old_id"])]
+        # Phase 1a: same neighbors, identified by evidence titles.
+        assert _titles(forward) == ["empirical:relational-old-claim"]
         backward = backend.expand_neighbors([str(linked["old_id"])], _scope(), edge_types=["supersedes"], limit=10)
-        assert [item.id for item in backward] == [str(linked["new_id"])]
+        assert _titles(backward) == ["empirical:relational-new-claim"]
 
     def test_assumption_seed_reaches_its_experiment(self, linked: dict) -> None:
         backend = pg.SQLRelationalExpansionStore(linked["factory"])
         found = backend.expand_neighbors([str(linked["linked_assumption_id"])], _scope(), edge_types=["applies_to"], limit=10)
-        assert [item.id for item in found] == [str(linked["parent_id"])]
+        # Phase 1a: same neighbor, identified by evidence title.
+        assert _titles(found) == ["Cross-sectional momentum 126-day backtest"]
         assert backend.expand_neighbors([str(linked["orphan_assumption_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=10) == []
 
     def test_edge_types_filter_the_traversal(self, linked: dict) -> None:
         backend = pg.SQLRelationalExpansionStore(linked["factory"])
         seed = [str(linked["parent_id"])]
         derived = backend.expand_neighbors(seed, _scope(), edge_types=["derived_from"], limit=50)
-        assert {item.id for item in derived} == {str(linked["child_id"]), str(linked["rescue_id"])}
+        # Phase 1a: same neighbor sets, identified by evidence titles.
+        assert set(_titles(derived)) == {"Momentum turnover stress test", "Overnight reversal microstructure examination"}
         uses = backend.expand_neighbors(seed, _scope(), edge_types=["uses"], limit=50)
-        assert [item.id for item in uses] == [str(linked["other_id"])]
+        assert _titles(uses) == ["Corporate bond liquidity provision study"]
         # supports/contradicts have no backing relation: accepted, empty.
         assert backend.expand_neighbors(seed, _scope(), edge_types=["supports", "contradicts"], limit=50) == []
         assert backend.expand_neighbors(seed, _scope(), edge_types=[], limit=50) == []
@@ -1257,10 +1436,11 @@ class TestRelationalExpansion:
         backend = pg.SQLRelationalExpansionStore(linked["factory"])
         # The child reaches only its parent: the sibling, replica, other,
         # and assumption are two hops away and must stay out.
+        # Phase 1a: same sole neighbor, identified by evidence title.
         found = backend.expand_neighbors([str(linked["child_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50)
-        assert [item.id for item in found] == [str(linked["parent_id"])]
+        assert _titles(found) == ["Cross-sectional momentum 126-day backtest"]
         found = backend.expand_neighbors([str(linked["sibling_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50)
-        assert [item.id for item in found] == [str(linked["parent_id"])]
+        assert _titles(found) == ["Cross-sectional momentum 126-day backtest"]
 
     def test_empty_graph_and_unknown_seeds_return_nothing(self, linked: dict) -> None:
         backend = pg.SQLRelationalExpansionStore(linked["factory"])
@@ -1272,15 +1452,16 @@ class TestRelationalExpansion:
     def test_seeds_are_excluded_from_results(self, linked: dict) -> None:
         backend = pg.SQLRelationalExpansionStore(linked["factory"])
         found = backend.expand_neighbors([str(linked["parent_id"]), str(linked["child_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50)
-        ids = {item.id for item in found}
-        assert str(linked["parent_id"]) not in ids
-        assert str(linked["child_id"]) not in ids
-        assert ids == {
-            str(linked["rescue_id"]),
-            str(linked["replica_id"]),
-            str(linked["sibling_id"]),
-            str(linked["other_id"]),
-            str(linked["linked_assumption_id"]),
+        # Phase 1a: same exclusion set, identified by evidence titles.
+        titles = set(_titles(found))
+        assert "Cross-sectional momentum 126-day backtest" not in titles
+        assert "Momentum turnover stress test" not in titles
+        assert titles == {
+            "Overnight reversal microstructure examination",
+            "Momentum 126-day independent replication",
+            "Sector-neutral momentum variant backtest",
+            "Corporate bond liquidity provision study",
+            "Closing auction volume absorbs the rebalanced notional.",
         }
 
     def test_scope_screening_matches_fusion(self, linked: dict) -> None:
@@ -1288,8 +1469,9 @@ class TestRelationalExpansion:
         # Under an asset-class mismatch only scope-neutral neighbors survive:
         # the assumption (no scope at all) and the rescue row (declares
         # horizon/frequency only, no asset class).
+        # Phase 1a: same survivor set, identified by evidence titles.
         found = backend.expand_neighbors([str(linked["parent_id"])], _scope(asset_class="credit"), edge_types=list(EDGE_TYPES), limit=50)
-        assert {item.id for item in found} == {str(linked["linked_assumption_id"]), str(linked["rescue_id"])}
+        assert set(_titles(found)) == {"Closing auction volume absorbs the rebalanced notional.", "Overnight reversal microstructure examination"}
 
     def test_limit_trims(self, linked: dict) -> None:
         backend = pg.SQLRelationalExpansionStore(linked["factory"])
@@ -1301,7 +1483,8 @@ class TestRelationalExpansion:
         found = backend.expand_neighbors([str(linked["new_id"]), str(linked["child_id"])], _scope(), edge_types=list(EDGE_TYPES), limit=50)
         # The finding neighbor (seed 0) outranks the experiment neighbor
         # (seed 1) regardless of recency.
-        assert [item.id for item in found] == [str(linked["old_id"]), str(linked["parent_id"])]
+        # Phase 1a: same seed order, read via evidence titles.
+        assert _titles(found) == ["empirical:relational-old-claim", "Cross-sectional momentum 126-day backtest"]
 
     def test_service_search_surfaces_expansion_only_neighbors(self, linked: dict) -> None:
         service = pg.KnowledgeRetrievalService(linked["factory"])

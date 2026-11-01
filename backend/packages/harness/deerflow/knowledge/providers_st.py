@@ -9,7 +9,8 @@ package is missing.
 The provider emits canonical :data:`EMBEDDING_DIM` (768) L2-unit vectors from
 ``sentence-transformers/all-mpnet-base-v2`` (default id :data:`ST_MODEL_ID`),
 resolved from the local HuggingFace cache (no implicit downloads at retrieval
-time — the checkpoint must already be cached; ``HF_HUB_OFFLINE=1`` is honored).
+time — the checkpoint must already be cached; ``local_files_only=True`` is
+passed and ``HF_HUB_OFFLINE=1`` is honored).
 """
 
 from __future__ import annotations
@@ -63,7 +64,7 @@ class SentenceTransformerEmbeddingProvider:
         self._model_id = model_id.strip()
         self._lock = threading.Lock()
         try:
-            self._model = SentenceTransformer(self._model_id)
+            self._model = SentenceTransformer(self._model_id, local_files_only=True)
         except Exception as exc:
             raise EmbeddingProviderError(f"Failed to load sentence-transformers checkpoint {self._model_id!r}: {exc}") from exc
         self._model.eval()

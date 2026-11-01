@@ -27,23 +27,31 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from math import isfinite
 from typing import Any, Protocol, runtime_checkable
 
 from langchain.tools import tool
 
+from deerflow.knowledge.config import get_knowledge_config
+from deerflow.knowledge.contract import KnowledgeRequestContext, KnowledgeSource, RetrievalHit, RetrievalResult
 from deerflow.knowledge.hashing import normalize
+from deerflow.knowledge.llm_text_client import LLMTextClient
 from deerflow.knowledge.search import ExperimentSearchStore, experiment_search
+from deerflow.knowledge.sources import format_result, prune_sources, truncate
 from deerflow.knowledge.write_api import KnowledgeError, KnowledgeValidationError
-from deerflow.runtime.user_context import resolve_runtime_user_id
 from deerflow.tools.types import Runtime
 
 from .lookup import (
     MAX_LIMIT,
+    SCOPE_NOT_APPLICABLE_MESSAGE,
     ArtifactReadStore,
     KnowledgeRetrievalBackend,
     RetrievalDocument,
     bind_knowledge_backends,
     get_knowledge_backends,
+    resolve_scoped_method,
+    resolve_tool_scope,
+    scope_from_request_context,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,9 +76,14 @@ __all__ = [
     "parse_research_intent",
     "intent_from_text",
     "intent_from_mapping",
+    "bind_intent_llm_client",
+    "get_intent_llm_client",
     "plan_retrieval",
     "knowledge_bootstrap",
     "format_context_packet",
+    "BOOTSTRAP_EVIDENCE_PROVIDER",
+    "packet_entry_to_hit",
+    "packet_sections_to_retrieval_result",
     "knowledge_bootstrap_tool",
     "get_knowledge_bootstrap_tool",
     "bind_knowledge_backends",
@@ -114,6 +127,9 @@ DEFAULT_NEEDED_MEMORY = (
 
 #: Closed asset-class vocabulary for intent parsing.
 ASSET_CLASSES = frozenset({"equity", "fixed_income", "futures", "fx", "crypto", "multi_asset", "unknown"})
+
+#: Evidence provider label for bootstrap packet entries adapted to upstream retrieval hits.
+BOOTSTRAP_EVIDENCE_PROVIDER = "knowledge-bootstrap"
 
 _DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 _YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
@@ -520,8 +536,8 @@ def _detect_horizon(text: str) -> str | None:
     return f"{first} {first_unit} to {second} {second_unit}"
 
 
-def intent_from_text(task: str, *, needed_memory: Sequence[str] | None = None) -> ResearchIntent:
-    """Convert a raw task string into a structured research intent.
+def _intent_from_text_keyword(task: str, *, needed_memory: Sequence[str] | None = None) -> ResearchIntent:
+    """Convert a raw task string into a research intent (keyword heuristic).
 
     The conversion is deterministic keyword extraction (documented
     heuristic, no model calls): topic from the task text, asset class /
@@ -553,6 +569,143 @@ def intent_from_text(task: str, *, needed_memory: Sequence[str] | None = None) -
         requested_period=_detect_period(topic),
         needed_memory=_require_needed_memory(needed_memory),
     )
+
+
+#: Prompt template for the opt-in Muse intent parser. The model must emit
+#: exactly one JSON object in the research-intent shape; the reply is
+#: strictly validated by :func:`intent_from_mapping`, and anything
+#: unparseable falls back to the keyword heuristic.
+_INTENT_LLM_PROMPT = """\
+You convert a quantitative-research task into a structured research intent.
+Reply with exactly one JSON object and nothing else (no markdown fences, no explanation).
+Keys (all optional except "topic"; use null when unknown, omit nothing else):
+- "topic": the task text, lightly normalized (required, non-empty string).
+- "asset_class": one of "equity", "fixed_income", "futures", "fx", "crypto", "multi_asset", "unknown".
+- "markets": list with any of "US", "EU", "UK", "JP", "CN", "EM", "GL" (empty list when unspecified).
+- "universe": tradable-universe description or null.
+- "horizon": holding/forecast horizon description or null.
+- "frequency": data frequency ("tick", "intraday", "daily", "weekly", "monthly", "quarterly", "annual") or null.
+- "concepts": list of key research concepts (short phrases, most important first).
+- "requested_period": ["YYYY-MM-DD", "YYYY-MM-DD"] sample period or null.
+- "needed_memory": list with any of "validated_findings", "prior_experiments", "failures", "conflicts", "assumptions", "relevant_skills".
+
+Task:
+{task}
+"""
+
+#: Process-wide LLM client for the opt-in Muse intent parser (unbound by default).
+_intent_llm_client: LLMTextClient | None = None
+
+
+def bind_intent_llm_client(client: LLMTextClient | None) -> LLMTextClient | None:
+    """Register the process-wide LLM client for the Muse intent parser.
+
+    Args:
+        client: Text-completion client implementation (the app layer
+            binds the ``muse exec`` client; tests bind fakes). ``None``
+            unbinds, restoring keyword-only parsing.
+
+    Returns:
+        The registered client (or ``None`` when unbound).
+    """
+    global _intent_llm_client
+    _intent_llm_client = client
+    return _intent_llm_client
+
+
+def get_intent_llm_client() -> LLMTextClient | None:
+    """Return the bound intent-parser LLM client, or ``None`` when unbound."""
+    return _intent_llm_client
+
+
+def _intent_llm_selected() -> bool:
+    """Whether the Muse parser is both configured and bound (else keyword)."""
+    if _intent_llm_client is None:
+        return False
+    try:
+        return get_knowledge_config().get_intent_parser() == "muse"
+    except Exception:
+        logger.warning("invalid knowledge intent_parser config; using the keyword parser.", exc_info=True)
+        return False
+
+
+def _parse_intent_json(raw: str) -> dict[str, Any]:
+    """Decode one research-intent JSON object from model text.
+
+    Markdown fences and surrounding prose are tolerated (the span from
+    the first ``{`` to the last ``}`` is decoded); the result must be a
+    JSON object. Raises :class:`KnowledgeValidationError` on any failure
+    so the caller falls back to the keyword heuristic.
+    """
+    if not isinstance(raw, str):
+        raise KnowledgeValidationError(f"LLM intent output must be a string, got {type(raw).__name__}.")
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    if not text.startswith("{"):
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise KnowledgeValidationError(f"LLM intent output contains no JSON object: {raw[:200]!r}.")
+        text = text[start : end + 1]
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise KnowledgeValidationError(f"LLM intent output is not valid JSON: {exc}") from exc
+    if not isinstance(decoded, dict):
+        raise KnowledgeValidationError(f"LLM intent output must decode to an object, got {type(decoded).__name__}.")
+    return decoded
+
+
+def _intent_from_text_llm(task: str, *, needed_memory: Sequence[str] | None = None) -> ResearchIntent:
+    """Parse a task via the bound LLM client (raises on any failure).
+
+    The model reply is strictly validated into the SAME
+    :class:`ResearchIntent` shape as the keyword path; an explicitly
+    passed ``needed_memory`` overrides the model's channel list.
+    """
+    client = _intent_llm_client
+    if client is None:
+        raise KnowledgeError("no intent LLM client is bound.")
+    topic = _require_topic(task)
+    raw = client.complete(_INTENT_LLM_PROMPT.format(task=topic))
+    data = _parse_intent_json(raw)
+    if needed_memory is not None:
+        data["needed_memory"] = needed_memory
+    return intent_from_mapping(data)
+
+
+def intent_from_text(task: str, *, needed_memory: Sequence[str] | None = None) -> ResearchIntent:
+    """Convert a raw task string into a structured research intent.
+
+    When the knowledge config selects the ``muse`` intent parser AND an
+    LLM client is bound, the task is parsed by the model first and the
+    reply is strictly validated into the SAME :class:`ResearchIntent`
+    shape; ANY failure (transport, timeout, non-JSON output, shape
+    violation) logs at warning and falls back to the deterministic
+    keyword heuristic. Otherwise — default config, unbound client,
+    offline CI — the keyword path runs directly with byte-identical
+    behavior.
+
+    Args:
+        task: Raw agent task text (non-empty).
+        needed_memory: Optional channel subset; defaults to
+            :data:`DEFAULT_NEEDED_MEMORY`.
+
+    Raises:
+        KnowledgeValidationError: On empty tasks or unknown channels.
+    """
+    if not isinstance(task, str):
+        raise KnowledgeValidationError(f"task must be a string, got {type(task).__name__}.")
+    if _intent_llm_selected():
+        try:
+            return _intent_from_text_llm(task, needed_memory=needed_memory)
+        except Exception:
+            logger.warning("Muse intent parser failed; falling back to the keyword heuristic.", exc_info=True)
+    return _intent_from_text_keyword(task, needed_memory=needed_memory)
 
 
 def _require_needed_memory(needed_memory: Any) -> list[str]:
@@ -755,11 +908,41 @@ def _experiment_entry(record: Any) -> dict[str, Any]:
     }
 
 
-def _run_validated_findings(step: RetrievalPlanStep, stores: BootstrapStores) -> list[dict[str, Any]]:
-    """Execute the validated-findings channel over the retrieval backend."""
+def _run_retrieval_kinds(
+    step: RetrievalPlanStep,
+    stores: BootstrapStores,
+    kinds: tuple[str, ...],
+    *,
+    scope: dict[str, Any] | None,
+    request_context: KnowledgeRequestContext | None,
+) -> list[dict[str, Any]]:
+    """Execute one document channel, scoped when a per-message scope is in force.
+
+    Phase 3b: a selected scope routes through the backend's ``search_scoped``
+    entry point (which owns dataset/kind enforcement); a missing scoped
+    method fails this channel closed via :func:`resolve_scoped_method`
+    instead of falling back to an unconstrained search. Absent scopes keep
+    the legacy path byte-identical.
+    """
     assert stores.retrieval is not None
-    page = stores.retrieval.search(step.query, kinds=("finding",), filters={k: v for k, v in step.filters.items() if not k.startswith("_")}, limit=step.limit, offset=0)
+    filters = {k: v for k, v in step.filters.items() if not k.startswith("_")}
+    scoped = resolve_scoped_method(stores.retrieval, "search_scoped", scope)
+    if scope is not None and scoped is not None:
+        page = scoped(step.query, kinds=kinds, filters=filters, limit=step.limit, offset=0, context=request_context)
+    else:
+        page = stores.retrieval.search(step.query, kinds=kinds, filters=filters, limit=step.limit, offset=0)
     return [_doc_entry(doc) for doc in page.documents]
+
+
+def _run_validated_findings(
+    step: RetrievalPlanStep,
+    stores: BootstrapStores,
+    *,
+    scope: dict[str, Any] | None,
+    request_context: KnowledgeRequestContext | None,
+) -> list[dict[str, Any]]:
+    """Execute the validated-findings channel over the retrieval backend."""
+    return _run_retrieval_kinds(step, stores, ("finding",), scope=scope, request_context=request_context)
 
 
 def _experiment_design(intent: ResearchIntent) -> dict[str, Any]:
@@ -778,9 +961,29 @@ def _experiment_design(intent: ResearchIntent) -> dict[str, Any]:
     return {"hypothesis": intent.topic, "methodology": methodology}
 
 
-def _run_prior_experiments(intent: ResearchIntent, step: RetrievalPlanStep, stores: BootstrapStores) -> list[dict[str, Any]]:
+def _guard_experiment_scope(scope: dict[str, Any] | None) -> None:
+    """Fail closed when a selected scope reaches the unscoped experiment store.
+
+    Phase 3b: ``ExperimentSearchStore`` has no scoped entry point yet, so a
+    selected scope cannot constrain experiment recall — the channel gaps
+    loudly (recorded in ``channel_errors``) instead of running an
+    unrestricted retry. A future scoped experiment-search integration fills
+    this without changing the fork call sites.
+    """
+    if scope is not None and scope.get("mode") == "selected":
+        raise KnowledgeError(SCOPE_NOT_APPLICABLE_MESSAGE)
+
+
+def _run_prior_experiments(
+    intent: ResearchIntent,
+    step: RetrievalPlanStep,
+    stores: BootstrapStores,
+    *,
+    scope: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
     """Execute the prior-experiments channel (family lookup, substring fallback)."""
     assert stores.experiments is not None
+    _guard_experiment_scope(scope)
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
     try:
@@ -801,7 +1004,14 @@ def _run_prior_experiments(intent: ResearchIntent, step: RetrievalPlanStep, stor
     return entries
 
 
-def _run_failures(intent: ResearchIntent, step: RetrievalPlanStep, stores: BootstrapStores) -> list[dict[str, Any]]:
+def _run_failures(
+    intent: ResearchIntent,
+    step: RetrievalPlanStep,
+    stores: BootstrapStores,
+    *,
+    scope: dict[str, Any] | None,
+    request_context: KnowledgeRequestContext | None,
+) -> list[dict[str, Any]]:
     """Execute the dedicated failure channel (experiments + failure docs).
 
     The two legs are independent: when one leg raises but the other
@@ -809,10 +1019,16 @@ def _run_failures(intent: ResearchIntent, step: RetrievalPlanStep, stores: Boots
     outage is logged) so a retrieval blip cannot hide known experiment
     failures; when nothing was retrieved the error propagates so the
     packet records a channel gap.
+
+    Phase 3b: under a selected scope the experiments leg raises before
+    reading (unscoped store, fail closed) so the whole channel gaps loudly
+    — failure recall must never be silently partial. The retrieval leg
+    routes through ``search_scoped`` like the other document channels.
     """
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
     if stores.experiments is not None:
+        _guard_experiment_scope(scope)
         for record in _union_needle_search(stores.experiments, _hypothesis_needles(intent), limit=step.limit, outcome="failure"):
             entry = _experiment_entry(record)
             entry["kind"] = "failure"
@@ -821,7 +1037,11 @@ def _run_failures(intent: ResearchIntent, step: RetrievalPlanStep, stores: Boots
                 entries.append(entry)
     if stores.retrieval is not None:
         try:
-            page = stores.retrieval.search(step.query, kinds=("failure",), filters={}, limit=step.limit, offset=0)
+            scoped = resolve_scoped_method(stores.retrieval, "search_scoped", scope)
+            if scope is not None and scoped is not None:
+                page = scoped(step.query, kinds=("failure",), filters={}, limit=step.limit, offset=0, context=request_context)
+            else:
+                page = stores.retrieval.search(step.query, kinds=("failure",), filters={}, limit=step.limit, offset=0)
         except Exception:
             if entries:
                 logger.warning("knowledge_bootstrap failures channel: retrieval leg failed; returning %d experiment failure(s)", len(entries), exc_info=True)
@@ -834,11 +1054,16 @@ def _run_failures(intent: ResearchIntent, step: RetrievalPlanStep, stores: Boots
     return entries[: step.limit]
 
 
-def _run_retrieval_channel(step: RetrievalPlanStep, stores: BootstrapStores, kinds: tuple[str, ...]) -> list[dict[str, Any]]:
+def _run_retrieval_channel(
+    step: RetrievalPlanStep,
+    stores: BootstrapStores,
+    kinds: tuple[str, ...],
+    *,
+    scope: dict[str, Any] | None,
+    request_context: KnowledgeRequestContext | None,
+) -> list[dict[str, Any]]:
     """Execute a plain document channel (conflicts / assumptions)."""
-    assert stores.retrieval is not None
-    page = stores.retrieval.search(step.query, kinds=kinds, filters={k: v for k, v in step.filters.items() if not k.startswith("_")}, limit=step.limit, offset=0)
-    return [_doc_entry(doc) for doc in page.documents]
+    return _run_retrieval_kinds(step, stores, kinds, scope=scope, request_context=request_context)
 
 
 def _run_skills(intent: ResearchIntent, step: RetrievalPlanStep, stores: BootstrapStores) -> list[dict[str, Any]]:
@@ -872,40 +1097,101 @@ _SECTION_TITLES = {
 }
 
 
-def _execute_step(intent: ResearchIntent, step: RetrievalPlanStep, stores: BootstrapStores) -> list[dict[str, Any]]:
-    """Route one plan step to its channel implementation."""
+def _execute_step(
+    intent: ResearchIntent,
+    step: RetrievalPlanStep,
+    stores: BootstrapStores,
+    *,
+    scope: dict[str, Any] | None = None,
+    request_context: KnowledgeRequestContext | None = None,
+) -> list[dict[str, Any]]:
+    """Route one plan step to its channel implementation.
+
+    Phase 3b ``scope``/``request_context`` thread the per-message scope to the
+    document channels (via ``search_scoped``) and fail the experiment-store
+    channels closed under a selected scope. The skills channel is
+    scope-independent: the skill catalog is operator-curated tool metadata,
+    not scoped KB evidence.
+    """
     if step.channel == "validated_findings":
         if stores.retrieval is None:
             raise KnowledgeError("retrieval backend is not bound")
-        return _run_validated_findings(step, stores)
+        return _run_validated_findings(step, stores, scope=scope, request_context=request_context)
     if step.channel == "prior_experiments":
         if stores.experiments is None:
             raise KnowledgeError("experiment store is not bound")
-        return _run_prior_experiments(intent, step, stores)
+        return _run_prior_experiments(intent, step, stores, scope=scope)
     if step.channel == "failures":
         if stores.retrieval is None and stores.experiments is None:
             raise KnowledgeError("neither retrieval backend nor experiment store is bound")
-        return _run_failures(intent, step, stores)
+        return _run_failures(intent, step, stores, scope=scope, request_context=request_context)
     if step.channel == "conflicts":
         if stores.retrieval is None:
             raise KnowledgeError("retrieval backend is not bound")
-        return _run_retrieval_channel(step, stores, ("conflict",))
+        return _run_retrieval_channel(step, stores, ("conflict",), scope=scope, request_context=request_context)
     if step.channel == "assumptions":
         if stores.retrieval is None:
             raise KnowledgeError("retrieval backend is not bound")
-        return _run_retrieval_channel(step, stores, ("assumption",))
+        return _run_retrieval_channel(step, stores, ("assumption",), scope=scope, request_context=request_context)
     if step.channel == "relevant_skills":
         return _run_skills(intent, step, stores)
     raise KnowledgeValidationError(f"unknown retrieval channel {step.channel!r}.")
 
 
+def packet_entry_to_hit(entry: Mapping[str, Any]) -> RetrievalHit | None:
+    """Adapt one packet entry to an upstream retrieval hit with verbatim evidence.
+
+    The hit content pairs the entry title with its summary and the source
+    excerpt is that same text, so upstream :func:`format_result` keeps
+    the attribution (it drops sources whose excerpt differs from the
+    hit). The source id is content-hashed by :class:`KnowledgeSource`
+    from provider/title/excerpt. Returns ``None`` for entries with no
+    evidence text (upstream skips empty hits the same way).
+    """
+    title = str(entry.get("title", "") or entry.get("summary", "") or entry.get("id", "")).strip().replace("\n", " ")
+    summary = str(entry.get("summary", "") or "").strip().replace("\n", " ")
+    if summary and summary != title:
+        content = f"{title} — {summary}" if title else summary
+    else:
+        content = title or summary
+    content = truncate(content.strip(), 100_000)
+    if not content:
+        return None
+    label = truncate(title or str(entry.get("id", "entry")), 500)
+    source = KnowledgeSource(provider=BOOTSTRAP_EVIDENCE_PROVIDER, title=label, excerpt=content)
+    score = entry.get("score")
+    if not isinstance(score, (int, float)) or isinstance(score, bool) or not isfinite(score):
+        score = None
+    return RetrievalHit(content=content, source=source, score=score)
+
+
+def packet_sections_to_retrieval_result(sections: Sequence[Mapping[str, Any]]) -> RetrievalResult:
+    """Adapt every entry of rendered packet sections, in order, to an upstream result."""
+    hits: list[RetrievalHit] = []
+    for section in sections:
+        entries = section.get("entries", [])
+        if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes, bytearray)):
+            continue
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            hit = packet_entry_to_hit(entry)
+            if hit is not None:
+                hits.append(hit)
+    return RetrievalResult(hits=hits)
+
+
 def _trim_text(text: str, budget: int) -> tuple[str, bool]:
     """Trim ``text`` to ``budget`` chars with an ellipsis marker."""
+    # Phase 1b: the cut itself delegates to upstream truncate; the
+    # budget<=1 branch preserves the legacy quirk of emitting "…" even
+    # when the budget is 0 (upstream would emit ""), so rendering stays
+    # byte-identical to the old fork-rolled clip.
     if len(text) <= budget:
         return text, False
     if budget <= 1:
         return "…", True
-    return text[: budget - 1].rstrip() + "…", True
+    return truncate(text, budget), True
 
 
 def knowledge_bootstrap(
@@ -913,6 +1199,7 @@ def knowledge_bootstrap(
     *,
     stores: BootstrapStores,
     budget: PacketBudget | None = None,
+    request_context: KnowledgeRequestContext | None = None,
 ) -> dict[str, Any]:
     """Build the fixed-budget research context packet for a task.
 
@@ -929,6 +1216,12 @@ def knowledge_bootstrap(
             :class:`ResearchIntent`.
         stores: Interface bundle (integration binds real PG + skills).
         budget: Packet budget; defaults to :class:`PacketBudget`.
+        request_context: Phase 3b per-message scope (built by
+            :func:`resolve_tool_scope` in the ``@tool`` wrapper; ``None``
+            keeps the legacy unconstrained packet for direct callers). A
+            selected scope routes the document channels through
+            ``search_scoped`` and gaps the experiment-store channels
+            (recorded in ``channel_errors``); disabled refuses the packet.
 
     Returns:
         JSON-safe context packet dict (see :class:`ContextPacket`).
@@ -936,8 +1229,10 @@ def knowledge_bootstrap(
     Raises:
         KnowledgeValidationError: On invalid intents or budgets, or when
             ``stores`` binds neither retrieval nor experiments.
+        KnowledgeError: When knowledge is disabled for the turn.
     """
     intent = parse_research_intent(research_intent)
+    scope = scope_from_request_context(request_context)
     limits = budget or PacketBudget()
     if not isinstance(limits, PacketBudget):
         raise KnowledgeValidationError(f"budget must be a PacketBudget, got {type(limits).__name__}.")
@@ -951,7 +1246,7 @@ def knowledge_bootstrap(
     packet_truncated = False
     for step in plan:
         try:
-            entries = _execute_step(intent, step, stores)
+            entries = _execute_step(intent, step, stores, scope=scope, request_context=request_context)
         except NotImplementedError as exc:
             channel_errors.append({"channel": step.channel, "error": f"backend does not support this operation: {exc}"})
             entries = []
@@ -974,6 +1269,9 @@ def knowledge_bootstrap(
             summary = str(entry.get("summary", ""))
             title = str(entry.get("title", ""))
             cost = len(title) + len(summary) + len(str(entry.get("id", ""))) + 16
+            # Dropped entries contribute no evidence hits, so the
+            # format_context_packet prune_sources pass keeps rendered
+            # citations paired with visible excerpts (Phase 1b).
             if cost > remaining_chars:
                 if remaining_chars > 64:
                     entry["summary"], _ = _trim_text(summary, max(0, remaining_chars - len(title) - 32))
@@ -1079,7 +1377,20 @@ def format_context_packet(packet: ContextPacket | Mapping[str, Any]) -> str:
         lines.append("")
     if truncated:
         lines.append("(packet truncated to budget; use ledger_search/experiment_get for depth)")
-    return "\n".join(lines).rstrip() + "\n"
+    text = "\n".join(lines).rstrip() + "\n"
+    # Phase 1b: the pre-formatted packet passes through upstream
+    # prune_sources with a format_result-built evidence artifact over the
+    # kept entries, so truncation can never strand a citation past its
+    # excerpt (dropped entries simply contribute no hits). Legacy entry
+    # lines carry no citation markers, hence this pass is byte-identical
+    # today by construction (parity-tested); citation-marked entry
+    # rendering is a later phase.
+    kept = [section for section in sections if isinstance(section, Mapping)]
+    hits = packet_sections_to_retrieval_result(kept).hits
+    budget = sum(len(hit.content) + 1024 for hit in hits) + 64
+    _, evidence_artifact = format_result(RetrievalResult(hits=hits), max_chars_per_chunk=100_000, max_total_chars=budget)
+    text, _ = prune_sources(text, evidence_artifact)
+    return text
 
 
 _skill_catalog: SkillCatalog = NullSkillCatalog()
@@ -1104,15 +1415,6 @@ def bind_knowledge_skills(catalog: SkillCatalog | None) -> SkillCatalog:
 def get_knowledge_skills() -> SkillCatalog:
     """Return the current process-wide skill catalog (null catalog by default)."""
     return _skill_catalog
-
-
-def _resolve_scope(runtime: Runtime | None = None) -> tuple[str | None, str]:
-    """Resolve agent_name and user_id for tool handler scope (cf. memory/tools.py)."""
-    context = getattr(runtime, "context", None)
-    agent_name = None
-    if isinstance(context, dict) and context.get("agent_name"):
-        agent_name = str(context["agent_name"])
-    return agent_name, resolve_runtime_user_id(runtime)
 
 
 @tool("knowledge_bootstrap", parse_docstring=True)
@@ -1141,7 +1443,9 @@ def knowledge_bootstrap_tool(
         JSON string context packet ("intent", "sections", "channel_errors",
         "text") — or "error".
     """
-    _agent_name, _user_id = _resolve_scope(runtime)
+    request_context, refusal = resolve_tool_scope(runtime)
+    if refusal is not None:
+        return refusal
     try:
         bindings = get_knowledge_backends()
         if bindings.retrieval is None and bindings.experiments is None:
@@ -1165,6 +1469,7 @@ def knowledge_bootstrap_tool(
                 skills=get_knowledge_skills(),
             ),
             budget=PacketBudget(max_items=max_items, max_chars=max_chars),
+            request_context=request_context,
         )
         return json.dumps(packet, ensure_ascii=False)
     except KnowledgeError as exc:

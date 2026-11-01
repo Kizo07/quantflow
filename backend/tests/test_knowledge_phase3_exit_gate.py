@@ -3,28 +3,40 @@
 Seeds the merged eval fixture exactly like the Phase 2 gate (production
 write path, lexical index refresh), backfills **both** embedding kinds —
 finding vectors via :func:`backfill_findings_embeddings` and experiment
-vectors via the Phase 3 experiment text/vector stores — then runs the
-production retrieval plane per query in two sections with the vector
-channel armed:
+vectors via the Phase 3 experiment text/vector stores — then serves the
+scored retrieval through the fork provider boundary (Phase 2c;
+``deerflow.knowledge.quantflow_provider.QuantflowKnowledgeProvider`` bound
+to the scratch database with the MPNet embedding provider), one sectioned
+search per query with the vector channel armed:
 
-* priors section — structured + lexical + vector channels over the
-  ``finding``/``experiment``/``assumption`` kinds, no failure boost;
-* failures section — structured + lexical + vector + dedicated failure
-  channel over the ``failure`` kind, failure boost on. The
-  ``needed_memory`` is widened to ``("failures", "prior_experiments")``
-  (from the Phase 2 ``("failures",)``) purely to arm the vector channel —
-  ``plan_retrieval`` maps ``"failures"`` to the failure channel alone —
-  while ``kinds`` stays ``("failure",)`` so the judgments are unchanged.
+* priors section — ``search_scoped`` over the ``findings``/``experiments``/
+  ``assumptions`` datasets (planner kinds
+  ``finding``/``experiment``/``assumption``), vector armed;
+* failures section — ``search_scoped`` over the ``failures`` dataset
+  (planner kind ``failure``), vector armed.
+
+Hit → judgment mapping mirrors the Phase 2 gate: provider ``documents()``
+title → row rejoin plus a verbatim fixture-text cross-check that must
+agree exactly.
+
+The vector-contribution proof stays on the shared serving stack (same
+session factory, same MPNet provider, same channel stores, same planner):
+per section the gate also runs the direct retrieval plan and asserts the
+vector channel contributes to every fused top-10. ``RetrievalHit`` carries
+no channel provenance, so per-hit vector attribution cannot cross the
+provider boundary; the direct probe plus the provider armed-check below
+(the provider must embed a probe query) jointly prove the leg is ON.
 
 Sectioned judgments mirror Phase 2: the priors section scores the
 non-failure relevant docs only (every failure-kind doc is also in
 ``must_recall_failures``, asserted here), failures are judged in the
 failures section.
 
-Gate: mean recall@10 >= 0.8 AND mean failure-recall@10 >= 0.8, with the
-vector channel contributing to every fused top-10 in both sections (a
-run where the vector leg silently skips fails the gate even at full
-recall) and both embedding kinds fully backfilled.
+Gate: mean recall@10 >= 0.8 AND mean failure-recall@10 >= 0.8 on the
+provider-served top-10 per section, with the vector channel contributing
+to every fused top-10 in both sections (a run where the vector leg
+silently skips fails the gate even at full recall) and both embedding
+kinds fully backfilled.
 
 Provider: the real MPNet checkpoint via
 :mod:`deerflow.knowledge.providers_st` (cached, offline). The
@@ -33,6 +45,8 @@ the vector leg armed cannot use it — noise ranks would only dilute the
 lexical/structured signal (measured: priors recall@10 0.75 with fake
 vectors ON vs 0.83 OFF). The gate skips when the checkpoint is
 unavailable; mechanics stay covered by the fake-backed retrieval tests.
+Requires ``deerflow.knowledge.quantflow_provider`` (Phase 2a); skips
+until it exists.
 """
 
 from __future__ import annotations
@@ -50,14 +64,17 @@ from sqlalchemy.orm import sessionmaker
 
 import deerflow.knowledge.schema as kb_schema
 import deerflow.persistence.models  # noqa: F401  (register all rows)
+from deerflow.knowledge import KnowledgeRequestContext, RetrievalCatalogPage
 from deerflow.knowledge import pg_retrieval as pg
 from deerflow.knowledge.embeddings import (
+    EMBEDDING_DIM,
     EmbeddingProvider,
     EmbeddingProviderError,
     backfill_experiments_embeddings,
     backfill_findings_embeddings,
 )
 from deerflow.knowledge.eval import seed_phase2 as seed
+from deerflow.knowledge.providers import search_provider
 from deerflow.knowledge.retrieval.planner import (
     execute_retrieval,
     lexical_query_text,
@@ -81,6 +98,12 @@ KB_TABLES: tuple[str, ...] = (
 K = 10
 TARGET = 0.8
 NOW = "2026-09-20T00:00:00+00:00"
+
+PRIORS_DATASETS = ("findings", "experiments", "assumptions")
+FAILURES_DATASETS = ("failures",)
+ALL_DATASETS = ("findings", "experiments", "failures", "assumptions")
+GATE_USER_ID = "phase3-exit-gate"
+GATE_AGENT = "lead_agent"
 
 
 def _parse_moment(value: object) -> datetime | None:
@@ -251,16 +274,104 @@ def _seed_database(db_path: Path, provider: EmbeddingProvider) -> tuple[object, 
     return factory, id_to_doc
 
 
-def test_sectioned_recall_gate_with_vector_leg(tmp_path: Path) -> None:
-    """Exit gate: sectioned recall@10 and failure-recall@10 each >= 0.8, vector ON."""
-    provider = _load_provider()
-    factory, id_to_doc = _seed_database(tmp_path / "phase3_exit_gate.db", provider)
+async def _assert_fork_catalog(provider: object, context: KnowledgeRequestContext) -> None:
+    """Assert the provider serves exactly the four fixed fork datasets."""
+    page = await provider.catalog(context=context, page=1, page_size=100, search="")  # type: ignore[attr-defined]
+    assert isinstance(page, RetrievalCatalogPage)
+    assert page.page == 1
+    assert page.total == len(ALL_DATASETS) == len(page.items)
+    assert {item.id for item in page.items} == set(ALL_DATASETS)
+
+
+async def _title_to_row_map(provider: object, context: KnowledgeRequestContext) -> dict[str, str]:
+    """Map provider document titles to row UUIDs across the four datasets.
+
+    ``documents()`` ids are row UUIDs and names are candidate titles, so this
+    map rejoins served hits (``source.title``) to seeded rows. Titles must be
+    unique and datasets disjoint, else the rejoin would be ambiguous.
+    """
+    mapping: dict[str, str] = {}
+    seen_rows: set[str] = set()
+    for dataset_id in ALL_DATASETS:
+        page_no = 1
+        collected = 0
+        while True:
+            docs = await provider.documents(dataset_id, context=context, page=page_no, page_size=100, search="")  # type: ignore[attr-defined]
+            assert isinstance(docs, RetrievalCatalogPage)
+            for item in docs.items:
+                assert item.name not in mapping, f"duplicate document title {item.name!r}: rows {mapping[item.name]} and {item.id}"
+                assert item.id not in seen_rows, f"row {item.id} listed in two datasets"
+                mapping[item.name] = item.id
+                seen_rows.add(item.id)
+                collected += 1
+            if collected >= docs.total or not docs.items:
+                break
+            page_no += 1
+    return mapping
+
+
+def _resolve_hit_doc_ids(hits: object, title_map: dict[str, str], id_to_doc: dict[str, str]) -> set[str]:
+    """Resolve served hits to fixture doc_ids via title → row → doc."""
+    doc_ids: set[str] = set()
+    for hit in hits:  # type: ignore[union-attr]
+        title = hit.source.title if hit.source is not None else None
+        row_id = title_map.get(title or "")
+        if row_id is not None and row_id in id_to_doc:
+            doc_ids.add(id_to_doc[row_id])
+    return doc_ids
+
+
+def _text_match_doc_ids(hits: object, raw_texts: dict[str, str]) -> set[str]:
+    """Resolve served hits to doc_ids by verbatim fixture-text matching (cross-check)."""
+    blobs = []
+    for hit in hits:  # type: ignore[union-attr]
+        parts = [hit.content or ""]
+        if hit.source is not None:
+            parts.append(hit.source.excerpt or "")
+        blobs.append(" ".join(" ".join(parts).split()))
+    matched: set[str] = set()
+    for doc_id, text in raw_texts.items():
+        needle = " ".join(text.split())
+        if needle and any(needle in blob for blob in blobs):
+            matched.add(doc_id)
+    return matched
+
+
+def _assert_hit_attribution(hits: object, allowed_datasets: frozenset[str]) -> None:
+    """Assert every served hit carries fork evidence for the section's datasets."""
+    for hit in hits:  # type: ignore[union-attr]
+        assert hit.source is not None, "gated provider hits must be attributed"
+        assert hit.source.provider == "quantflow-pg"
+        assert hit.source.excerpt in hit.content
+        assert hit.source.dataset_name in allowed_datasets, f"hit {hit.source.title!r} leaks dataset {hit.source.dataset_name!r}"
+
+
+@pytest.mark.asyncio
+async def test_sectioned_recall_gate_with_vector_leg(tmp_path: Path) -> None:
+    """Exit gate: sectioned recall@10 and failure-recall@10 each >= 0.8, vector ON, served via the fork provider."""
+    qp_module = pytest.importorskip(
+        "deerflow.knowledge.quantflow_provider",
+        reason="Phase 2c: fork provider not implemented yet (Phase 2a in flight)",
+    )
+    assert qp_module.PROVIDER_NAME == "quantflow-pg"
+    provider_cls = getattr(qp_module, "QuantflowKnowledgeProvider", None) or qp_module.QuantflowPgProvider
+    mpnet = _load_provider()
+    factory, id_to_doc = _seed_database(tmp_path / "phase3_exit_gate.db", mpnet)
+    fork = provider_cls(session_factory=factory, embedding_provider=mpnet)
+    # The serving provider itself must embed: a vector-off provider binding
+    # fails here, before any per-query probe, even at full recall.
+    armed = fork._query_embedding("momentum backtest placebo")
+    assert armed is not None and len(armed) == EMBEDDING_DIM, "fork provider must serve the vector leg in the phase 3 gate"
+    context = KnowledgeRequestContext(user_id=GATE_USER_ID, agent_name=GATE_AGENT)
+    await _assert_fork_catalog(fork, context)
+    title_map = await _title_to_row_map(fork, context)
     structured = pg.SQLStructuredLookupStore(factory)
     lexical = pg.SQLLexicalSearchStore(factory)
     vector = pg.SQLVectorSearchStore(factory)
     failures = pg.SQLFailureSearchStore(factory)
     fixture = seed.load_merged_fixture()
     kinds = {doc.doc_id: getattr(doc, "kind", "?") for doc in fixture.documents}
+    raw_texts = {doc_id: doc.get("text", "") for doc_id, doc in seed.fixture_raw_documents().items()}
 
     # Every failure-kind relevant doc must be judged in the failures section;
     # otherwise the priors denominator below would silently drop judgments.
@@ -270,7 +381,7 @@ def test_sectioned_recall_gate_with_vector_leg(tmp_path: Path) -> None:
 
     # One batched encode for every query (both sections share the embedding).
     query_texts = [lexical_query_text(judgment.query_text, parse_research_intent(dict(judgment.intent))) for judgment in fixture.queries]
-    query_embeddings = {judgment.query_id: embedding for judgment, embedding in zip(fixture.queries, provider.embed_batch(query_texts), strict=True)}
+    query_embeddings = {judgment.query_id: embedding for judgment, embedding in zip(fixture.queries, mpnet.embed_batch(query_texts), strict=True)}
 
     recalls: list[float] = []
     f_recalls: list[float] = []
@@ -333,12 +444,34 @@ def test_sectioned_recall_gate_with_vector_leg(tmp_path: Path) -> None:
         assert all("vector" in item.channels for item in fails.top), f"{judgment.query_id}: vector leg missing from fused failures top-10"
         vector_hits += fails.channel_counts.get("vector", 0)
 
-        priors_ids = [id_to_doc[item.candidate.id] for item in priors.top if item.candidate.id in id_to_doc]
-        fails_ids = [id_to_doc[item.candidate.id] for item in fails.top if item.candidate.id in id_to_doc]
+        priors_result = await search_provider(
+            fork,
+            text,
+            scope={"version": 1, "mode": "selected", "dataset_ids": list(PRIORS_DATASETS)},
+            user_id=GATE_USER_ID,
+            agent_name=GATE_AGENT,
+            now=NOW,
+        )
+        fails_result = await search_provider(
+            fork,
+            text,
+            scope={"version": 1, "mode": "selected", "dataset_ids": list(FAILURES_DATASETS)},
+            user_id=GATE_USER_ID,
+            agent_name=GATE_AGENT,
+            now=NOW,
+        )
+        priors_hits = priors_result.hits[:K]
+        fails_hits = fails_result.hits[:K]
+        _assert_hit_attribution(priors_hits, frozenset(PRIORS_DATASETS))
+        _assert_hit_attribution(fails_hits, frozenset(FAILURES_DATASETS))
+        priors_ids = _resolve_hit_doc_ids(priors_hits, title_map, id_to_doc)
+        fails_ids = _resolve_hit_doc_ids(fails_hits, title_map, id_to_doc)
+        assert _text_match_doc_ids(priors_hits, raw_texts) == priors_ids, f"{judgment.query_id}: title/text mapping disagree on priors hits"
+        assert _text_match_doc_ids(fails_hits, raw_texts) == fails_ids, f"{judgment.query_id}: title/text mapping disagree on failures hits"
         rel = {d for d in judgment.relevant_doc_ids if kinds.get(d) != "failure"}
         must = set(judgment.must_recall_failures)
-        recall = len(rel & set(priors_ids)) / len(rel) if rel else 1.0
-        f_recall = len(must & set(fails_ids)) / len(must) if must else 1.0
+        recall = len(rel & priors_ids) / len(rel) if rel else 1.0
+        f_recall = len(must & fails_ids) / len(must) if must else 1.0
         recalls.append(recall)
         f_recalls.append(f_recall)
         if recall < 1.0 or f_recall < 1.0:

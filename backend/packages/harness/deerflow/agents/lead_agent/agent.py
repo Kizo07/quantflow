@@ -200,16 +200,24 @@ def _append_memory_tools_without_name_conflicts(tools: list) -> None:
 
 
 def _append_knowledge_tools_without_name_conflicts(tools: list) -> None:
-    """Append KB recall tools without dropping unrelated duplicate-named tools.
+    """Append converged knowledge tools without dropping unrelated duplicate-named tools.
 
     Self-gating no-op unless the plane is enabled and bound (see
     ``knowledge_tools_available``), so callers never register dead tools.
+    Phase 4a: registers the built-in fork provider first (the same
+    ``ensure_quantflow_provider_registered`` one-liner as factory step
+    [10] — ``make_lead_agent`` builds via raw ``create_agent``, so it
+    needs its own call at this assembly point) and appends the upstream
+    generic search tool alongside the fork recall tools; skip-on-conflict
+    keeps operator- or user-provided same-name tools.
     """
-    from deerflow.knowledge.agent_tools.lookup import get_knowledge_tools, knowledge_tools_available
+    from deerflow.knowledge.agent_tools.lookup import get_knowledge_tools, get_upstream_knowledge_tools, knowledge_tools_available
+    from deerflow.knowledge.quantflow_provider import ensure_quantflow_provider_registered
 
     if not knowledge_tools_available():
         return
-    _append_named_tools_without_conflicts(tools, get_knowledge_tools(), kind="Knowledge")
+    ensure_quantflow_provider_registered()
+    _append_named_tools_without_conflicts(tools, [*get_upstream_knowledge_tools(), *get_knowledge_tools()], kind="Knowledge")
 
 
 def _append_project_document_tools_if_pinned(tools: list, cfg: dict) -> None:

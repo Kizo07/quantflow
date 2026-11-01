@@ -57,6 +57,21 @@ logic drift by construction), then ranks the survivors and trims to
 (:class:`SQLRelationalExpansionStore`); the service plans two-pass
 retrieval with it.
 
+Phase 1a evidence shape: every channel-store search method returns
+:class:`EvidenceCandidate` records (and :class:`SQLExperimentLookupStore`
+returns :class:`EvidenceExperimentRecord` records) — the planner
+``Candidate`` / ``ExperimentRecord`` payload plus upstream retrieval
+evidence (``content`` + ``source: KnowledgeSource``). The excerpt always
+equals ``content`` verbatim with the content-hash ``source.id`` computed
+by ``KnowledgeSource`` itself, so
+:func:`deerflow.knowledge.sources.format_result` never strips the
+attribution; ``provider`` is ``quantflow-pg``, ``dataset_name`` is the
+fork dataset (findings/experiments/failures/assumptions), and
+``url``/``page`` stay None (rows carry no locator evidence and upstream
+forbids inferred locators). Fusion, the planner, and the service see
+unchanged ``Candidate`` payloads — the evidence subclass passes every
+``isinstance`` gate and ranking read.
+
 Dialect behavior:
 
 * Lexical: PostgreSQL ranks findings with
@@ -94,9 +109,10 @@ short session per call, mirroring :mod:`deerflow.knowledge.pg_store`, so a
 single instance is safe to share across threads. :func:`open_pg_backends`
 builds the full backend bundle from a DSN through the process-wide
 sync-engine cache. :func:`bind_knowledge_backends_from_config` is the
-startup integration step: it reads the DSN + embedding model from
-:class:`deerflow.knowledge.config.KnowledgeConfig` and registers the
-bundle process-wide (the Gateway lifespan calls it once at startup).
+startup integration step: it reads the DSN + embedding model +
+artifact-store URI from :class:`deerflow.knowledge.config.KnowledgeConfig`
+and registers the bundle process-wide (the Gateway lifespan calls it once
+at startup).
 """
 
 from __future__ import annotations
@@ -105,6 +121,7 @@ import logging
 import math
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from typing import Any
 
@@ -119,6 +136,7 @@ from deerflow.knowledge.agent_tools.lookup import (
     bind_knowledge_backends,
 )
 from deerflow.knowledge.config import get_knowledge_config
+from deerflow.knowledge.contract import KnowledgeRequestContext, KnowledgeSource, RetrievalHit
 from deerflow.knowledge.embeddings import (
     EMBEDDING_DIM,
     FAKE_MODEL_ID,
@@ -130,7 +148,7 @@ from deerflow.knowledge.embeddings import (
     render_embeddable_text,
 )
 from deerflow.knowledge.pg_store import SQLExperimentSearchStore, row_to_record
-from deerflow.knowledge.retrieval.fusion import SCOPE_PLACEHOLDERS, apply_hard_filters
+from deerflow.knowledge.retrieval.fusion import SCOPE_PLACEHOLDERS, FusionWeights, apply_hard_filters
 from deerflow.knowledge.retrieval.planner import (
     DEFAULT_PER_CHANNEL_LIMIT,
     EDGE_TYPES,
@@ -151,12 +169,20 @@ from deerflow.knowledge.schema.experiments import (
     ExperimentRow,
 )
 from deerflow.knowledge.schema.findings import FindingRow, NativeVector
+from deerflow.knowledge.search import ExperimentFilter
 from deerflow.knowledge.write_api import ExperimentRecord, KnowledgeError, KnowledgeValidationError
+from deerflow.knowledge_scope import execution_scope
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "SUMMARY_CHARS",
+    "EVIDENCE_PROVIDER",
+    "EvidenceCandidate",
+    "EvidenceExperimentRecord",
+    "candidate_to_evidence_hit",
+    "candidate_to_retrieval_hit",
+    "record_to_evidence_hit",
     "SQLStructuredLookupStore",
     "SQLLexicalSearchStore",
     "SQLVectorSearchStore",
@@ -270,13 +296,15 @@ def _experiment_scope_and_window(row: ExperimentRow) -> tuple[dict[str, Any], st
     return scope, valid_from, valid_to
 
 
-def _experiment_text(row: ExperimentRow) -> str:
+def _experiment_text(row: ExperimentRow | ExperimentRecord) -> str:
     """Build the lexical surface for an experiment row.
 
     The hypothesis leads; the parameters summary follows (signal names,
     lookbacks, tool params, and any seeder-provided retrieval text); the
     outcome/failure class trails so failure phrasing stays matchable.
-    Parts are whitespace-joined and stripped of empties.
+    Parts are whitespace-joined and stripped of empties. Records carry the
+    same four attributes, so evidence content rebuilds identically from a
+    stored row or a fetched record.
     """
     parts = [row.hypothesis or ""]
     parameters = row.parameters if isinstance(row.parameters, dict) else {}
@@ -375,6 +403,194 @@ def assumption_row_to_candidate(row: AssumptionRow) -> Candidate:
         status=row.status or "",
         metadata=metadata,
     )
+
+
+#: Upstream provider name stamped on every channel-hit source (the fork
+#: extension; see ``backend/docs/KNOWLEDGE.md`` "Local-only deployment").
+EVIDENCE_PROVIDER = "quantflow-pg"
+
+#: Planner kind → upstream dataset name (KNOWLEDGE.md "Dataset to kind
+#: mapping"). ``failure`` draws from both tables but reports one dataset.
+_KIND_DATASETS: dict[str, str] = {
+    "finding": "findings",
+    "experiment": "experiments",
+    "failure": "failures",
+    "assumption": "assumptions",
+}
+
+#: Evidence ceilings mirror the upstream ``KnowledgeSource`` field limits.
+#: Content and excerpt share one string, so the pair truncates together and
+#: stays verbatim-equal at any length.
+_MAX_EVIDENCE_CHARS = 100_000
+_MAX_EVIDENCE_TITLE_CHARS = 500
+
+#: Base dataclass field names copied when attaching evidence (computed once;
+#: the evidence subclasses add only ``content``/``source``).
+_CANDIDATE_FIELD_NAMES = tuple(entry.name for entry in fields(Candidate))
+_RECORD_FIELD_NAMES = tuple(entry.name for entry in fields(ExperimentRecord))
+
+
+def _evidence_text(text: str, title: str, *, kind: str, row_id: str) -> str:
+    """Derive non-empty evidence content for one hit (stripped, ceilinged).
+
+    Falls back from body text to title to a stable ``kind:id`` label so the
+    excerpt is never empty (upstream requires ``min_length=1``); the
+    fallbacks only fire for degenerate rows.
+    """
+    content = (text or "").strip() or (title or "").strip() or f"{kind}:{row_id}"
+    if len(content) > _MAX_EVIDENCE_CHARS:
+        content = content[:_MAX_EVIDENCE_CHARS].rstrip()
+    return content
+
+
+def _evidence_title(title: str, *, kind: str, row_id: str) -> str:
+    """Derive a valid upstream title (non-empty, within the 500-char limit)."""
+    cleaned = (title or "").strip() or f"{kind}:{row_id}"
+    if len(cleaned) > _MAX_EVIDENCE_TITLE_CHARS:
+        cleaned = cleaned[:_MAX_EVIDENCE_TITLE_CHARS]
+    return cleaned
+
+
+def _checked_evidence(content: Any, source: Any) -> str:
+    """Validate one evidence pair, returning the stripped content.
+
+    Raises:
+        KnowledgeValidationError: On empty content, a non-``KnowledgeSource``
+            source, or an excerpt that differs from content (``format_result``
+            strips such pairs, so they are refused at construction).
+    """
+    cleaned = content.strip() if isinstance(content, str) else ""
+    if not cleaned:
+        raise KnowledgeValidationError("evidence content must be a non-empty string.")
+    if source is not None:
+        if not isinstance(source, KnowledgeSource):
+            raise KnowledgeValidationError(f"evidence source must be a KnowledgeSource or None, got {type(source).__name__}.")
+        if source.excerpt != cleaned:
+            raise KnowledgeValidationError("evidence source.excerpt must equal content verbatim (else format_result strips the attribution).")
+    return cleaned
+
+
+def _copied_field_values(obj: Any, names: Sequence[str]) -> dict[str, Any]:
+    """Copy dataclass field values, shallow-copying mutable containers.
+
+    The evidence hit never aliases the source object's dicts/lists, so a
+    mutated ranking payload cannot corrupt the converted hit or vice versa.
+    """
+    values: dict[str, Any] = {}
+    for name in names:
+        value = getattr(obj, name)
+        if isinstance(value, dict):
+            value = dict(value)
+        elif isinstance(value, list):
+            value = list(value)
+        values[name] = value
+    return values
+
+
+@dataclass(frozen=True)
+class EvidenceCandidate(Candidate):
+    """A planner candidate carrying its upstream retrieval evidence (Phase 1a).
+
+    Every channel-store search method returns these instead of bare
+    :class:`Candidate` records. Fusion, the planner, and the service see an
+    unchanged candidate (row-UUID ``id``, ``kind``, ``scope``, validity —
+    the ranking identity never moves to the evidence fields); upstream
+    readers see ``content`` plus ``source`` (verbatim excerpt, content-hash
+    ``source.id`` computed by :class:`KnowledgeSource` itself). ``source``
+    mirrors upstream optionality (None = unattributed content), but the
+    channel boundaries always attach one.
+    """
+
+    content: str = ""
+    source: KnowledgeSource | None = None
+
+    def __post_init__(self) -> None:
+        """Validate the candidate fields plus the evidence pair."""
+        super().__post_init__()
+        object.__setattr__(self, "content", _checked_evidence(self.content, self.source))
+
+
+@dataclass(frozen=True)
+class EvidenceExperimentRecord(ExperimentRecord):
+    """An experiment record carrying its upstream retrieval evidence (Phase 1a).
+
+    :class:`SQLExperimentLookupStore` returns these from every lookup/search
+    method. Tool consumers see an unchanged record (``to_dict()`` keeps the
+    base keys); upstream readers see ``content`` plus ``source``.
+    """
+
+    content: str = ""
+    source: KnowledgeSource | None = None
+
+    def __post_init__(self) -> None:
+        """Validate the evidence pair (the base record needs no validation)."""
+        object.__setattr__(self, "content", _checked_evidence(self.content, self.source))
+
+
+def candidate_to_evidence_hit(candidate: Candidate) -> EvidenceCandidate:
+    """Attach upstream retrieval evidence to one channel candidate (Phase 1a).
+
+    Idempotent: ``EvidenceCandidate`` input passes through untouched. The
+    excerpt is the candidate text verbatim (``format_result`` keeps the
+    attribution); ``provider`` is ``quantflow-pg``, ``title`` the candidate
+    title, ``dataset_name`` the fork dataset for the kind, and ``url``/
+    ``page`` None (rows carry no locator evidence and upstream forbids
+    inferred locators). ``source.id`` is the content hash computed by
+    ``KnowledgeSource`` — never invented, never the row UUID.
+
+    Raises:
+        KnowledgeValidationError: When ``candidate`` is not a Candidate.
+    """
+    if isinstance(candidate, EvidenceCandidate):
+        return candidate
+    if not isinstance(candidate, Candidate):
+        raise KnowledgeValidationError(f"candidate must be a Candidate, got {type(candidate).__name__}.")
+    content = _evidence_text(candidate.text, candidate.title, kind=candidate.kind, row_id=candidate.id)
+    source = KnowledgeSource(
+        provider=EVIDENCE_PROVIDER,
+        title=_evidence_title(candidate.title, kind=candidate.kind, row_id=candidate.id),
+        excerpt=content,
+        dataset_name=_KIND_DATASETS.get(candidate.kind),
+    )
+    return EvidenceCandidate(**_copied_field_values(candidate, _CANDIDATE_FIELD_NAMES), content=content, source=source)
+
+
+def candidate_to_retrieval_hit(candidate: Candidate, *, score: float | None = None) -> RetrievalHit:
+    """Render one channel candidate as a genuine upstream ``RetrievalHit`` (Phase 1a).
+
+    Normalizes through :func:`candidate_to_evidence_hit` first, so bare
+    candidates convert identically. ``score`` stays None unless the caller
+    supplies a fused/rank score (upstream leaves unscored hits None).
+    """
+    hit = candidate_to_evidence_hit(candidate)
+    return RetrievalHit(content=hit.content, source=hit.source, score=score)
+
+
+def record_to_evidence_hit(record: ExperimentRecord) -> EvidenceExperimentRecord:
+    """Attach upstream retrieval evidence to one experiment record (Phase 1a).
+
+    Idempotent: ``EvidenceExperimentRecord`` input passes through untouched.
+    Content is the record's lexical surface (hypothesis plus the parameters
+    summary, mirroring :func:`_experiment_text`); ``dataset_name`` is
+    ``"failures"`` for ``outcome == "failure"`` records, else
+    ``"experiments"`` (the same fork rule as the candidate kind mapping).
+
+    Raises:
+        KnowledgeValidationError: When ``record`` is not an ExperimentRecord.
+    """
+    if isinstance(record, EvidenceExperimentRecord):
+        return record
+    if not isinstance(record, ExperimentRecord):
+        raise KnowledgeValidationError(f"record must be an ExperimentRecord, got {type(record).__name__}.")
+    kind = "failure" if record.outcome == "failure" else "experiment"
+    content = _evidence_text(_experiment_text(record), record.hypothesis, kind=kind, row_id=record.id)
+    source = KnowledgeSource(
+        provider=EVIDENCE_PROVIDER,
+        title=_evidence_title(record.hypothesis, kind=kind, row_id=record.id),
+        excerpt=content,
+        dataset_name=_KIND_DATASETS[kind],
+    )
+    return EvidenceExperimentRecord(**_copied_field_values(record, _RECORD_FIELD_NAMES), content=content, source=source)
 
 
 def _stable_order(candidates: list[Candidate], score_fn: Callable[[Candidate], float] | None = None) -> list[Candidate]:
@@ -551,7 +767,10 @@ class SQLStructuredLookupStore(_ChannelStoreBase):
     """
 
     def structured_lookup(self, scope: ScopeFilter, *, kinds: Sequence[str], limit: int) -> list[Candidate]:
-        """Return up to ``limit`` scope-compatible candidates, best scope match first."""
+        """Return up to ``limit`` scope-compatible candidates, best scope match first.
+
+        Hits carry upstream retrieval evidence (Phase 1a).
+        """
         with self._sessions() as session:
             candidates: list[Candidate] = []
             if self._wants(kinds, _FINDING_PLANNER_KINDS):
@@ -573,7 +792,8 @@ class SQLStructuredLookupStore(_ChannelStoreBase):
             # otherwise appear in every channel). Scope-empty rows stay —
             # declaring nothing contradicts nothing (neutral, like "none").
             survivors = [item for item in survivors if counts[item.id] > 0 or not _declares_scope(item.scope)]
-        return _stable_order(survivors, score_fn=lambda item: float(counts[item.id]))[:limit]
+        ranked = _stable_order(survivors, score_fn=lambda item: float(counts[item.id]))[:limit]
+        return [candidate_to_evidence_hit(item) for item in ranked]
 
 
 class SQLLexicalSearchStore(_ChannelStoreBase):
@@ -591,11 +811,16 @@ class SQLLexicalSearchStore(_ChannelStoreBase):
     """
 
     def lexical_search(self, query_text: str, scope: ScopeFilter, *, kinds: Sequence[str], limit: int) -> list[Candidate]:
-        """Return up to ``limit`` lexical matches, best-first."""
+        """Return up to ``limit`` lexical matches, best-first.
+
+        Hits carry upstream retrieval evidence (Phase 1a).
+        """
         with self._sessions() as session:
             if _dialect_name(session) == "postgresql":
-                return self._search_postgres(session, query_text, scope, kinds, limit)
-            return self._search_portable(session, query_text, scope, kinds, limit)
+                found = self._search_postgres(session, query_text, scope, kinds, limit)
+            else:
+                found = self._search_portable(session, query_text, scope, kinds, limit)
+        return [candidate_to_evidence_hit(item) for item in found]
 
     def _search_portable(self, session: Session, query_text: str, scope: ScopeFilter, kinds: Sequence[str], limit: int) -> list[Candidate]:
         """Score kind-filtered rows with the IDF-weighted LIKE fallback (positive scores only)."""
@@ -670,12 +895,17 @@ class SQLVectorSearchStore(_ChannelStoreBase):
     """
 
     def vector_search(self, query_embedding: Sequence[float], scope: ScopeFilter, *, kinds: Sequence[str], limit: int) -> list[Candidate]:
-        """Return up to ``limit`` embedded findings/experiments nearest the query, best-first."""
+        """Return up to ``limit`` embedded findings/experiments nearest the query, best-first.
+
+        Hits carry upstream retrieval evidence (Phase 1a).
+        """
         literal = _vector_literal(query_embedding)
         with self._sessions() as session:
             if _dialect_name(session) == "postgresql":
-                return self._search_postgres(session, literal, scope, kinds, limit)
-            return self._search_portable(session, query_embedding, scope, kinds, limit)
+                found = self._search_postgres(session, literal, scope, kinds, limit)
+            else:
+                found = self._search_portable(session, query_embedding, scope, kinds, limit)
+        return [candidate_to_evidence_hit(item) for item in found]
 
     def _search_portable(self, session: Session, query_embedding: Sequence[float], scope: ScopeFilter, kinds: Sequence[str], limit: int) -> list[Candidate]:
         """Brute-force cosine search over the SQLite JSON fallback (both tables)."""
@@ -750,11 +980,16 @@ class SQLFailureSearchStore(_ChannelStoreBase):
     """
 
     def search_failures(self, query_text: str, scope: ScopeFilter, *, limit: int) -> list[Candidate]:
-        """Return up to ``limit`` failure candidates relevant to the query, best-first."""
+        """Return up to ``limit`` failure candidates relevant to the query, best-first.
+
+        Hits carry upstream retrieval evidence (Phase 1a).
+        """
         with self._sessions() as session:
             if _dialect_name(session) == "postgresql":
-                return self._search_postgres(session, query_text, scope, limit)
-            return self._search_portable(session, query_text, scope, limit)
+                found = self._search_postgres(session, query_text, scope, limit)
+            else:
+                found = self._search_portable(session, query_text, scope, limit)
+        return [candidate_to_evidence_hit(item) for item in found]
 
     def _failure_candidates(self, session: Session) -> list[Candidate]:
         """Fetch the fixed failure row set and map it to candidates."""
@@ -820,6 +1055,8 @@ class SQLRelationalExpansionStore(_ChannelStoreBase):
 
     def expand_neighbors(self, seed_ids: Sequence[str], scope: ScopeFilter, *, edge_types: Sequence[str], limit: int) -> list[Candidate]:
         """Return up to ``limit`` one-hop neighbors of the seeds, best-first.
+
+        Hits carry upstream retrieval evidence (Phase 1a).
 
         Raises:
             KnowledgeValidationError: When any edge type falls outside the
@@ -923,7 +1160,82 @@ class SQLRelationalExpansionStore(_ChannelStoreBase):
         candidates = [neighbors[neighbor_id] for neighbor_id in neighbor_ids if neighbor_id in neighbors]
         rank_by_id = {str(neighbor_id): rank for neighbor_id, rank in discovered.items()}
         survivors = _screen(candidates, scope)
-        return _stable_order(survivors, score_fn=lambda item: -rank_by_id[item.id])[:limit]
+        ranked = _stable_order(survivors, score_fn=lambda item: -rank_by_id[item.id])[:limit]
+        return [candidate_to_evidence_hit(item) for item in ranked]
+
+
+@dataclass(frozen=True)
+class _ScopeSelection:
+    """A constraining per-message scope selection (Phase 3c).
+
+    ``dataset_ids`` is the canonical selected datasets; ``kinds`` the
+    planner kinds those datasets own (via the provider mapping);
+    ``allowed_doc_ids`` the document-id allowlist (None when no document
+    filters are present, meaning "every id in the selected datasets").
+    """
+
+    dataset_ids: tuple[str, ...]
+    kinds: tuple[str, ...]
+    allowed_doc_ids: frozenset[str] | None
+
+
+def _scope_selection(context: KnowledgeRequestContext | None) -> _ScopeSelection | None:
+    """Resolve a scoped call's dataset selection, mirroring the provider exactly.
+
+    Mirrors :meth:`QuantflowPgProvider.search_scoped
+    <deerflow.knowledge.quantflow_provider.QuantflowPgProvider.search_scoped>`
+    (``quantflow_provider.py``): the dataset→kind table is imported from the
+    provider module (never duplicated here); ``disabled`` refuses with
+    ``ValueError``; an empty ``selected`` list or any unknown dataset id
+    fails the whole call with ``PermissionError`` (never a best-effort
+    subset); document filters validate per entry and union into an id
+    allowlist. Returns None when the call is unconstrained (absent scope or
+    ``all`` mode), in which case scoped methods delegate straight to the
+    legacy entry points.
+
+    Raises:
+        ValueError: When knowledge is disabled for the turn.
+        PermissionError: On an empty selection or unknown dataset ids.
+    """
+    from deerflow.knowledge.quantflow_provider import dataset_kinds
+
+    dataset_kind_map = dataset_kinds()
+    raw = context.scope if context is not None else None
+    if raw is None:
+        return None
+    scope = execution_scope(raw)
+    if scope.get("mode") == "disabled":
+        raise ValueError("Knowledge search is disabled for this turn")
+    if scope.get("mode") != "selected":
+        return None
+    dataset_ids = list(scope.get("dataset_ids") or [])
+    if not dataset_ids:
+        # Fail closed, mirroring the provider invariant (unreachable through
+        # execution_scope, which requires >= 1 dataset id, but the store must
+        # not depend on the validation layer for it).
+        raise PermissionError("Knowledge scope selects no datasets")
+    unknown = [dataset_id for dataset_id in dataset_ids if dataset_id not in dataset_kind_map]
+    if unknown:
+        raise PermissionError(f"Knowledge scope selects unknown dataset(s): {', '.join(sorted(unknown))}")
+    kinds = tuple(dict.fromkeys(kind for dataset_id in dataset_ids for kind in dataset_kind_map[dataset_id]))
+    filters = list(scope.get("document_filters") or [])
+    for entry in filters:
+        if not isinstance(entry, dict) or entry.get("dataset_id") not in dataset_kind_map:
+            raise PermissionError("Knowledge scope selects unknown dataset(s)")
+    allowed_doc_ids: frozenset[str] | None = None
+    if filters:
+        allowed_doc_ids = frozenset(document_id for entry in filters for document_id in (entry.get("document_ids") or []) if isinstance(document_id, str))
+    return _ScopeSelection(dataset_ids=tuple(dataset_ids), kinds=kinds, allowed_doc_ids=allowed_doc_ids)
+
+
+def _experiment_dataset(record: ExperimentRecord) -> str:
+    """Return the fork dataset owning an experiment record.
+
+    Mirrors the provider ``documents`` split (``quantflow_provider.py``):
+    ``outcome == "failure"`` rows belong to ``failures``; every other row
+    — including NULL (undecided) outcomes — belongs to ``experiments``.
+    """
+    return "failures" if record.outcome == "failure" else "experiments"
 
 
 class SQLExperimentLookupStore(SQLExperimentSearchStore):
@@ -931,11 +1243,15 @@ class SQLExperimentLookupStore(SQLExperimentSearchStore):
 
     Extends :class:`SQLExperimentSearchStore` with ``find_by_id`` (UUID
     primary-key point lookup with the same batched link fetch), completing
-    the experiment read boundary the lookup tools need.
+    the experiment read boundary the lookup tools need. Every method returns
+    :class:`EvidenceExperimentRecord` hits (upstream retrieval evidence,
+    Phase 1a); the record payload itself is unchanged.
     """
 
     def find_by_id(self, experiment_id: str) -> ExperimentRecord | None:
         """Return the experiment with this id, or None (primary-key lookup).
+
+        The hit carries upstream retrieval evidence (Phase 1a).
 
         Raises:
             KnowledgeValidationError: When ``experiment_id`` is not a UUID.
@@ -949,7 +1265,75 @@ class SQLExperimentLookupStore(SQLExperimentSearchStore):
             if row is None:
                 return None
             links = self._fetch_links(session, [row.id])
-            return row_to_record(row, datasets=links[0][0], result_artifacts=links[0][1])
+            return record_to_evidence_hit(row_to_record(row, datasets=links[0][0], result_artifacts=links[0][1]))
+
+    def find_by_execution_hash(self, execution_hash: str) -> ExperimentRecord | None:
+        """Return the experiment with this execution hash, or None (unique lookup).
+
+        Same lookup as :class:`SQLExperimentSearchStore`; the hit carries
+        upstream retrieval evidence (Phase 1a).
+        """
+        record = super().find_by_execution_hash(execution_hash)
+        return record_to_evidence_hit(record) if record is not None else None
+
+    def find_by_id_scoped(self, experiment_id: str, *, context: KnowledgeRequestContext) -> ExperimentRecord | None:
+        """Return the experiment with this id under ``context.scope``, or None.
+
+        Phase 3c :class:`ScopedExperimentLookupStore
+        <deerflow.knowledge.agent_tools.lookup.ScopedExperimentLookupStore>`
+        binding: reuses :meth:`find_by_id` (no duplicated SQL), then hides
+        out-of-scope records as None — indistinguishable from unknown ids —
+        instead of erroring. Records whose dataset (``failures`` for
+        ``outcome == "failure"``, else ``experiments``, mirroring the
+        provider split) is not selected, or whose id falls outside the
+        document-id allowlist, read as misses.
+
+        Raises:
+            ValueError: When knowledge is disabled for the turn.
+            PermissionError: On an empty selection or unknown dataset ids.
+        """
+        selection = _scope_selection(context)
+        record = self.find_by_id(experiment_id)
+        if selection is None or record is None:
+            return record
+        if _experiment_dataset(record) not in selection.dataset_ids:
+            return None
+        if selection.allowed_doc_ids is not None and record.id not in selection.allowed_doc_ids:
+            return None
+        return record
+
+    def find_by_execution_hash_scoped(self, execution_hash: str, *, context: KnowledgeRequestContext) -> ExperimentRecord | None:
+        """Return the experiment with this execution hash under ``context.scope``, or None.
+
+        Same scope rule as :meth:`find_by_id_scoped` over
+        :meth:`find_by_execution_hash`: out-of-scope hashes read as None
+        (existence-hiding), never as errors.
+        """
+        selection = _scope_selection(context)
+        record = self.find_by_execution_hash(execution_hash)
+        if selection is None or record is None:
+            return record
+        if _experiment_dataset(record) not in selection.dataset_ids:
+            return None
+        if selection.allowed_doc_ids is not None and record.id not in selection.allowed_doc_ids:
+            return None
+        return record
+
+    def find_by_family_hash(self, family_hash: str, *, limit: int, offset: int) -> list[ExperimentRecord]:
+        """Return one page of experiments in this family, oldest first.
+
+        Same page as :class:`SQLExperimentSearchStore`; the hits carry
+        upstream retrieval evidence (Phase 1a).
+        """
+        return [record_to_evidence_hit(item) for item in super().find_by_family_hash(family_hash, limit=limit, offset=offset)]
+
+    def search_experiments(self, filters: ExperimentFilter, *, limit: int, offset: int) -> list[ExperimentRecord]:
+        """Return one page of experiments matching all non-None filter fields, oldest first.
+
+        Same page as :class:`SQLExperimentSearchStore`; the hits carry
+        upstream retrieval evidence (Phase 1a).
+        """
+        return [record_to_evidence_hit(item) for item in super().search_experiments(filters, limit=limit, offset=offset)]
 
 
 class SQLFindingTextSource:
@@ -1271,7 +1655,13 @@ class KnowledgeRetrievalService:
     recall, never fail the whole search.
     """
 
-    def __init__(self, session_factory: Callable[[], Session], *, embedding_provider: EmbeddingProvider | None = None) -> None:
+    def __init__(
+        self,
+        session_factory: Callable[[], Session],
+        *,
+        embedding_provider: EmbeddingProvider | None = None,
+        fusion_weights: FusionWeights | None = None,
+    ) -> None:
         """Bind the service to a session factory plus an optional provider.
 
         Args:
@@ -1279,6 +1669,10 @@ class KnowledgeRetrievalService:
                 four channel stores.
             embedding_provider: Query-embedding computation boundary (None
                 disables the vector channel).
+            fusion_weights: Explicit rank-fusion weights (None reads the
+                ``knowledge:`` config mapping per search via
+                :func:`deerflow.knowledge.config.get_knowledge_config`, so
+                the default is ``FusionWeights()``, identical to before).
         """
         self._sessions = session_factory
         self._structured = SQLStructuredLookupStore(session_factory)
@@ -1287,11 +1681,17 @@ class KnowledgeRetrievalService:
         self._failures = SQLFailureSearchStore(session_factory)
         self._relational = SQLRelationalExpansionStore(session_factory)
         self._embedding_provider = embedding_provider
+        self._fusion_weights = fusion_weights
 
     @property
     def embedding_provider(self) -> EmbeddingProvider | None:
         """The bound query-embedding provider (None when vector is off)."""
         return self._embedding_provider
+
+    @property
+    def fusion_weights(self) -> FusionWeights | None:
+        """The explicit rank-fusion weights (None means read from config per search)."""
+        return self._fusion_weights
 
     def search(
         self,
@@ -1337,6 +1737,7 @@ class KnowledgeRetrievalService:
         )
         query_embedding = self._embed_query(query_text)
         allowed = [filters["project_id"]] if filters.get("project_id") else None
+        weights = self._fusion_weights if self._fusion_weights is not None else get_knowledge_config().get_fusion_weights()
         result = execute_retrieval(
             plan,
             query_text=query_text,
@@ -1347,6 +1748,7 @@ class KnowledgeRetrievalService:
             relational=self._relational,
             query_embedding=query_embedding,
             allowed_project_ids=allowed,
+            weights=weights,
         )
         # Slice the full fused ranking (not plan.top_k): total stays honest
         # across pages and deep offsets keep working.
@@ -1361,6 +1763,49 @@ class KnowledgeRetrievalService:
         total = len(ranked)
         page = ranked[offset : offset + limit]
         return RetrievalPage(documents=[self._to_document(item.candidate, score=item.score, channels=item.channels, modifiers=item.modifiers, rank=item.rank) for item in page], limit=limit, offset=offset, total=total)
+
+    def search_scoped(
+        self,
+        query: str,
+        *,
+        kinds: tuple[str, ...],
+        filters: Mapping[str, str],
+        limit: int,
+        offset: int,
+        context: KnowledgeRequestContext,
+    ) -> RetrievalPage:
+        """Return one page of fused hits constrained by ``context.scope``.
+
+        Phase 3c :class:`ScopedKnowledgeRetrievalBackend
+        <deerflow.knowledge.agent_tools.lookup.ScopedKnowledgeRetrievalBackend>`
+        binding: reuses :meth:`search` (no duplicated SQL). A selected scope
+        intersects the caller ``kinds`` with the selected datasets' planner
+        kinds (via the provider mapping, so ``conflict``/``dossier``/
+        ``artifact`` — owned by no dataset — drop out), then post-filters
+        the fused ranking by document id when document filters are present
+        (mirroring :meth:`QuantflowPgProvider.search_scoped
+        <deerflow.knowledge.quantflow_provider.QuantflowPgProvider.search_scoped>`).
+        ``all`` scopes behave as the legacy search.
+
+        Raises:
+            ValueError: When knowledge is disabled for the turn.
+            PermissionError: On an empty selection or unknown dataset ids.
+        """
+        selection = _scope_selection(context)
+        if selection is None:
+            return self.search(query, kinds=kinds, filters=filters, limit=limit, offset=offset)
+        wanted = frozenset(selection.kinds)
+        restricted = tuple(kind for kind in kinds if set(_LOOKUP_KIND_MAP.get(kind, ())) & wanted)
+        if selection.allowed_doc_ids is None:
+            return self.search(query, kinds=restricted, filters=filters, limit=limit, offset=offset)
+        # The id allowlist applies post-fusion (provider parity), so fetch the
+        # full ranking through the unscoped entry point and slice after filtering.
+        fetch = limit + offset
+        page = self.search(query, kinds=restricted, filters=filters, limit=fetch, offset=0)
+        if page.total is not None and page.total > fetch:
+            page = self.search(query, kinds=restricted, filters=filters, limit=page.total, offset=0)
+        filtered = [doc for doc in page.documents if doc.id in selection.allowed_doc_ids]
+        return RetrievalPage(documents=filtered[offset : offset + limit], limit=limit, offset=offset, total=len(filtered))
 
     def get_documents(self, ids: Sequence[str], *, include_evidence: bool) -> list[RetrievalDocument | None]:
         """Return one entry per requested id, ``None`` for unknown ids (order preserved).
@@ -1381,6 +1826,40 @@ class KnowledgeRetrievalService:
                     continue
                 documents.append(self._fetch_document(session, key, include_evidence=include_evidence))
         return documents
+
+    def get_documents_scoped(
+        self,
+        ids: Sequence[str],
+        *,
+        include_evidence: bool,
+        context: KnowledgeRequestContext,
+    ) -> list[RetrievalDocument | None]:
+        """Return one entry per requested id under ``context.scope`` (order preserved).
+
+        Phase 3c scoped binding: reuses :meth:`get_documents` (no duplicated
+        SQL), then hides out-of-scope documents as None — unknown AND
+        out-of-scope ids both read as misses so a miss never confirms
+        whether an id exists outside the scope. ``all`` scopes behave as the
+        legacy fetch.
+
+        Raises:
+            ValueError: When knowledge is disabled for the turn.
+            PermissionError: On an empty selection or unknown dataset ids.
+        """
+        selection = _scope_selection(context)
+        rows = self.get_documents(ids, include_evidence=include_evidence)
+        if selection is None:
+            return rows
+        allowed_lookup = {_PLANNER_KIND_MAP[kind] for kind in selection.kinds if kind in _PLANNER_KIND_MAP}
+        scoped: list[RetrievalDocument | None] = []
+        for doc in rows:
+            if doc is None or doc.kind not in allowed_lookup:
+                scoped.append(None)
+            elif selection.allowed_doc_ids is not None and doc.id not in selection.allowed_doc_ids:
+                scoped.append(None)
+            else:
+                scoped.append(doc)
+        return scoped
 
     def _embed_query(self, query_text: str) -> list[float] | None:
         """Embed the query, degrading to None (vector skipped) on any failure."""
@@ -1474,7 +1953,14 @@ class KnowledgeRetrievalService:
         return None
 
 
-def open_pg_backends(dsn: str, *, embedding_model: str | None = None, artifact_store: Any | None = None) -> KnowledgeBackends:
+def open_pg_backends(
+    dsn: str,
+    *,
+    embedding_model: str | None = None,
+    artifact_store: Any | None = None,
+    artifact_store_uri: str | None = None,
+    fusion_weights: FusionWeights | None = None,
+) -> KnowledgeBackends:
     """Build the tool-layer backend bundle bound to the database at ``dsn``.
 
     Reuses the process-wide sync-engine cache (one engine/pool per URL), so
@@ -1491,18 +1977,32 @@ def open_pg_backends(dsn: str, *, embedding_model: str | None = None, artifact_s
             the production path; pass ``"test-fake/v1"`` explicitly for
             offline mechanics checks.
         artifact_store: Optional :class:`ArtifactStore` to expose through
-            an :class:`ArtifactStoreReader` (None leaves artifacts unbound).
+            an :class:`ArtifactStoreReader` (None leaves artifacts unbound
+            unless ``artifact_store_uri`` is set; wins over the URI).
+        artifact_store_uri: Optional object-store URI (``file://`` /
+            ``s3://`` / ``minio://`` / bare path) resolved via
+            :func:`create_backend <deerflow.knowledge.artifacts.backends.create_backend>`
+            into the reader's store. None leaves artifacts unbound (current
+            behavior when no explicit store is given either).
+        fusion_weights: Explicit rank-fusion weights for the retrieval
+            service (None reads the ``knowledge:`` config mapping per
+            search, defaulting to ``FusionWeights()``).
 
     Returns:
         A :class:`KnowledgeBackends` bundle (retrieval + experiments always
-        bound, artifacts bound when a store is given).
+        bound, artifacts bound when a store or URI is given).
     """
     from deerflow.persistence.agents.sql import get_sync_sessionmaker
 
     session_factory = get_sync_sessionmaker(dsn)
     provider = load_provider(embedding_model) if embedding_model is not None else None
+    if artifact_store is None and artifact_store_uri is not None:
+        from deerflow.knowledge.artifacts.backends import create_backend
+        from deerflow.knowledge.artifacts.store import ArtifactStore
+
+        artifact_store = ArtifactStore(create_backend(artifact_store_uri))
     return KnowledgeBackends(
-        retrieval=KnowledgeRetrievalService(session_factory, embedding_provider=provider),
+        retrieval=KnowledgeRetrievalService(session_factory, embedding_provider=provider, fusion_weights=fusion_weights),
         experiments=SQLExperimentLookupStore(session_factory),
         artifacts=ArtifactStoreReader(artifact_store) if artifact_store is not None else None,
     )
@@ -1512,8 +2012,8 @@ def bind_knowledge_backends_from_config(*, artifact_store: Any | None = None) ->
     """Bind the process-wide knowledge backends from the ``knowledge:`` config section.
 
     The startup integration step (called once from the Gateway lifespan):
-    reads the database DSN plus the embedding model from
-    :func:`deerflow.knowledge.config.get_knowledge_config`, opens the
+    reads the database DSN, the embedding model, and the artifact-store URI
+    from :func:`deerflow.knowledge.config.get_knowledge_config`, opens the
     backend bundle with :func:`open_pg_backends`, and registers it via
     :func:`deerflow.knowledge.agent_tools.lookup.bind_knowledge_backends` so the
     ``ledger_*``/``experiment_get`` tools and the run-start bootstrap
@@ -1533,8 +2033,10 @@ def bind_knowledge_backends_from_config(*, artifact_store: Any | None = None) ->
     never fail the whole search.
 
     Args:
-        artifact_store: Optional artifact store to expose through an
-            :class:`ArtifactStoreReader` (None leaves artifacts unbound).
+        artifact_store: Optional explicit artifact store to expose through
+            an :class:`ArtifactStoreReader` (wins over the configured URI;
+            None builds the reader from the configured ``artifact_store``
+            URI when set, else leaves artifacts unbound).
 
     Returns:
         The effective process-wide bindings, or None when the plane is
@@ -1543,6 +2045,8 @@ def bind_knowledge_backends_from_config(*, artifact_store: Any | None = None) ->
     Raises:
         sqlalchemy.exc.ArgumentError: When the configured DSN is not a
             usable SQLAlchemy URL (the lifespan logs and keeps serving).
+        ValueError: When the configured ``artifact_store`` URI has an
+            unsupported scheme (fail closed: no partial binding).
     """
     config = get_knowledge_config()
     if not config.is_enabled():
@@ -1559,15 +2063,20 @@ def bind_knowledge_backends_from_config(*, artifact_store: Any | None = None) ->
 
         if model not in embeddings_mod._provider_factories:
             register_provider_factory(model, lambda: SentenceTransformerEmbeddingProvider(model))
+    artifact_store_uri = config.get_artifact_store() if artifact_store is None else None
     try:
-        backends = open_pg_backends(dsn, embedding_model=model, artifact_store=artifact_store)
+        backends = open_pg_backends(dsn, embedding_model=model, artifact_store=artifact_store, artifact_store_uri=artifact_store_uri)
     except EmbeddingError:
         logger.warning(
             "bind_knowledge_backends_from_config: embedding model %r failed to load; binding knowledge backends without the vector channel",
             model,
             exc_info=True,
         )
-        backends = open_pg_backends(dsn, artifact_store=artifact_store)
+        backends = open_pg_backends(dsn, artifact_store=artifact_store, artifact_store_uri=artifact_store_uri)
     bound = bind_knowledge_backends(retrieval=backends.retrieval, experiments=backends.experiments, artifacts=backends.artifacts)
-    logger.info("bind_knowledge_backends_from_config: knowledge backends bound (vector=%s)", "on" if model is not None and bound.retrieval is not None and bound.retrieval.embedding_provider is not None else "off")
+    logger.info(
+        "bind_knowledge_backends_from_config: knowledge backends bound (vector=%s, artifacts=%s)",
+        "on" if model is not None and bound.retrieval is not None and bound.retrieval.embedding_provider is not None else "off",
+        "on" if bound.artifacts is not None else "off",
+    )
     return bound

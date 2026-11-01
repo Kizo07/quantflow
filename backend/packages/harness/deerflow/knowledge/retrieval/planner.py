@@ -72,7 +72,7 @@ __all__ = [
     "Candidate",
     "ChannelHit",
     "RetrievalPlan",
-    "RetrievalResult",
+    "FusedRetrieval",
     "StructuredLookupStore",
     "LexicalSearchStore",
     "VectorSearchStore",
@@ -529,7 +529,7 @@ class RetrievalPlan:
 
 
 @dataclass(frozen=True)
-class RetrievalResult:
+class FusedRetrieval:
     """Fused retrieval output with per-channel diagnostics."""
 
     plan: RetrievalPlan = field(default_factory=RetrievalPlan)
@@ -867,7 +867,7 @@ def execute_retrieval(
     now: datetime | str | None = None,
     relational_seed_k: int = DEFAULT_RELATIONAL_SEED_K,
     apply_failure_boost: bool = True,
-) -> RetrievalResult:
+) -> FusedRetrieval:
     """Execute a retrieval plan across the channel stores and fuse the rankings.
 
     Pass 1 runs the planned channels (structured / lexical / vector /
@@ -898,7 +898,7 @@ def execute_retrieval(
             general top-k; the failures section fuses separately).
 
     Returns:
-        A :class:`RetrievalResult` with fused ranking + diagnostics.
+        A :class:`FusedRetrieval` with fused ranking + diagnostics.
 
     Raises:
         KnowledgeValidationError: On invalid query text/embedding/seed count.
@@ -944,4 +944,4 @@ def execute_retrieval(
             hits.extend(_as_hits(neighbors, CHANNEL_RELATIONAL))
             fused = fuse(hits, plan.scope, weights=weights, allowed_project_ids=allowed_project_ids, query_family_hash=query_family_hash, now=now, apply_failure_boost=apply_failure_boost)
         rounds = 2
-    return RetrievalResult(plan=plan, fusion=fused, channel_counts=channel_counts, rounds=rounds, warnings=tuple(warnings))
+    return FusedRetrieval(plan=plan, fusion=fused, channel_counts=channel_counts, rounds=rounds, warnings=tuple(warnings))

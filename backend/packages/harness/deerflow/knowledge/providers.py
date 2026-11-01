@@ -164,7 +164,16 @@ def validate_scope_capabilities(scope: object, capabilities: KnowledgeCapabiliti
     return canonical
 
 
-async def search_provider(provider: RetrievalProvider, query: str, *, scope: object | None, user_id: str, agent_name: str | None, operation: str = "search") -> RetrievalResult:
+async def search_provider(
+    provider: RetrievalProvider,
+    query: str,
+    *,
+    scope: object | None,
+    user_id: str,
+    agent_name: str | None,
+    operation: str = "search",
+    now: object | None = None,
+) -> RetrievalResult:
     capabilities = operation_capabilities(provider.capabilities, operation)
     if not capabilities.supports("search"):
         raise ValueError("Knowledge retrieval operation is unavailable")
@@ -174,7 +183,12 @@ async def search_provider(provider: RetrievalProvider, query: str, *, scope: obj
     context = KnowledgeRequestContext(user_id=user_id, agent_name=agent_name, scope=canonical)
     contextual_search = getattr(provider, "search_scoped" if operation == "search" else operation, None)
     if callable(contextual_search):
-        result = await contextual_search(query, context=context)
+        # ``now`` pins the fusion reference clock for providers that accept
+        # it (exit gates pin fixture time); other providers are unaffected.
+        if now is not None and "now" in inspect.signature(contextual_search).parameters:
+            result = await contextual_search(query, context=context, now=now)
+        else:
+            result = await contextual_search(query, context=context)
     elif canonical is not None and canonical["mode"] == "selected":
         raise ValueError("Knowledge provider cannot apply the selected scope")
     elif operation != "search":

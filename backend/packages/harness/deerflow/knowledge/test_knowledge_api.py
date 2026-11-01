@@ -25,6 +25,7 @@ from deerflow.knowledge import (  # noqa: E402
     write_api,  # noqa: E402
 )
 from deerflow.knowledge import search as knowledge_search  # noqa: E402
+from deerflow.knowledge.retrieval.fusion import FusionWeights  # noqa: E402
 from deerflow.knowledge.search import ExperimentFilter, ExperimentSearchResult  # noqa: E402
 from deerflow.knowledge.write_api import (  # noqa: E402
     AssumptionRecord,
@@ -273,6 +274,89 @@ class TestKnowledgeConfig:
         fresh = knowledge_config.KnowledgeConfig()
         knowledge_config.set_knowledge_config(fresh)
         assert knowledge_config.get_knowledge_config() is fresh
+
+    def test_artifact_store_defaults_to_none(self, monkeypatch):
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_ARTIFACT_STORE", raising=False)
+        cfg = knowledge_config.KnowledgeConfig()
+        assert cfg.artifact_store is None
+        assert cfg.get_artifact_store() is None
+
+    def test_artifact_store_explicit_field_beats_env(self, monkeypatch):
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_ARTIFACT_STORE", "s3://env-bucket")
+        cfg = knowledge_config.KnowledgeConfig(artifact_store="file:///var/lib/quantflow/artifacts")
+        assert cfg.get_artifact_store() == "file:///var/lib/quantflow/artifacts"
+
+    @pytest.mark.parametrize("uri", ["file:///var/lib/quantflow/artifacts", "s3://kb-evidence/prefix", "minio://kb-evidence", "/srv/kb/artifacts"])
+    def test_artifact_store_env_override(self, monkeypatch, uri):
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_ARTIFACT_STORE", uri)
+        assert knowledge_config.KnowledgeConfig().get_artifact_store() == uri
+
+    def test_artifact_store_blank_counts_as_unset(self, monkeypatch):
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_ARTIFACT_STORE", "   ")
+        assert knowledge_config.KnowledgeConfig().get_artifact_store() is None
+        assert knowledge_config.KnowledgeConfig(artifact_store="  ").get_artifact_store() is None
+
+    def test_fusion_weights_defaults(self, monkeypatch):
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS", raising=False)
+        cfg = knowledge_config.KnowledgeConfig()
+        assert cfg.fusion_weights == {}
+        assert cfg.get_fusion_weights() == FusionWeights()
+
+    def test_fusion_weights_explicit_mapping(self, monkeypatch):
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS", raising=False)
+        cfg = knowledge_config.KnowledgeConfig(fusion_weights={"rrf_k": 5, "failure_boost": 2.0, "near_dup_penalty": 0.25})
+        weights = cfg.get_fusion_weights()
+        assert weights.rrf_k == 5
+        assert weights.failure_boost == 2.0
+        assert weights.near_dup_penalty == 0.25
+        assert weights.exact_scope_boost == FusionWeights().exact_scope_boost
+
+    def test_fusion_weights_unknown_key_rejected(self, monkeypatch):
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS", raising=False)
+        cfg = knowledge_config.KnowledgeConfig(fusion_weights={"rrf_k": 60, "recency_boost_typo": 1.1})
+        with pytest.raises(ValueError, match="Unknown fusion_weights keys"):
+            cfg.get_fusion_weights()
+
+    @pytest.mark.parametrize("mapping", [{"rrf_k": 0}, {"rrf_k": 1.5}, {"rrf_k": "60"}, {"near_dup_penalty": 0}, {"failure_boost": -1.0}, {"recency_window_days": True}])
+    def test_fusion_weights_invalid_value_rejected(self, monkeypatch, mapping):
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS", raising=False)
+        cfg = knowledge_config.KnowledgeConfig(fusion_weights=mapping)
+        with pytest.raises(KnowledgeValidationError):
+            cfg.get_fusion_weights()
+
+    def test_fusion_weights_env_json_override(self, monkeypatch):
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS", '{"rrf_k": 7, "failure_boost": 2.5}')
+        weights = knowledge_config.KnowledgeConfig().get_fusion_weights()
+        assert weights.rrf_k == 7
+        assert weights.failure_boost == 2.5
+        assert weights.exact_scope_boost == FusionWeights().exact_scope_boost
+
+    def test_fusion_weights_explicit_field_beats_env_per_key(self, monkeypatch):
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS", '{"rrf_k": 7, "failure_boost": 2.5}')
+        cfg = knowledge_config.KnowledgeConfig(fusion_weights={"rrf_k": 3})
+        weights = cfg.get_fusion_weights()
+        assert weights.rrf_k == 3
+        assert weights.failure_boost == 2.5
+
+    @pytest.mark.parametrize("raw", ["not-json", "[1, 2]", '"rrf_k"', "42"])
+    def test_fusion_weights_env_must_be_json_object(self, monkeypatch, raw):
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS", raw)
+        with pytest.raises(ValueError, match="DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS"):
+            knowledge_config.KnowledgeConfig().get_fusion_weights()
+
+    def test_fusion_weights_env_unknown_key_rejected(self, monkeypatch):
+        monkeypatch.setenv("DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS", '{"bogus_knob": 1.0}')
+        with pytest.raises(ValueError, match="Unknown fusion_weights keys"):
+            knowledge_config.KnowledgeConfig().get_fusion_weights()
+
+    def test_new_keys_dict_roundtrip(self, monkeypatch):
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_ARTIFACT_STORE", raising=False)
+        monkeypatch.delenv("DEER_FLOW_KNOWLEDGE_FUSION_WEIGHTS", raising=False)
+        monkeypatch.setattr(knowledge_config, "_knowledge_config", knowledge_config.KnowledgeConfig())
+        knowledge_config.load_knowledge_config_from_dict({"artifact_store": "file:///tmp/kb-artifacts", "fusion_weights": {"rrf_k": 9}})
+        effective = knowledge_config.get_knowledge_config()
+        assert effective.get_artifact_store() == "file:///tmp/kb-artifacts"
+        assert effective.get_fusion_weights().rrf_k == 9
 
 
 # ---------------------------------------------------------------------------

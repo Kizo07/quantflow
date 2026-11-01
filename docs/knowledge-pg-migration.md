@@ -84,3 +84,84 @@ reprovisioning.
 2. Restart the gateway.
 3. The SQLite file + timestamped backups are intact; `quantflow_kb` can be
    left alone or dropped (`DROP DATABASE quantflow_kb;` as `postgres`).
+
+## Hermetic / local-only runs
+
+All claims below verified against code/config on 2026-11-01 (Phase 2c).
+
+- **`HF_HUB_OFFLINE=1` is required.** Nothing in the startup path sets it
+  (only the Phase 3 gate sets it for itself via `os.environ.setdefault` in
+  `backend/tests/test_knowledge_phase3_exit_gate.py`, and
+  `backend/docs/KNOWLEDGE.md` "Local-only deployment" prescribes it for
+  hermetic runs). Export it in the gateway/service environment so no
+  HuggingFace Hub HTTP request is ever attempted at retrieval time.
+- **One-time MPNet checkpoint seeding.** The vector leg loads
+  `sentence-transformers/all-mpnet-base-v2` (`ST_MODEL_ID` in
+  `backend/packages/harness/deerflow/knowledge/providers_st.py`, 768-d)
+  exclusively from the local HuggingFace cache — it is never downloaded
+  implicitly. With network available, run once (any Python with
+  `sentence-transformers` installed):
+  `SentenceTransformer("sentence-transformers/all-mpnet-base-v2")`
+  (or `huggingface-cli download` of the same id) to fill the cache
+  (`~/.cache/huggingface/hub/models--sentence-transformers--all-mpnet-base-v2`,
+  present on this host). Every run after that is hermetic.
+- **`local_files_only` hardening.** Construction passes
+  `local_files_only=True`
+  (`SentenceTransformerEmbeddingProvider.__init__`), so a missing
+  checkpoint raises instead of hitting the network; the failure is
+  wrapped as `EmbeddingProviderError`, which the Phase 3 gate turns into
+  a skip and the retrieval service turns into a logged warning plus
+  vector-channel-off retrieval (never a failed search).
+- **Single-provider deployment (`quantflow-pg` only).** The fork ships
+  exactly one knowledge provider, `PROVIDER_NAME = "quantflow-pg"`
+  (`backend/packages/harness/deerflow/knowledge/quantflow_provider.py`,
+  registered via `ensure_quantflow_provider_registered`); the in-tree
+  RAGFlow/LightRAG adapters and the separately packaged WeKnora
+  extension stay unregistered and unconfigured
+  (`backend/docs/KNOWLEDGE.md` "Local-only deployment",
+  `backend/tests/test_knowledge_local_only_guard.py`). Canonical state
+  is this migrated PostgreSQL DSN (`knowledge.database_dsn` /
+  `DEER_FLOW_KNOWLEDGE_DSN`); SQLite keeps dev/test parity only.
+
+## Provider / capabilities / dataset runbook (Phase 5c)
+
+Checked for consistency with the fork section of
+`backend/docs/KNOWLEDGE.md` on 2026-11-01; that section is the
+contract, this is the operator view over the migrated database.
+
+- **Provider.** `quantflow-pg` is the only registered knowledge
+  provider (`PROVIDER_NAME` in
+  `backend/packages/harness/deerflow/knowledge/quantflow_provider.py`).
+  After the step-8 cutover, every fork knowledge tool resolves to it.
+- **Capabilities (six, all read-only).** `search` (fused retrieval via
+  `KnowledgeRetrievalService` / `execute_retrieval`), `sources`
+  (shared v1 evidence envelope, no native sidecar), `catalog`
+  (paginated listing of the four datasets below), `documents`
+  (paginated documents within one dataset), `dataset_filter` and
+  `document_filter` (`search_scoped` restricted to selected
+  datasets' kinds / document IDs).
+- **Dataset → kind → table mapping** (migration files verified
+  present in
+  `backend/packages/harness/deerflow/persistence/migrations/versions/`):
+
+  | Dataset | Kind | Tables (migration) |
+  | --- | --- | --- |
+  | `findings` | `finding` | `finding` (0023) |
+  | `experiments` | `experiment` | `experiment` (0022; embedding column 0028) |
+  | `failures` | `failure` | `finding` + `experiment` (0022/0023) |
+  | `assumptions` | `assumption` | `assumption` (0022) |
+
+  Row mapping: `finding` rows yield `finding` except
+  `finding_type == "failure"`; `experiment` rows yield `experiment`
+  except `outcome == "failure"`; `assumption` rows yield
+  `assumption`. The `failure` kind draws from both tables.
+- **Scope rules.** Admitted `dataset_ids` must be a subset of the
+  four IDs above — unknown IDs are rejected, never mapped.
+  `disabled` blocks every fork tool and the bootstrap packet. An
+  inaccessible or missing selection fails the whole constrained
+  request; no best-effort fallback, no unrestricted retry.
+- **Caps / budgets (unchanged by the migration).** Results display at
+  most 100 hits; `format_result` budgets chunk text and source
+  evidence together (a cited hit that cannot fit is omitted as a
+  whole); only displayed excerpts enter artifacts. See "Sources and
+  citations" in `backend/docs/KNOWLEDGE.md`.

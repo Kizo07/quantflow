@@ -27,6 +27,9 @@ const { mobile, navigation } = rs.hoisted(() => ({
 rs.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile.value }));
 rs.mock("next/navigation", () => ({
   usePathname: () => navigation.pathname,
+  // The merged WorkspaceHeader also renders the fork's ImportChatButton,
+  // which navigates after an import (merge-verify fix).
+  useRouter: () => ({ push: rs.fn(), replace: rs.fn(), refresh: rs.fn() }),
 }));
 rs.mock("@/core/i18n/hooks", () => ({
   useI18n: () => ({ t: { sidebar: { newChat: "New chat" } } }),

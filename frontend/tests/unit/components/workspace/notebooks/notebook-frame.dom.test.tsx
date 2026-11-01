@@ -109,11 +109,29 @@ function getNotebookFrame(): HTMLIFrameElement {
   return el;
 }
 
+// happy-dom 21 (arrived via the upstream merge's lockfile) reports
+// iframe.contentWindow as null where happy-dom 20 provided a Window, so
+// install one shared stub window per frame. The component under test reads
+// the same property for both postMessage delivery and event.source
+// filtering, so every assertion below keeps its original strength
+// (merge-verify fix).
+const stubbedFrameWindows = new WeakMap<HTMLIFrameElement, Window>();
+
 function frameContentWindow(iframe: HTMLIFrameElement): Window {
-  const win = iframe.contentWindow;
-  if (win === null) {
-    throw new Error("expected the Notebook frame to have a content window");
+  const stubbed = stubbedFrameWindows.get(iframe);
+  if (stubbed) {
+    return stubbed;
   }
+  const real = iframe.contentWindow;
+  if (real !== null) {
+    return real;
+  }
+  const win = { postMessage: rs.fn() } as unknown as Window;
+  Object.defineProperty(iframe, "contentWindow", {
+    value: win,
+    configurable: true,
+  });
+  stubbedFrameWindows.set(iframe, win);
   return win;
 }
 
@@ -122,7 +140,7 @@ function frameMessage(
   data: unknown,
   origin = "null",
 ): void {
-  const source = iframe.contentWindow;
+  const source = frameContentWindow(iframe);
   expect(source).not.toBeNull();
   window.dispatchEvent(new MessageEvent("message", { data, origin, source }));
 }

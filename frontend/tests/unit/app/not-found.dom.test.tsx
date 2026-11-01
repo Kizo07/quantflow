@@ -65,6 +65,11 @@ describe("404 recovery", () => {
     const config = readFileSync(configPath, "utf-8");
     expect(
       config.includes(
+        "/home/fire/Documents/quantflow/backend/Audit/spark-mcp-architecture.html",
+      ),
+    ).toBe(true);
+    expect(
+      config.includes(
         "/home/fire/Documents/deer-flow/backend/Audit/spark-mcp-architecture.html",
       ),
     ).toBe(true);

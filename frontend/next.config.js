@@ -39,6 +39,11 @@ const config = {
     // site-absolute URLs; serve the public copy instead of 404ing.
     rewrites.push({
       source:
+        "/home/fire/Documents/quantflow/backend/Audit/spark-mcp-architecture.html",
+      destination: "/spark-mcp-architecture.html",
+    });
+    rewrites.push({
+      source:
         "/home/fire/Documents/deer-flow/backend/Audit/spark-mcp-architecture.html",
       destination: "/spark-mcp-architecture.html",
     });

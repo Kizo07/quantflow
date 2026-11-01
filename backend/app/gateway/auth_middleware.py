@@ -23,6 +23,7 @@ from app.gateway.auth_disabled import (
     AUTH_SOURCE_INTERNAL,
     AUTH_SOURCE_PAT,
     AUTH_SOURCE_SESSION,
+    AUTH_SOURCE_SIDECAR,
     get_auth_disabled_user,
     is_auth_disabled,
 )
@@ -67,6 +68,75 @@ def _is_public(path: str) -> bool:
     return any(path.startswith(prefix) for prefix in _PUBLIC_PATH_PREFIXES)
 
 
+# Gateway-owned connector endpoints stay on the session cookie; every other
+# path under /api/notebooks/ is a sidecar relay path the sandboxed iframe
+# (which sends no cookies) reaches with a sidecar token instead — except the
+# static UI bundle below, which is EXEMPT from per-request auth (joint
+# contract D1): the document shell plus its <script>/<link> subresources
+# carry no notebook data (data loads via authenticated API calls), and the
+# sandboxed frame cannot attach credentials to subresource loads anyway. The
+# single ?sidecar_token= on the document navigation authenticates the mount;
+# the assets load on that document token alone. ReportForge owns the files;
+# the paths are pinned here so shell↔sidecar skew fails closed.
+_NOTEBOOK_RELAY_PREFIX = "/api/notebooks/"
+_NOTEBOOK_NON_RELAY_PATHS: frozenset[str] = frozenset(
+    {
+        "/api/notebooks/token",
+        "/api/notebooks/health",
+    }
+)
+
+# D1 public asset set. EXACT match only — no prefix matching, no trailing-
+# slash normalization, no traversal resolution. Anything not in this set
+# (e.g. /api/notebooks/app.js.map, /api/notebooks/../x) stays on the
+# authenticated relay path.
+_NOTEBOOK_PUBLIC_ASSET_PATHS: frozenset[str] = frozenset(
+    {
+        "/api/notebooks",
+        "/api/notebooks/",
+        "/api/notebooks/app.js",
+        "/api/notebooks/bridge.js",
+        "/api/notebooks/sanitize.js",
+        "/api/notebooks/styles.css",
+    }
+)
+
+
+def _is_notebook_public_asset(path: str) -> bool:
+    """True only for the exact D1 asset paths (no normalization)."""
+    return path in _NOTEBOOK_PUBLIC_ASSET_PATHS
+
+
+def _is_notebook_relay_path(path: str) -> bool:
+    if _is_notebook_public_asset(path):
+        return False
+    normalized = path.rstrip("/") or "/"
+    if normalized in _NOTEBOOK_NON_RELAY_PATHS:
+        return False
+    return normalized == "/api/notebooks" or normalized.startswith(_NOTEBOOK_RELAY_PREFIX)
+
+
+def _notebook_query_token_present(request: Request) -> bool:
+    """True when the request carries the sidecar-token query key at all.
+
+    Presence (not validity) drives the carve-out: an empty or duplicated
+    ``?sidecar_token=`` is a present-but-invalid credential and must hard-401
+    without falling back to the session cookie — same strictness as #4849.
+    """
+    from app.gateway.auth.sidecar_token import SIDECAR_TOKEN_QUERY_PARAM
+
+    return SIDECAR_TOKEN_QUERY_PARAM in request.query_params
+
+
+def _notebook_query_token(request: Request) -> str | None:
+    from app.gateway.auth.sidecar_token import SIDECAR_TOKEN_QUERY_PARAM
+
+    values = request.query_params.getlist(SIDECAR_TOKEN_QUERY_PARAM)
+    if len(values) != 1 or not values[0]:
+        return None
+    return values[0]
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """Strict auth gate: reject requests without a valid session.
 
@@ -91,7 +161,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if _is_public(get_request_route_path(request)):
+        route_path = get_request_route_path(request)
+        if _is_public(route_path):
+            return await call_next(request)
+        if _is_notebook_public_asset(route_path):
+            # D1: the static UI bundle is public code — no credential is
+            # required, and none is consulted (a garbage ?sidecar_token= on
+            # an asset URL cannot 401 a load that needs no auth). The relay
+            # forwards these upstream without an Authorization header.
             return await call_next(request)
 
         internal_user = None
@@ -146,6 +223,41 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if internal_user is not None:
             user = internal_user
             auth_source = AUTH_SOURCE_INTERNAL
+        elif _is_notebook_relay_path(route_path) and not is_auth_disabled() and (authorization is not None or _notebook_query_token_present(request)):
+            # Sidecar-token carve-out (BEFORE the PAT branch): the sandboxed
+            # notebook iframe sends no cookies, so its fetches carry the
+            # short-lived sidecar JWT minted by GET /api/notebooks/token —
+            # as a Bearer header normally, or as ?sidecar_token= on GETs
+            # that cannot set headers. The carve-out triggers on credential
+            # PRESENCE (header present, or the query key present even when
+            # empty/duplicated): present-but-invalid credentials are a hard
+            # 401 and never fall back to the session cookie (same strictness
+            # as #4849); requests carrying neither credential fall through
+            # to the cookie path below.
+            from app.gateway.auth.pat import extract_bearer_token
+            from app.gateway.auth.sidecar_token import validate_sidecar_token
+            from app.gateway.deps import get_local_provider
+
+            raw_token: str | None
+            if authorization is not None:
+                raw_token = extract_bearer_token(authorization)
+            elif request.method == "GET":
+                raw_token = _notebook_query_token(request)
+            else:
+                raw_token = ""
+            payload = validate_sidecar_token(raw_token) if raw_token else None
+            if payload is None:
+                return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+            try:
+                user = await get_local_provider().get_user(payload.sub)
+            except Exception:
+                logger.warning("Sidecar-token users lookup failed", exc_info=True)
+                return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+            if user is None or getattr(user, "disabled", False):
+                # Mirror the PAT path: deleted/suspended owners resolve to
+                # the same generic 401 so the verdict is not an oracle.
+                return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+            auth_source = AUTH_SOURCE_SIDECAR
         elif authorization is not None and not is_auth_disabled():
             # Bearer (PAT) credential precedence (#4849): a present-but-invalid
             # Authorization header is a hard 401 and never silently falls back

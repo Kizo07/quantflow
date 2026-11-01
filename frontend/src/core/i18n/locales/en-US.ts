@@ -612,6 +612,7 @@ export const enUS: Translations = {
     demoChats: "Demo chats",
     agents: "Agents",
     scheduledTasks: "Scheduled tasks",
+    notebooks: "Notebooks",
     cliSessions: "CLI sessions",
     usage: "Usage",
     agentsDisabledTooltip: "Feature not enabled",
@@ -620,8 +621,7 @@ export const enUS: Translations = {
     pinnedAssistantPause: "Pause assistant",
     pinnedAssistantResume: "Resume assistant",
     pinnedAssistantPaused: "Paused",
-    pinnedAssistantDisabledTooltip:
-      "Assistant is not enabled — no session yet",
+    pinnedAssistantDisabledTooltip: "Assistant is not enabled — no session yet",
   },
 
   // Knowledge scope for custom-agent chat

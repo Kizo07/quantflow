@@ -573,6 +573,7 @@ export const zhCN: Translations = {
     demoChats: "演示对话",
     agents: "智能体",
     scheduledTasks: "定时任务",
+    notebooks: "笔记本",
     cliSessions: "CLI 会话",
     usage: "用量",
     agentsDisabledTooltip: "功能未启用",

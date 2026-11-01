@@ -427,6 +427,41 @@ def install_url_log_redaction() -> None:
             target.addFilter(UrlRedactionFilter())
     for handler in logging.root.handlers:
         _install_url_redaction_filter(handler)
+    install_access_log_query_stripping()
+
+
+# Uvicorn's access line renders the origin-form request target VERBATIM,
+# query string included: ``"GET /api/notebooks/?sidecar_token=<JWT> HTTP/1.1"``.
+# The sandboxed notebook iframe must carry its short-lived token in the URL
+# (navigations cannot set headers), so without a dedicated pass every frame
+# mount would land the token in the gateway access logs. The generic
+# absolute-URL pass cannot see this shape (no scheme), hence its own filter,
+# attached ONLY to the ``uvicorn.access`` logger so no other stream loses
+# its query strings. The path stays for operator debuggability; the query —
+# every param, not just the token — is omitted.
+_UVICORN_ACCESS_TARGET_RE = re.compile(r'(?P<method>"[A-Za-z]+ )(?P<path>/[^"?\s]*)(?P<query>\?[^"\s]*)?(?P<version> HTTP/[0-9.]+")')
+
+
+class AccessLogQueryStripFilter(logging.Filter):
+    """Omit query strings from uvicorn access log records (token-in-URL)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        stripped = _UVICORN_ACCESS_TARGET_RE.sub(
+            lambda match: match.group("method") + match.group("path") + match.group("version"),
+            message,
+        )
+        if stripped != message:
+            record.msg = stripped
+            record.args = None
+        return True
+
+
+def install_access_log_query_stripping() -> None:
+    """Attach query stripping to the ``uvicorn.access`` logger (idempotent)."""
+    target = logging.getLogger("uvicorn.access")
+    if not any(isinstance(item, AccessLogQueryStripFilter) for item in target.filters):
+        target.addFilter(AccessLogQueryStripFilter())
 
 
 class TraceContextFilter(logging.Filter):

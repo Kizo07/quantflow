@@ -1195,3 +1195,45 @@ def test_url_redaction_filter_collapses_space_carrying_targets_in_every_retry_sh
     # does not start with ``/`` keeps passing through untouched, which
     # test_url_redaction_filter_covers_urllib3_retry_lines already pins.
     assert _formatted("Retry: /tmp/build.sock went away", ()) == "Retry: /<redacted>"
+
+
+def _access_record(message: str, *args) -> logging.LogRecord:
+    # Uvicorn's default access line: '%s - "%s %s HTTP/%s" %d' style content —
+    # the request target carries the query string verbatim.
+    return logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, message, args or (), None)
+
+
+def test_access_log_query_strip_filter_omits_query_strings() -> None:
+    from deerflow.logging_config import AccessLogQueryStripFilter
+
+    record = _access_record('127.0.0.1:1 - "GET /api/notebooks/?sidecar_token=eyJhbGciOiJIUzI1NiJ9.payload.sig&notebook=nb-1 HTTP/1.1" 200')
+    assert AccessLogQueryStripFilter().filter(record) is True
+    assert record.getMessage() == '127.0.0.1:1 - "GET /api/notebooks/ HTTP/1.1" 200'
+    assert "sidecar_token" not in record.getMessage()
+    assert "eyJhbGciOiJIUzI1NiJ9" not in record.getMessage()
+
+
+def test_access_log_query_strip_filter_keeps_queryless_lines() -> None:
+    from deerflow.logging_config import AccessLogQueryStripFilter
+
+    record = _access_record('127.0.0.1:1 - "GET /api/notebooks/health HTTP/1.1" 200')
+    assert AccessLogQueryStripFilter().filter(record) is True
+    assert record.getMessage() == '127.0.0.1:1 - "GET /api/notebooks/health HTTP/1.1" 200'
+
+
+def test_install_access_log_query_stripping_targets_uvicorn_access_only() -> None:
+    from deerflow.logging_config import AccessLogQueryStripFilter, install_access_log_query_stripping
+
+    access_logger = logging.getLogger("uvicorn.access")
+    other_logger = logging.getLogger("uvicorn.error")
+    old_access = access_logger.filters[:]
+    old_other = other_logger.filters[:]
+    try:
+        access_logger.filters = [f for f in old_access if not isinstance(f, AccessLogQueryStripFilter)]
+        install_access_log_query_stripping()
+        install_access_log_query_stripping()  # idempotent
+        assert sum(isinstance(f, AccessLogQueryStripFilter) for f in access_logger.filters) == 1
+        assert not any(isinstance(f, AccessLogQueryStripFilter) for f in other_logger.filters)
+    finally:
+        access_logger.filters = old_access
+        other_logger.filters = old_other

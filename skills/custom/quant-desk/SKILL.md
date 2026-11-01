@@ -271,6 +271,64 @@ report-forge executes code and accepts arbitrary assets on the host:
 Host execution runs with user permissions by explicit operator decision —
 powerful tool, not a sandbox. Kill-switch: `REPORTFORGE_EXEC=off`.
 
+## ReportForge notebooks + diagram loop (two-pass rule)
+
+For analysis notebooks and diagram figures, the full contract is
+`/home/fire/Documents/report-forge/docs/notebooks.md` — this is the
+desk-facing summary. Pipeline steps (must run in order) vs utilities
+(call as needed):
+
+- **Pass 1 — execute (pipeline):** `reportforge_notebook_create` →
+  cell edits → `reportforge_notebook_run_cell`/`run_all` (ephemeral,
+  fresh kernel per run) or `reportforge_run_cell_persistent` (ONE
+  cell in the project's long-lived kernel). Re-run after ANY code
+  edit above a fed cell; stale flags say when. Kill-switch
+  `REPORTFORGE_EXEC=off` stops all kernel paths.
+- **Pass 2 — render (pipeline):** `reportforge_render_report` on the
+  slug, then publish + present per Artifact delivery. Render NEVER
+  executes — a hollow render means pass 1 was skipped; re-run the
+  pass, never patch the outputs. Unexecuted notebooks render rc 0
+  with EMPTY outputs (pinned policy, not a bug).
+- **Diagram figures (utility):** livefigures sources (`figures/*.dot`,
+  `*.vl.json`, `*.nomnoml`, …) validate→render→look→fix via
+  `scripts/figure_loop.py <project-dir> --render` from the
+  report-forge checkout (exit 1 lists violations; `--json` gives
+  JSON→stdout, logs→stderr). LOOK at the preview before shipping —
+  layout bugs render exit-0 and valid-but-wrong. Offline formats
+  only for sealed releases (kroki-backed PlantUML/D2/… phone home).
+- **Figure previews (utility):** `save_chart`/`save_asset` take
+  `preview=True` (engine-level; MCP flag lands after review close)
+  to return the PNG in-result — use it right after export, not as a
+  substitute for the pre-render lint pass.
+- **Hygiene is warn-only:** `panache_warnings` on render results are
+  advisory this phase — read them, fix what is cheap, never treat
+  them as render failures.
+
+### Notebook approval protocol (mandatory — joint contract D3)
+
+Notebook cell edits and cell runs are HUMAN-GATED when an agent issues
+them (reads are never gated):
+
+- **agent × interactive:** the harness returns a `RISK_CONFIRMATION`
+  directive instead of running the tool. You MUST call
+  `ask_clarification(question=..., clarification_type="risk_confirmation",
+  ...)` and wait. Only after the human approves, retry the SAME call —
+  the harness forwards the confirmed retry. No other tool calls in the
+  `ask_clarification` turn (siblings are dropped).
+- **agent × autonomous** (scheduled/webhook/no-human runs): the harness
+  returns `BLOCKED`. NEVER retry a `BLOCKED` notebook call — no human
+  is present to approve it. Report the `missing_decision` and continue
+  with read-only work or stop.
+- **human's own clicks** in the embedded UI are always allowed.
+
+NEVER pass `confirmed`, `interaction_mode`, or `mode` to a notebook
+tool yourself — the harness STRIPS any model-supplied values and sets
+them per run policy (confirmed retry carries `confirmed=True` plus the
+resolved `interaction_mode`). A model can never self-approve; smuggling
+`confirmed=True` into your args changes nothing. Edits you make while
+the human watches the embedded UI still count as agent-initiated —
+observation is not authorship.
+
 ## Rules
 - Never skip Phase 2; a single-track recommendation is labeled "non-debated".
 - Every number traces to a subagent brief; you add no unsourced numbers.

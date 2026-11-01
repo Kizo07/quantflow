@@ -41,6 +41,7 @@ from app.gateway.routers import (
     mcp_tasks,
     memory,
     models,
+    notebooks,
     persistent_bot,
     personal_mcp,
     plugins,
@@ -1443,6 +1444,11 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
 
     # Browser API is mounted at /api/threads/{thread_id}/browser
     app.include_router(browser.router)
+
+    # Notebook connector (ReportForge sidecar proxy + health/token) is mounted
+    # at /api/notebooks. Nothing notebook-shaped starts with the gateway —
+    # the sidecar starts on first notebook open (see the connector health).
+    app.include_router(notebooks.router)
 
     # Uploads API is mounted at /api/threads/{thread_id}/uploads
     app.include_router(uploads.router)

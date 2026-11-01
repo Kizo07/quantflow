@@ -145,6 +145,7 @@ function nameOfSegment(
   if (segment === "chats") return t.breadcrumb.chats;
   if (segment === "usage") return t.breadcrumb.usage;
   if (segment === "scheduled-tasks") return t.sidebar.scheduledTasks;
+  if (segment === "notebooks") return t.sidebar.notebooks;
   if (segment === "cli-sessions") return t.sidebar.cliSessions;
   if (segment === "agents") return t.sidebar.agents;
   return segment[0]?.toUpperCase() + segment.slice(1);

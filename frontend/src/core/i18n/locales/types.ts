@@ -476,6 +476,7 @@ export interface Translations {
     demoChats: string;
     agents: string;
     scheduledTasks: string;
+    notebooks: string;
     cliSessions: string;
     usage: string;
     agentsDisabledTooltip: string;

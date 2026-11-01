@@ -66,6 +66,7 @@ from deerflow.config.tool_search_config import ToolSearchConfig, load_tool_searc
 from deerflow.config.typesafe_config import TypeSafeConfig, load_typesafe_config_from_dict
 from deerflow.config.verification_config import VerificationConfig
 from deerflow.env import load_selected_env_file
+from deerflow.evolution.config import EvolutionConfig
 from deerflow.extensions.loader import ExtensionSpec
 from deerflow.knowledge.config import KnowledgeConfig, load_knowledge_config_from_dict
 
@@ -307,6 +308,7 @@ class AppConfig(BaseModel):
     task_continuity: TaskContinuityConfig = Field(default_factory=TaskContinuityConfig, description="Thread-local notes and compacted-source recall")
     memory: MemoryConfig = Field(default_factory=MemoryConfig, description="Memory subsystem configuration")
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig, description="Research Knowledge Plane configuration (experiments, evidence, experiment search)")
+    evolution: EvolutionConfig = Field(default_factory=EvolutionConfig, description="Native evolution loop configuration (budgets, defaults, model roles)")
     blob_storage: BlobStorageConfig = Field(default_factory=BlobStorageConfig, description="Content-addressed blob store configuration")
     knowledge_base: KnowledgeBaseConfig = Field(
         default_factory=KnowledgeBaseConfig,

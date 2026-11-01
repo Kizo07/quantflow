@@ -37,10 +37,8 @@ user-facing behavior and the relevant `AGENTS.md` for development changes.
 `CLAUDE.md` imports `AGENTS.md`; do not edit the shim.
 
 ### Generated Output Location
-Store generated audit reports, HTML exhibits, and screenshot sets in
-`/home/fire/Documents/Audit/` (e.g. `quantflow-*-2026-10-18.md`,
-`screenshots-*/`). Never create an `Audit/` directory inside the repo
-working tree (such as `backend/Audit/`).
+Store generated reports, exhibits, and screenshots in
+`/home/fire/Documents/Audit/`, never an `Audit/` dir inside the repo.
 
 Image result URL policy: [image search guide](packages/harness/deerflow/community/image_search/AGENTS.md).
 
@@ -52,9 +50,9 @@ vars; `summarize` and pytest are offline. See its README for the protocol.
 Benchmarks in `scripts/benchmark/` must be standalone and reproducible. Import
 production functions; never duplicate them or introduce an alternative runtime.
 
-Sandbox benchmarks reuse production lifecycle. Reject negative/NaN timing values
-before provider creation, export no secrets, and fail on final cleanup errors.
-See the sandbox benchmark README for supported options and tests.
+Sandbox benchmarks reuse production lifecycle: reject negative/NaN timings
+pre-creation, export no secrets, fail on cleanup errors. See its README for
+options and tests.
 
 - Pin every external dataset by immutable revision and SHA-256. Callers provide
   the local dataset path; evaluation commands must not silently download data.
@@ -128,16 +126,15 @@ make format             # ruff format
 make migrate-rev MSG="..."  # Autogenerate a new alembic revision (see Schema Migrations section)
 ```
 
-The backend `make dev` target pre-creates and excludes `DEER_FLOW_HOME`
-(default: `backend/.deer-flow`) and `backend/sandbox` from Uvicorn's reload
-watcher. Do not replace it with a bare `uvicorn --reload`: agent tasks write
-Python and other runtime files below `DEER_FLOW_HOME`, which would otherwise
-restart the Gateway during an active run.
+The backend `make dev` target excludes `DEER_FLOW_HOME` (default
+`backend/.deer-flow`) and `backend/sandbox` from Uvicorn's reload watcher:
+agent tasks write runtime files below `DEER_FLOW_HOME`, so a bare
+`uvicorn --reload` would restart the Gateway mid-run.
 
 Configuration checks and operator migration scripts reuse the installed backend
 environment with `uv run --no-sync --project backend` from the repository root.
-`--project` preserves the caller's working directory and relative runtime/config
-selectors; `--no-sync` retains installed extras such as PostgreSQL drivers.
+`--project` preserves cwd and relative selectors; `--no-sync` keeps installed
+extras such as PostgreSQL drivers.
 
 Read the nearest scoped `AGENTS.md` for subsystem ownership.
 

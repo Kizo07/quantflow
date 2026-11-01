@@ -114,8 +114,17 @@ async def test_bootstrap_claim_tokens_preserves_existing_scheduler_and_outbox(tm
         async with engine.connect() as conn:
             columns = await conn.run_sync(lambda sync: {col["name"] for col in sa.inspect(sync).get_columns(TABLE)})
             assert "claim_token" not in columns
-            assert (await conn.execute(sa.text("SELECT version_num FROM alembic_version"))).scalar_one() == SCHEDULER
-        await bootstrap.bootstrap_schema(engine, backend="sqlite")
+            versions = set((await conn.execute(sa.text("SELECT version_num FROM alembic_version"))).scalars().all())
+            # The QuantFlow merge head leaves the knowledge leg pinned at its
+            # own pre-merge head when the upstream leg downgrades past the fork
+            # (restored from the pre-merge fork test; the merge resolution had
+            # taken upstream's linear-history assertions).
+            assert versions == {SCHEDULER, "0029_merge_knowledge_outbox"}
+        # Re-upgrade with plain alembic: bootstrap requires a single
+        # alembic_version row, which a downgrade past a merge point cannot give.
+        await asyncio.to_thread(command.upgrade, cfg, "head")
         await assert_preserved()
+        async with engine.connect() as conn:
+            assert (await conn.execute(sa.text("SELECT version_num FROM alembic_version"))).scalar_one() == HEAD
     finally:
         await engine.dispose()

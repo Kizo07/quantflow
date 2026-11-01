@@ -489,6 +489,9 @@ async def test_gateway_lifespan_passes_the_gate_signal_and_the_run_worker_id():
     startup_config.log_level = "INFO"
     startup_config.memory.enabled = False
     startup_config.memory.shutdown_flush_timeout_seconds = 5.0
+    # The merged lifespan seeds the persistent bot when enabled; this test
+    # only cares about the channel-service lease wiring (merge-verify fix).
+    startup_config.persistent_bot.enabled = False
     captured = {}
 
     async def fake_start(_startup_config, **kwargs):

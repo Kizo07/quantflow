@@ -28,6 +28,12 @@ class FakeChannel:
         self.sent: list[tuple[str, str]] = []
         self.is_running = running
 
+    # The merged worker sends through the owner-scoped channel interface
+    # (matching test_notification_delivery_worker.py's fake); sends still
+    # land in `sent` so every assertion below is unchanged (merge-verify fix).
+    async def send_notification_for_owner(self, *, owner_user_id, target, text_markdown):
+        self.sent.append((target, text_markdown))
+
     async def send_notification(self, *, target, text_markdown):
         self.sent.append((target, text_markdown))
 

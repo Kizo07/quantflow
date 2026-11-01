@@ -171,7 +171,14 @@ async def _run_lifespan_with_upload_staging_cleanup():
     from app.gateway.app import lifespan
 
     app = FastAPI()
-    startup_config = SimpleNamespace(log_level="INFO", memory=SimpleNamespace(token_counting="char", enabled=False, shutdown_flush_timeout_seconds=30.0))
+    # persistent_bot.enabled=False: the merged lifespan seeds the bot when
+    # enabled; these tests only cover upload-staging/MCP wiring
+    # (merge-verify fix).
+    startup_config = SimpleNamespace(
+        log_level="INFO",
+        memory=SimpleNamespace(token_counting="char", enabled=False, shutdown_flush_timeout_seconds=30.0),
+        persistent_bot=SimpleNamespace(enabled=False),
+    )
     fake_service = MagicMock()
     fake_service.get_status = MagicMock(return_value={})
     cleanup_upload_staging_files = MagicMock(return_value=2)

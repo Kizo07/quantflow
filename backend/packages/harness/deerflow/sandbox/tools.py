@@ -3019,7 +3019,11 @@ def ls_tool(runtime: Runtime, path: str, description: str = "") -> str:
         return f"Error: Directory not found: {requested_path}"
     except PermissionError as e:
         detail = _sanitize_error(e, runtime) if e.filename is not None else requested_path
-        return f"Error: Permission denied: {detail}"
+        if requested_path == VIRTUAL_PATH_PREFIX or requested_path.startswith("/mnt/"):
+            return f"Error: Permission denied: {detail}"
+        # Host-absolute paths outside the mounts: point at the virtual tree
+        # (2026-09-13 harness regression). Already-virtual denials stay bare.
+        return f"Error: Permission denied: {detail} (sandbox tools only see /mnt/... virtual paths — thread deliverables live under /mnt/user-data/outputs)"
     except Exception as e:
         return f"Error: Unexpected error listing directory: {_sanitize_error(e, runtime)}"
 

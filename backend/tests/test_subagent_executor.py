@@ -634,12 +634,21 @@ class TestAgentConstruction:
         assert captured["thinking_enabled"] is True
         assert captured["reasoning_effort"] == "high"
 
-    def test_create_agent_rejects_thinking_on_incapable_model(
+    def test_create_agent_thinking_unsupported_degrades_without_raising(
         self,
         classes,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """Thinking on a model without supports_thinking fails fast at launch."""
+        """Thinking on a model without supports_thinking degrades, not fail-fast.
+
+        Since the 2026-11-01 upstream merge the executor resolves thinking via
+        upstream's ``deerflow.models.reasoning`` contract: an unsupported
+        request is recorded as a ``thinking_unsupported`` adjustment and the
+        ORIGINAL request still reaches the model factory, which enforces it
+        (``ValueError: Model ... does not support thinking`` — covered in
+        test_model_factory.py).
+        """
+        from deerflow.models.reasoning import resolve_reasoning_contract, resolve_reasoning_request
         from deerflow.subagents import executor as executor_module
 
         SubagentConfig = classes["SubagentConfig"]
@@ -650,11 +659,22 @@ class TestAgentConstruction:
             models=[SimpleNamespace(name="agent-model")],
             get_model_config=lambda name: model_profile if name == "agent-model" else None,
         )
+        captured: dict[str, object] = {}
 
-        def fail_create_chat_model(**kwargs):
-            raise AssertionError("model construction must not be reached")
+        def fake_create_chat_model(**kwargs):
+            captured.update(kwargs)
+            return object()
 
-        monkeypatch.setattr(executor_module, "create_chat_model", fail_create_chat_model)
+        monkeypatch.setattr(executor_module, "create_chat_model", fake_create_chat_model)
+        monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: SimpleNamespace(get_graph=lambda: SimpleNamespace(nodes={})))
+        monkeypatch.setitem(
+            sys.modules,
+            "deerflow.agents.middlewares.tool_error_handling_middleware",
+            _module(
+                "deerflow.agents.middlewares.tool_error_handling_middleware",
+                build_subagent_runtime_middlewares=lambda **kwargs: [],
+            ),
+        )
 
         config = SubagentConfig(
             name="thinking-agent",
@@ -664,26 +684,46 @@ class TestAgentConstruction:
         )
         executor = SubagentExecutor(config=config, tools=[], app_config=app_config)
 
-        with pytest.raises(ValueError, match="does not support thinking"):
-            asyncio.run(executor._create_agent())
+        asyncio.run(executor._create_agent())
 
-    def test_create_agent_rejects_invalid_effort(
+        # Original request preserved for the factory's validation and logs.
+        assert captured["thinking_enabled"] is True
+        resolved = resolve_reasoning_request(resolve_reasoning_contract(model_profile), thinking_enabled=True, reasoning_effort=None)
+        assert resolved.thinking_enabled is False
+        assert "thinking_unsupported" in resolved.adjustments
+
+    def test_create_agent_unknown_effort_passes_through_to_factory(
         self,
         classes,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """A bad effort level fails fast at launch, before model construction."""
+        """An unknown effort level passes through; the factory validates it.
+
+        Legacy (non-strict) contracts forward effort values verbatim — the
+        executor must not raise before model construction.
+        """
         from deerflow.subagents import executor as executor_module
 
         SubagentConfig = classes["SubagentConfig"]
         SubagentExecutor = classes["SubagentExecutor"]
 
         app_config = SimpleNamespace(models=[SimpleNamespace(name="agent-model")])
+        captured: dict[str, object] = {}
 
-        def fail_create_chat_model(**kwargs):
-            raise AssertionError("model construction must not be reached")
+        def fake_create_chat_model(**kwargs):
+            captured.update(kwargs)
+            return object()
 
-        monkeypatch.setattr(executor_module, "create_chat_model", fail_create_chat_model)
+        monkeypatch.setattr(executor_module, "create_chat_model", fake_create_chat_model)
+        monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: SimpleNamespace(get_graph=lambda: SimpleNamespace(nodes={})))
+        monkeypatch.setitem(
+            sys.modules,
+            "deerflow.agents.middlewares.tool_error_handling_middleware",
+            _module(
+                "deerflow.agents.middlewares.tool_error_handling_middleware",
+                build_subagent_runtime_middlewares=lambda **kwargs: [],
+            ),
+        )
 
         config = SubagentConfig(
             name="thinking-agent",
@@ -693,8 +733,9 @@ class TestAgentConstruction:
         )
         executor = SubagentExecutor(config=config, tools=[], app_config=app_config)
 
-        with pytest.raises(ValueError, match="invalid reasoning_effort"):
-            asyncio.run(executor._create_agent())
+        asyncio.run(executor._create_agent())
+
+        assert captured["reasoning_effort"] == "ultra"
 
     def test_create_agent_thinking_enabled_construction_with_profile_effort(
         self,

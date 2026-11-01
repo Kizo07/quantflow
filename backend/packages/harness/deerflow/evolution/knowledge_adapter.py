@@ -363,7 +363,7 @@ class KnowledgeAdapter:
             return ProposalPacket(text="", refs=(), intent_topic=topic.strip())
         # Imported lazily: the bootstrap intent helper pulls the langchain
         # tool dependency, which must never load at evolution import time.
-        from deerflow.knowledge.tools.bootstrap import intent_from_text
+        from deerflow.knowledge.agent_tools.bootstrap import intent_from_text
 
         channels = self._retrieval
         intent = await asyncio.to_thread(intent_from_text, topic)

@@ -64,7 +64,8 @@ async def web_fetch_tool(url: str) -> str:
     if not stripped.lower().startswith(("http://", "https://")):
         return f"Error: web_fetch only accepts http(s) URLs, got: {stripped!r}. For local files use the appropriate MCP tool instead (e.g. kizonlp_pdf_text for local PDFs)."
     request_options = {}
-    config = get_app_config().get_tool_config("web_fetch")
+    # Config resolution stats and hashes the config files; keep it off the event loop.
+    config = (await asyncio.to_thread(get_app_config)).get_tool_config("web_fetch")
     if config is not None:
         timeout = _coerce_timeout(config.model_extra.get("timeout"), timeout)
         proxy = _coerce_proxy(config.model_extra.get("proxy"))

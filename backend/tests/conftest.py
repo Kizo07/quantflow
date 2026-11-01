@@ -51,8 +51,8 @@ def _reset_knowledge_plane_state():
     an untouched registry). Reset after each test; in-test behavior is
     unchanged.
     """
+    from deerflow.knowledge.agent_tools.lookup import reset_knowledge_backends
     from deerflow.knowledge.config import get_knowledge_config, set_knowledge_config
-    from deerflow.knowledge.tools.lookup import reset_knowledge_backends
 
     previous = get_knowledge_config()
     try:

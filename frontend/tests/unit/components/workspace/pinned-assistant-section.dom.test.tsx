@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
-import {
-  QueryClient,
-  QueryClientProvider,
-  type InfiniteData,
-} from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 
 rs.mock("next/navigation", () => ({
@@ -17,7 +13,10 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { PinnedAssistantSection } from "@/components/workspace/pinned-assistant-section";
 import type { Locale } from "@/core/i18n";
 import { I18nProvider } from "@/core/i18n/context";
-import { INFINITE_THREADS_QUERY_KEY_PREFIX } from "@/core/threads/hooks";
+import {
+  INFINITE_THREADS_QUERY_KEY_PREFIX,
+  type InfiniteThreadsData,
+} from "@/core/threads/hooks";
 import {
   PERSISTENT_BOT_STATUS_QUERY_KEY,
   type PersistentBotStatus,
@@ -26,10 +25,7 @@ import type { AgentThread } from "@/core/threads/types";
 
 const BOT_THREAD = "b07b0b7d-0000-4000-8000-000000000001";
 
-function thread(
-  id: string,
-  metadata: Record<string, unknown>,
-): AgentThread {
+function thread(id: string, metadata: Record<string, unknown>): AgentThread {
   return {
     thread_id: id,
     created_at: "2026-10-05T12:00:00Z",
@@ -52,9 +48,16 @@ function renderSection(
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   clients.push(queryClient);
-  queryClient.setQueryData<InfiniteData<AgentThread[]>>(
+  // Seed the merged cache shape: useInfiniteThreads now caches
+  // InfiniteThreadsPage entries ({threads, hiddenCount, hasMore}) and
+  // selects plain thread pages for readers, so raw AgentThread[] pages
+  // would select to `undefined` entries (merge-verify fix).
+  queryClient.setQueryData<InfiniteThreadsData>(
     [...INFINITE_THREADS_QUERY_KEY_PREFIX, { archived: false }],
-    { pages: [threads], pageParams: [0] },
+    {
+      pages: [{ threads, hiddenCount: 0, hasMore: false }],
+      pageParams: [0],
+    },
   );
   if (status) {
     queryClient.setQueryData(PERSISTENT_BOT_STATUS_QUERY_KEY, status);

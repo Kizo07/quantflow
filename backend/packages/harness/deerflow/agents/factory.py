@@ -360,8 +360,8 @@ def _assemble_from_features(
         if isinstance(feat.knowledge, AgentMiddleware):
             chain.append(feat.knowledge)
         else:
-            from deerflow.knowledge.tools.lookup import get_knowledge_tools, knowledge_tools_available
-            from deerflow.knowledge.tools.middleware import KnowledgeBootstrapMiddleware
+            from deerflow.knowledge.agent_tools.lookup import get_knowledge_tools, knowledge_tools_available
+            from deerflow.knowledge.agent_tools.middleware import KnowledgeBootstrapMiddleware
 
             chain.append(KnowledgeBootstrapMiddleware(agent_name=name))
             if knowledge_tools_available():

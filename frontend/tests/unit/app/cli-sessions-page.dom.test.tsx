@@ -52,6 +52,13 @@ rs.mock("@/core/cli-sessions/harness-mode", () => ({
   HARNESS_MODE_DEFAULT: "research",
   useHarnessMode: () => ({ mode: mocks.mode, setMode: mocks.setMode }),
 }));
+// The merged ArtifactsProvider (rendered by cli-chat-view) reads the
+// authenticated user for per-account draft scoping, so the page harness
+// below runs inside ArtifactDraftsProvider with a signed-out stub
+// (merge-verify fix).
+rs.mock("@/core/auth/AuthProvider", () => ({
+  useAuth: () => ({ user: null }),
+}));
 rs.mock("@/core/cli-sessions/api", () => ({
   fetchCliSessions: mocks.fetchSessions,
   fetchCliSession: mocks.fetchSession,
@@ -71,6 +78,7 @@ rs.mock("@/core/cli-sessions/api", () => ({
 
 import CliSessionsPage from "@/app/workspace/cli-sessions/page";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { ArtifactDraftsProvider } from "@/core/artifacts/draft-context";
 import type {
   CliCapabilities,
   CliChatBackfill,
@@ -164,12 +172,30 @@ function renderPage() {
     <QueryClientProvider client={client}>
       <I18nProvider initialLocale="en-US">
         <SidebarProvider>
-          <CliSessionsPage />
+          <ArtifactDraftsProvider>
+            <CliSessionsPage />
+          </ArtifactDraftsProvider>
         </SidebarProvider>
       </I18nProvider>
     </QueryClientProvider>,
   );
   return client;
+}
+
+// happy-dom 21 (arrived via the upstream merge's lockfile) eagerly creates
+// each WAAPI Animation's `finished` promise and rejects it with AbortError
+// on cancel. Motion never observes that promise, so unmounting the
+// run-duration shimmer (an infinite animation) surfaces an unhandled
+// rejection that fails the file. Observe-and-ignore at cancel time;
+// animation behavior is otherwise untouched (merge-verify fix).
+const animationPrototype = globalThis.Animation?.prototype;
+if (animationPrototype) {
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const realAnimationCancel = animationPrototype.cancel;
+  animationPrototype.cancel = function (this: Animation) {
+    this.finished?.catch(() => undefined);
+    realAnimationCancel.call(this);
+  };
 }
 
 beforeEach(() => {

@@ -26,7 +26,15 @@ import {
 } from "@/components/ai-elements/conversation";
 import { Button } from "@/components/ui/button";
 import { KnowledgeSourcesProvider } from "@/components/workspace/citations/knowledge-source";
-import { extractArtifactsFromThread } from "@/core/artifacts/utils";
+import {
+  areStringArraysEqual,
+  collectThreadArtifactPaths,
+  extractArtifactsFromThread,
+} from "@/core/artifacts/utils";
+import {
+  createKnowledgeSourceReader,
+  type RetrievalSource,
+} from "@/core/citations/sources";
 import { useI18n } from "@/core/i18n/hooks";
 import { getArtifactArchiveCandidatesByGroupIndex } from "@/core/messages/artifact-archive";
 import {
@@ -88,7 +96,10 @@ import {
 } from "@/core/skills/usage";
 import type { Subtask } from "@/core/tasks";
 import { useUpdateSubtask } from "@/core/tasks/context";
-import { collectRenderedSubtasks } from "@/core/tasks/subtask-render";
+import {
+  collectRenderedSubtasks,
+  findSubtaskResultMessage,
+} from "@/core/tasks/subtask-render";
 import type { AgentThreadState } from "@/core/threads";
 import { cn } from "@/lib/utils";
 
@@ -105,6 +116,10 @@ import {
   type HumanInputSubmitResult,
 } from "./human-input-card";
 import { MarkdownContent } from "./markdown-content";
+import {
+  createMarkdownLinkComponent,
+  MessageArtifactPathsContext,
+} from "./markdown-link";
 import { MessageGroup, getMessageGroupReasoningMessage } from "./message-group";
 import { MessageListItem } from "./message-list-item";
 import {
@@ -133,19 +148,12 @@ type SettledStreamMetadataState = {
   snapshot: StreamMetadataSnapshot;
 };
 
-function sameStrings(previous: readonly string[], next: readonly string[]) {
-  return (
-    previous.length === next.length &&
-    previous.every((value, index) => value === next[index])
-  );
-}
-
 function useStableArtifactPaths(paths: readonly string[] | undefined) {
   const previousPathsRef = useRef<readonly string[]>(EMPTY_ARTIFACT_PATHS);
   return useMemo(() => {
     const nextPaths = paths ?? EMPTY_ARTIFACT_PATHS;
     const previousPaths = previousPathsRef.current;
-    if (sameStrings(previousPaths, nextPaths)) {
+    if (areStringArraysEqual(previousPaths, nextPaths)) {
       return previousPaths;
     }
     previousPathsRef.current = nextPaths;
@@ -331,6 +339,7 @@ export function MessageList({
   onSubmitHumanInput,
   onBranchTurn,
   canRegenerate = false,
+  activeRunId,
   canEdit = false,
   editLockedByGoal = false,
   canBranch = false,
@@ -369,6 +378,7 @@ export function MessageList({
     messageIds: string[],
   ) => void | Promise<void>;
   canRegenerate?: boolean;
+  activeRunId?: string;
   canEdit?: boolean;
   /** Edit would be allowed but for an active goal: show the pencil locked. */
   editLockedByGoal?: boolean;
@@ -388,7 +398,43 @@ export function MessageList({
   const [selectionToolbar, setSelectionToolbar] =
     useState<SelectionToolbarState | null>(null);
   const messages = thread.messages;
+  const previousKnowledgeSnapshotsRef = useRef(
+    new Map<string | Message, RetrievalSource[]>(),
+  );
+  const readMessageKnowledgeSources = useMemo(createKnowledgeSourceReader, []);
+  const knowledgeSourcesByMessage = useMemo(() => {
+    const byMessage = new Map<Message, RetrievalSource[]>();
+    const nextSnapshots = new Map<string | Message, RetrievalSource[]>();
+    const evidence = new Map<string, RetrievalSource>();
+    for (const message of messages) {
+      for (const source of readMessageKnowledgeSources(message))
+        evidence.set(source.id, source);
+      if (message.type === "ai") {
+        const key = message.id ?? message;
+        const next = [...evidence.values()];
+        const previous = previousKnowledgeSnapshotsRef.current.get(key);
+        const snapshot =
+          previous?.length === next.length &&
+          previous.every((source, index) => source.id === next[index]?.id)
+            ? previous
+            : next;
+        byMessage.set(message, snapshot);
+        nextSnapshots.set(key, snapshot);
+      }
+    }
+    previousKnowledgeSnapshotsRef.current = nextSnapshots;
+    return byMessage;
+  }, [messages, readMessageKnowledgeSources]);
   const groupedMessages = useStableMessageGroups(messages, thread.isLoading);
+  const isSteeredRun = useCallback(
+    (message: Message) => {
+      const runId =
+        getMessageRunId(message) ?? message.additional_kwargs?.run_id;
+      const progress = thread.values.applied_run_inputs;
+      return !!progress?.ids.length && runId === progress.run_id;
+    },
+    [thread.values.applied_run_inputs],
+  );
   // Schedule event lines sit at the end of the turn they followed.
   const placedTaskEvents = useMemo(
     () =>
@@ -566,12 +612,23 @@ export function MessageList({
     () =>
       collectRenderedSubtasks(
         groupedMessages,
-        (groupIndex) => thread.isLoading && groupIndex === lastGroupIndex,
+        (groupIndex) =>
+          thread.isLoading &&
+          (groupIndex === lastGroupIndex ||
+            (!!activeRunId &&
+              Boolean(
+                groupedMessages[groupIndex]?.messages.some(
+                  (m) =>
+                    (getMessageRunId(m) ?? m.additional_kwargs?.run_id) ===
+                    activeRunId,
+                ),
+              ))),
         t.subtasks.failed,
         t.subtasks.subtask,
       ),
     [
       groupedMessages,
+      activeRunId,
       lastGroupIndex,
       t.subtasks.failed,
       t.subtasks.subtask,
@@ -1017,7 +1074,13 @@ export function MessageList({
           {enableRegenerateForTurn &&
             actionTarget?.id &&
             onRegenerateMessage && (
-              <Tooltip content={t.common.regenerate}>
+              <Tooltip
+                content={
+                  isSteeredRun(actionTarget)
+                    ? t.inputBox.runInputReplayUnavailable
+                    : t.common.regenerate
+                }
+              >
                 <Button
                   aria-label={t.common.regenerate}
                   size="icon-sm"
@@ -1025,6 +1088,7 @@ export function MessageList({
                   variant="ghost"
                   disabled={
                     !canRegenerate ||
+                    isSteeredRun(actionTarget) ||
                     replayActionBusy ||
                     regeneratingMessageId === actionTarget.id
                   }
@@ -1058,12 +1122,14 @@ export function MessageList({
       branchingMessageId,
       canBranch,
       canRegenerate,
+      isSteeredRun,
       onBranchTurn,
       onRegenerateMessage,
       regeneratingMessageId,
       replayActionBusy,
       t.common.branch,
       t.common.regenerate,
+      t.inputBox.runInputReplayUnavailable,
     ],
   );
 
@@ -1118,8 +1184,16 @@ export function MessageList({
     ],
   );
 
-  const artifactPaths = useStableArtifactPaths(
-    extractArtifactsFromThread(thread),
+  const stateArtifactPaths = extractArtifactsFromThread(thread);
+  const threadArtifactPaths = useMemo(
+    () => collectThreadArtifactPaths(stateArtifactPaths, messages),
+    [stateArtifactPaths, messages],
+  );
+  const artifactPaths = useStableArtifactPaths(threadArtifactPaths);
+  // Message text rendered outside MessageListItem resolves artifact links too.
+  const threadLinkComponents = useMemo(
+    () => ({ a: createMarkdownLinkComponent(threadId) }),
+    [threadId],
   );
 
   if (thread.isThreadLoading && messages.length === 0) {
@@ -1274,6 +1348,8 @@ export function MessageList({
                       const isLatestEditableHumanMessage =
                         group.type === "human" &&
                         !group.scheduledOrigin &&
+                        !msg.additional_kwargs?.run_input_id &&
+                        !isSteeredRun(msg) &&
                         Boolean(msg.id) &&
                         msg.id === latestEditableHumanMessageId &&
                         !replayActionBusy &&
@@ -1281,6 +1357,7 @@ export function MessageList({
                       const item = (
                         <MessageListItem
                           message={msg}
+                          knowledgeSources={knowledgeSourcesByMessage.get(msg)}
                           isLoading={
                             thread.isLoading &&
                             groupIndex === groupedMessages.length - 1
@@ -1392,28 +1469,33 @@ export function MessageList({
                     group,
                     groupIndex,
                     <div className="w-full">
-                      <HumanInputCard
-                        answeredResponse={answeredResponse}
-                        disabled={
-                          thread.isLoading ||
-                          pending ||
-                          Boolean(answeredResponse) ||
-                          humanInputState.latestOpenRequestId !==
-                            humanInputRequest.request_id ||
-                          !onSubmitHumanInput
-                        }
-                        pending={pending}
-                        request={humanInputRequest}
-                        onSubmit={
-                          onSubmitHumanInput
-                            ? (response) =>
-                                handleSubmitHumanInput(
-                                  humanInputRequest,
-                                  response,
-                                )
-                            : undefined
-                        }
-                      />
+                      <MessageArtifactPathsContext.Provider
+                        value={artifactPaths}
+                      >
+                        <HumanInputCard
+                          answeredResponse={answeredResponse}
+                          disabled={
+                            thread.isLoading ||
+                            pending ||
+                            Boolean(answeredResponse) ||
+                            humanInputState.latestOpenRequestId !==
+                              humanInputRequest.request_id ||
+                            !onSubmitHumanInput
+                          }
+                          pending={pending}
+                          request={humanInputRequest}
+                          threadId={threadId}
+                          onSubmit={
+                            onSubmitHumanInput
+                              ? (response) =>
+                                  handleSubmitHumanInput(
+                                    humanInputRequest,
+                                    response,
+                                  )
+                              : undefined
+                          }
+                        />
+                      </MessageArtifactPathsContext.Provider>
                       {renderTokenUsage({
                         messages: group.messages,
                         turnUsageMessages,
@@ -1427,10 +1509,15 @@ export function MessageList({
                     group,
                     groupIndex,
                     <div className="w-full">
-                      <MarkdownContent
-                        content={extractContentFromMessage(message)}
-                        isLoading={thread.isLoading}
-                      />
+                      <MessageArtifactPathsContext.Provider
+                        value={artifactPaths}
+                      >
+                        <MarkdownContent
+                          content={extractContentFromMessage(message)}
+                          isLoading={thread.isLoading}
+                          components={threadLinkComponents}
+                        />
+                      </MessageArtifactPathsContext.Provider>
                       {renderTokenUsage({
                         messages: group.messages,
                         turnUsageMessages,
@@ -1468,11 +1555,16 @@ export function MessageList({
                   groupIndex,
                   <div className="w-full">
                     {group.messages[0] && hasContent(group.messages[0]) && (
-                      <MarkdownContent
-                        content={extractContentFromMessage(group.messages[0])}
-                        isLoading={thread.isLoading}
-                        className="mb-4"
-                      />
+                      <MessageArtifactPathsContext.Provider
+                        value={artifactPaths}
+                      >
+                        <MarkdownContent
+                          content={extractContentFromMessage(group.messages[0])}
+                          isLoading={thread.isLoading}
+                          className="mb-4"
+                          components={threadLinkComponents}
+                        />
+                      </MessageArtifactPathsContext.Provider>
                     )}
                     <ArtifactFileList
                       archiveDownloadsEnabled={
@@ -1521,21 +1613,26 @@ export function MessageList({
                 )) {
                   if (hasReasoning(message)) {
                     results.push(
-                      <MessageGroup
+                      <MessageArtifactPathsContext.Provider
                         key={"thinking-group-" + message.id}
-                        messages={[message]}
-                        durationSeconds={
-                          reasoningDurations.get(message)?.durationSeconds
-                        }
-                        isLoading={groupIsLoading}
-                        deferBrowserPreviews={thread.isLoading}
-                        tokenDebugSteps={getTokenDebugStepsForMessages([
-                          message,
-                        ])}
-                        showTokenDebugSummaries={showTokenDebugSummaries}
-                        showToolCallDetails={showToolCallDetails}
-                        toolArtifacts={thread.values?.tool_artifacts}
-                      />,
+                        value={artifactPaths}
+                      >
+                        <MessageGroup
+                          messages={[message]}
+                          durationSeconds={
+                            reasoningDurations.get(message)?.durationSeconds
+                          }
+                          isLoading={groupIsLoading}
+                          deferBrowserPreviews={thread.isLoading}
+                          tokenDebugSteps={getTokenDebugStepsForMessages([
+                            message,
+                          ])}
+                          showTokenDebugSummaries={showTokenDebugSummaries}
+                          threadId={threadId}
+                          showToolCallDetails={showToolCallDetails}
+                          toolArtifacts={thread.values?.tool_artifacts}
+                        />
+                      </MessageArtifactPathsContext.Provider>,
                     );
                   } else if (message.id) {
                     subagentDebugMessageIds.push(message.id);
@@ -1551,14 +1648,22 @@ export function MessageList({
                       continue;
                     }
                     results.push(
-                      <SubtaskCard
+                      <MessageArtifactPathsContext.Provider
                         key={"task-group-" + taskId}
-                        taskId={taskId}
-                        threadId={threadId}
-                        runId={(message as { run_id?: string }).run_id}
-                        isLoading={groupIsLoading}
-                        fallbackTask={fallbackTask}
-                      />,
+                        value={artifactPaths}
+                      >
+                        <SubtaskCard
+                          taskId={taskId}
+                          threadId={threadId}
+                          runId={(message as { run_id?: string }).run_id}
+                          isLoading={groupIsLoading}
+                          fallbackTask={fallbackTask}
+                          resultMessage={findSubtaskResultMessage(
+                            group,
+                            taskId,
+                          )}
+                        />
+                      </MessageArtifactPathsContext.Provider>,
                     );
                   }
                 }
@@ -1580,21 +1685,24 @@ export function MessageList({
                 group,
                 groupIndex,
                 <div className="w-full">
-                  <MessageGroup
-                    messages={group.messages}
-                    durationSeconds={
-                      reasoningDurations.values().next().value?.durationSeconds
-                    }
-                    isLoading={groupIsLoading}
-                    deferBrowserPreviews={thread.isLoading}
-                    threadId={threadId}
-                    tokenDebugSteps={getTokenDebugStepsForMessages(
-                      group.messages,
-                    )}
-                    showTokenDebugSummaries={showTokenDebugSummaries}
-                    showToolCallDetails={showToolCallDetails}
-                    toolArtifacts={thread.values?.tool_artifacts}
-                  />
+                  <MessageArtifactPathsContext.Provider value={artifactPaths}>
+                    <MessageGroup
+                      messages={group.messages}
+                      durationSeconds={
+                        reasoningDurations.values().next().value
+                          ?.durationSeconds
+                      }
+                      isLoading={groupIsLoading}
+                      deferBrowserPreviews={thread.isLoading}
+                      threadId={threadId}
+                      tokenDebugSteps={getTokenDebugStepsForMessages(
+                        group.messages,
+                      )}
+                      showTokenDebugSummaries={showTokenDebugSummaries}
+                      showToolCallDetails={showToolCallDetails}
+                      toolArtifacts={thread.values?.tool_artifacts}
+                    />
+                  </MessageArtifactPathsContext.Provider>
                   {renderTokenUsage({
                     messages: group.messages,
                     turnUsageMessages,

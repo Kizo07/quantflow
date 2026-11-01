@@ -168,11 +168,12 @@ export type MockAPIOptions = {
     browserControlEnabled?: boolean;
     mcpTasksEnabled?: boolean;
     knowledgeScopeSelectionEnabled?: boolean;
-    /** Emitted as `scheduled_tasks`; each flag defaults to true. */
+    /** Existing task flags default to true; optional group notifications default to false. */
     scheduledTasks?: {
       available?: boolean;
       running?: boolean;
       toolEnabled?: boolean;
+      groupNotifications?: boolean;
     };
     /** Emitted as `thread_activity`; unavailable unless enabled, so nothing polls by default. */
     threadActivity?: {
@@ -290,6 +291,7 @@ export type MockScheduledTask = {
   origin_thread_id?: string | null;
   standing_notes?: string[] | null;
   stop_condition?: string | null;
+  notification_group_connection_id?: string | null;
   automatic_runs_used?: number;
   active_run_status?: "queued" | "launching" | "running" | null;
   created_at: string;
@@ -359,6 +361,7 @@ const CLEARABLE_TASK_FIELDS = [
   "max_runs",
   "end_at",
   "stop_condition",
+  "notification_group_connection_id",
 ] as const;
 
 /** PATCH/resume semantics: a present key replaces the value; `null` clears the clearable fields. */
@@ -656,6 +659,8 @@ export function mockLangGraphAPI(
       available: options?.features?.scheduledTasks?.available ?? true,
       running: options?.features?.scheduledTasks?.running ?? true,
       toolEnabled: options?.features?.scheduledTasks?.toolEnabled ?? true,
+      groupNotifications:
+        options?.features?.scheduledTasks?.groupNotifications ?? false,
     },
     threadActivity: {
       available: options?.features?.threadActivity?.available ?? false,
@@ -2341,6 +2346,19 @@ export function mockLangGraphAPI(
   );
 
   // Models list — model picker dropdown
+  // Agent settings also read these catalogs. Keep ordinary UI specs independent
+  // of any real Gateway listening locally; catalog-specific specs override them.
+  void page.route("**/api/subagents", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: { subagents: [] } })
+      : route.fallback(),
+  );
+  void page.route("**/api/agent-tool-groups", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: { tool_groups: [] } })
+      : route.fallback(),
+  );
+
   void page.route("**/api/models", (route) => {
     if (route.request().method() === "GET") {
       return route.fulfill({
@@ -2350,6 +2368,24 @@ export function mockLangGraphAPI(
           models: [],
           token_usage: { enabled: false },
         }),
+      });
+    }
+    return route.fallback();
+  });
+
+  // General UI specs do not choose a model. Model-control specs can override
+  // this preview just as they override the empty model list above.
+  void page.route("**/api/models/resolve", (route) => {
+    if (route.request().method() === "POST") {
+      return route.fulfill({
+        json: {
+          status: "none",
+          scope: null,
+          query: "",
+          model_name: null,
+          candidates: [],
+          task_offset: 0,
+        },
       });
     }
     return route.fallback();
@@ -2375,6 +2411,7 @@ export function mockLangGraphAPI(
             available: featureFlags.scheduledTasks.available,
             running: featureFlags.scheduledTasks.running,
             tool_enabled: featureFlags.scheduledTasks.toolEnabled,
+            group_notifications: featureFlags.scheduledTasks.groupNotifications,
             min_interval_seconds: 60,
           },
           thread_activity: {
@@ -2385,6 +2422,24 @@ export function mockLangGraphAPI(
     }
     return route.fallback();
   });
+
+  void page.route("**/api/knowledge/capabilities?*", (route) =>
+    route.fulfill({
+      json: {
+        operations: featureFlags.knowledgeScopeSelectionEnabled
+          ? [
+              "search",
+              "sources",
+              "catalog",
+              "documents",
+              "dataset_filter",
+              "document_filter",
+            ]
+          : ["search"],
+        scope_selection_enabled: featureFlags.knowledgeScopeSelectionEnabled,
+      },
+    }),
+  );
 
   void page.route("**/api/mcp/config", (route) =>
     route.fulfill({ json: { mcp_servers: {} } }),

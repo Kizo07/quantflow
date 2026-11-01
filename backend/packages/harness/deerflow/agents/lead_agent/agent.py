@@ -65,7 +65,7 @@ from deerflow.config.subagents_config import (
     effective_subagent_concurrency,
     effective_total_subagents_per_run,
 )
-from deerflow.knowledge.tools.middleware import KnowledgeBootstrapMiddleware
+from deerflow.knowledge.agent_tools.middleware import KnowledgeBootstrapMiddleware
 from deerflow.models import create_chat_model
 from deerflow.models.reasoning import resolve_reasoning_contract, resolve_reasoning_request
 from deerflow.runtime.checkpoint_mode import (
@@ -205,7 +205,7 @@ def _append_knowledge_tools_without_name_conflicts(tools: list) -> None:
     Self-gating no-op unless the plane is enabled and bound (see
     ``knowledge_tools_available``), so callers never register dead tools.
     """
-    from deerflow.knowledge.tools.lookup import get_knowledge_tools, knowledge_tools_available
+    from deerflow.knowledge.agent_tools.lookup import get_knowledge_tools, knowledge_tools_available
 
     if not knowledge_tools_available():
         return
@@ -611,30 +611,13 @@ def build_middlewares(
         )
     )
 
-    # Observe the final tool_search Command after every inner policy/result
+    # Observe the final tool_search Command after every inner result
     # transformer has run. Tool wrappers are first-in-list outermost, so this
-    # must be registered before SkillToolPolicyMiddleware.
+    # must be registered before the deferred filter below.
     if deferred_setup is not None and deferred_setup.deferred_names:
         from deerflow.agents.middlewares.tool_promotion_audit_middleware import DeferredToolPromotionAuditMiddleware
 
         middlewares.append(DeferredToolPromotionAuditMiddleware(deferred_setup.deferred_names, deferred_setup.catalog_hash))
-
-    # Enabled skills are only discoverable metadata. Apply allowed-tools at
-    # runtime after explicit slash activation or an actual skill-file load.
-    from deerflow.agents.middlewares.skill_tool_policy_middleware import SkillToolPolicyMiddleware
-
-    middlewares.append(
-        SkillToolPolicyMiddleware(
-            available_skills=available_skills,
-            app_config=resolved_app_config,
-            user_id=user_id,
-            slash_source_owner_token=slash_source_owner_token,
-            # Persisted skill_context entries are re-authorized against the
-            # skill:activate decision before their allowed-tools apply (the
-            # policy may have changed since the entry was stamped).
-            skill_authorization=skill_authorization,
-        )
-    )
 
     # Capture completed task delegations and loaded skill files before
     # summarization can compact them, then inject durable context channels
@@ -729,8 +712,8 @@ def build_middlewares(
 
     # Hide deferred tool schemas from model binding until tool_search promotes them.
     # The lead deferred set + catalog hash come from the full build-time MCP
-    # catalog; SkillToolPolicyMiddleware separately filters model visibility,
-    # tool_search results, and execution for the active skill at runtime.
+    # catalog. Skill `allowed-tools` is compatibility metadata only; agent
+    # assembly/execution authorization owns the permission ceiling.
     if deferred_setup is not None and deferred_setup.deferred_names:
         from deerflow.agents.middlewares.deferred_tool_filter_middleware import DeferredToolFilterMiddleware
 
@@ -790,7 +773,7 @@ def build_middlewares(
     if custom_middlewares:
         middlewares.extend(custom_middlewares)
 
-    configured_middlewares = load_configured_extension_middlewares(resolved_app_config)
+    configured_middlewares = load_configured_extension_middlewares(resolved_app_config, scope="lead")
     if configured_middlewares:
         middlewares.extend(configured_middlewares)
 
@@ -816,6 +799,17 @@ def build_middlewares(
 
     # ClarificationMiddleware should always be last
     middlewares.append(ClarificationMiddleware())
+
+    from deerflow.runtime.runs.input_control import run_input_control
+
+    if run_input_control(cfg) is not None:
+        from deerflow.agents.middlewares.run_input_middleware import RunInputAdmissionMiddleware, RunInputMiddleware
+
+        # New direct input goes through the ordinary sanitization chain.
+        middlewares.insert(0, RunInputAdmissionMiddleware())
+        # after_agent runs in reverse order: decide whether to continue before
+        # sandbox and other terminal cleanup hooks execute.
+        middlewares.append(RunInputMiddleware())
 
     # Extension contributions are merged only here, once the full stack exists.
     # Doing it inside build_lead_runtime_middlewares() would place
@@ -960,7 +954,9 @@ def _complete_assembly(
     from deerflow.extensions import get_agent_build_extensions
 
     resolved_extensions = get_agent_build_extensions()
-    if not resolved_extensions.has_agent_assembly_observers:
+    from deerflow.runtime.assembly_evidence import capture_requested
+
+    if not resolved_extensions.has_agent_assembly_observers and not capture_requested():
         return LeadAgentAssembly(graph=graph, descriptor=None, effective_model=effective_model)
 
     from deerflow.agents.assembly_descriptor import build_assembly_descriptor
@@ -1105,7 +1101,17 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
 
     # Phase 3: enforce model:use authorization. On deny, fall back to the first
     # allowed model (graceful) rather than crashing the run (RFC §9).
-    model_name = _authorize_model_name(model_name, context=cfg, app_config=resolved_app_config)
+    explicit_selection = cfg.get("model_selection_requested")
+    if explicit_selection is not None:
+        from deerflow.models.selection import authorize_selected_model
+
+        if not isinstance(explicit_selection, str) or explicit_selection != requested_model_name:
+            raise ValueError("An explicit model selection must carry the same model_name.")
+        if explicit_selection != model_name:
+            raise ValueError("The explicitly selected model is not configured.")
+        authorize_selected_model(model_name, context=cfg, app_config=resolved_app_config)
+    else:
+        model_name = _authorize_model_name(model_name, context=cfg, app_config=resolved_app_config)
 
     model_config = resolved_app_config.get_model_config(model_name)
 
@@ -1356,6 +1362,14 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
         app_config=resolved_app_config,
         chat_model=chat_model,
     )
+    selected_child_model = cfg.get("subagent_model_name")
+    if selected_child_model is not None:
+        from deerflow.models.selection import authorize_selected_model, bind_selected_task_model
+
+        if not subagent_enabled or not isinstance(selected_child_model, str):
+            raise ValueError("A child model selection requires enabled subagents and a configured model name.")
+        authorize_selected_model(selected_child_model, context=cfg, app_config=resolved_app_config)
+        raw_tools = bind_selected_task_model(raw_tools, selected_child_model)
     configured_tools = raw_tools + extra_tools
     configured_tools = [tool for tool in configured_tools if tool.name not in interaction_policy.disabled_tool_names]
     authorization_candidates = [*configured_tools]

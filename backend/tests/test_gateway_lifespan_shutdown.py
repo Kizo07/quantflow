@@ -31,8 +31,8 @@ def _isolate_knowledge_plane(monkeypatch: pytest.MonkeyPatch):
     the process registry for later tests. Neutralize the bind step and
     restore registry/singleton state around each test.
     """
+    from deerflow.knowledge.agent_tools.lookup import reset_knowledge_backends
     from deerflow.knowledge.config import get_knowledge_config, set_knowledge_config
-    from deerflow.knowledge.tools.lookup import reset_knowledge_backends
 
     previous = get_knowledge_config()
     reset_knowledge_backends()
@@ -171,7 +171,14 @@ async def _run_lifespan_with_upload_staging_cleanup():
     from app.gateway.app import lifespan
 
     app = FastAPI()
-    startup_config = SimpleNamespace(log_level="INFO", memory=SimpleNamespace(token_counting="char", enabled=False, shutdown_flush_timeout_seconds=30.0))
+    # persistent_bot.enabled=False: the merged lifespan seeds the bot when
+    # enabled; these tests only cover upload-staging/MCP wiring
+    # (merge-verify fix).
+    startup_config = SimpleNamespace(
+        log_level="INFO",
+        memory=SimpleNamespace(token_counting="char", enabled=False, shutdown_flush_timeout_seconds=30.0),
+        persistent_bot=SimpleNamespace(enabled=False),
+    )
     fake_service = MagicMock()
     fake_service.get_status = MagicMock(return_value={})
     cleanup_upload_staging_files = MagicMock(return_value=2)
@@ -227,6 +234,34 @@ def test_personal_mcp_authority_spans_runtime_startup_and_shutdown():
 
     assert events == ["start", "stop"]
     assert personal_access._admin_checker is previous
+
+
+def test_mcp_oauth_token_store_spans_runtime_startup_and_shutdown():
+    """Runs drain inside the runtime's exit; a refresh there must still reach the shared store."""
+    from deerflow.mcp import oauth_store
+
+    events = []
+    store = object()
+    previous = oauth_store.get_mcp_oauth_token_store()
+
+    @asynccontextmanager
+    async def checked_runtime(_app, _config):
+        assert oauth_store.get_mcp_oauth_token_store() is store
+        events.append("start")
+        try:
+            yield
+        finally:
+            assert oauth_store.get_mcp_oauth_token_store() is store
+            events.append("stop")
+
+    with (
+        patch(f"{__name__}._noop_langgraph_runtime", checked_runtime),
+        patch("app.gateway.mcp_oauth_tokens.build_mcp_oauth_token_store", return_value=store),
+    ):
+        asyncio.run(_run_lifespan_with_upload_staging_cleanup())
+
+    assert events == ["start", "stop"]
+    assert oauth_store.get_mcp_oauth_token_store() is previous
 
 
 async def _run_lifespan_with_mcp_task_config_snapshot() -> None:

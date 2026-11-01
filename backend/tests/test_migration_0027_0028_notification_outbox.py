@@ -2,9 +2,7 @@
 
 ``0027_notification_deliveries`` creates the outbox table and
 ``0028_parked_attempts`` adds its parking counter. The scheduler-agent and
-notification claim-token migrations extend that chain in order. The
-chain-head pin moved on to ``test_migration_0040_merge_quantflow_upstream``
-with the 2026-10-11 QuantFlow/upstream merge revision.
+notification claim-token migrations extend that chain in order.
 """
 
 from __future__ import annotations
@@ -25,17 +23,9 @@ OUTBOX = "0027_notification_deliveries"
 PARKED = "0028_parked_attempts"
 SCHEDULER = "0029_scheduler_agent_tasks"
 CLAIM_TOKENS = "0030_notification_claim_tokens"
-HEAD = "0044_scheduled_task_notify_policy"
+HEAD = bootstrap._get_head_revision()
 PREVIOUS = "0026_mcp_task_lease_tokens"
 TABLE = "notification_deliveries"
-
-
-async def test_0028_is_ancestor_of_the_chain_head():
-    script = ScriptDirectory(str(bootstrap._MIGRATIONS_DIR))
-    (head,) = script.get_heads()
-    ancestors = {revision.revision for revision in script.walk_revisions()}
-    assert PARKED in ancestors
-    assert head == "0044_scheduled_task_notify_policy"
 
 
 async def test_outbox_revisions_chain_after_0026():
@@ -126,7 +116,9 @@ async def test_bootstrap_claim_tokens_preserves_existing_scheduler_and_outbox(tm
             assert "claim_token" not in columns
             versions = set((await conn.execute(sa.text("SELECT version_num FROM alembic_version"))).scalars().all())
             # The QuantFlow merge head leaves the knowledge leg pinned at its
-            # own pre-merge head when the upstream leg downgrades past the fork.
+            # own pre-merge head when the upstream leg downgrades past the fork
+            # (restored from the pre-merge fork test; the merge resolution had
+            # taken upstream's linear-history assertions).
             assert versions == {SCHEDULER, "0029_merge_knowledge_outbox"}
         # Re-upgrade with plain alembic: bootstrap requires a single
         # alembic_version row, which a downgrade past a merge point cannot give.

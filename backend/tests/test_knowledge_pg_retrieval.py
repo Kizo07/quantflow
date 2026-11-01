@@ -39,6 +39,13 @@ from sqlalchemy.orm import sessionmaker
 import deerflow.knowledge.schema as kb_schema
 from deerflow.knowledge import embeddings as embeddings_mod
 from deerflow.knowledge import pg_retrieval as pg
+from deerflow.knowledge.agent_tools.lookup import (
+    KnowledgeBackends,
+    get_knowledge_backends,
+    ledger_get,
+    ledger_search,
+    reset_knowledge_backends,
+)
 from deerflow.knowledge.config import (
     KnowledgeConfig,
     get_knowledge_config,
@@ -66,13 +73,6 @@ from deerflow.knowledge.retrieval.planner import (
 )
 from deerflow.knowledge.schema.experiments import AssumptionRow, ExperimentRow
 from deerflow.knowledge.schema.findings import FindingRow
-from deerflow.knowledge.tools.lookup import (
-    KnowledgeBackends,
-    get_knowledge_backends,
-    ledger_get,
-    ledger_search,
-    reset_knowledge_backends,
-)
 from deerflow.knowledge.write_api import KnowledgeError, KnowledgeValidationError
 from deerflow.persistence.base import Base
 

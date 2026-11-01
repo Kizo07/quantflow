@@ -5,7 +5,7 @@ harness (mirroring the Phase 1 wiring test style):
 
 * package surface: ``FindingRow`` re-exported from
   ``deerflow.knowledge.schema`` and registered as ``KnowledgeFindingRow``
-  in ``deerflow.persistence.models``; ``retrieval``/``tools``/``embeddings``
+  in ``deerflow.persistence.models``; ``retrieval``/``agent_tools``/``embeddings``
   lazily wired on ``deerflow.knowledge`` without dragging ``deerflow.config``
   or langchain into the import;
 * run start: ``RuntimeFeatures.knowledge`` (default off, opt-in assembly)
@@ -33,15 +33,15 @@ from sqlalchemy.orm import sessionmaker
 import deerflow.knowledge as knowledge_pkg
 import deerflow.knowledge.schema as kb_schema
 from deerflow.knowledge import pg_retrieval as pg
-from deerflow.knowledge.config import KnowledgeConfig, get_knowledge_config, set_knowledge_config
-from deerflow.knowledge.schema.experiments import ExperimentRow
-from deerflow.knowledge.schema.findings import FindingRow
-from deerflow.knowledge.tools.lookup import bind_knowledge_backends, reset_knowledge_backends
-from deerflow.knowledge.tools.middleware import (
+from deerflow.knowledge.agent_tools.lookup import bind_knowledge_backends, reset_knowledge_backends
+from deerflow.knowledge.agent_tools.middleware import (
     KNOWLEDGE_BOOTSTRAP_MARKER,
     KNOWLEDGE_BOOTSTRAP_MESSAGE_ID,
     KnowledgeBootstrapMiddleware,
 )
+from deerflow.knowledge.config import KnowledgeConfig, get_knowledge_config, set_knowledge_config
+from deerflow.knowledge.schema.experiments import ExperimentRow
+from deerflow.knowledge.schema.findings import FindingRow
 from deerflow.persistence.base import Base
 
 KB_TABLES: tuple[str, ...] = (
@@ -87,12 +87,12 @@ class TestPackageWiring:
         assert "finding" in Base.metadata.tables
 
     def test_knowledge_package_lazy_wiring(self) -> None:
-        for name in ("retrieval", "tools", "embeddings", "pg_retrieval"):
+        for name in ("retrieval", "agent_tools", "embeddings", "pg_retrieval"):
             assert name in knowledge_pkg.__all__
             assert name in knowledge_pkg._LAZY_SUBMODULES
         assert knowledge_pkg.retrieval.__name__ == "deerflow.knowledge.retrieval"
         assert knowledge_pkg.embeddings.__name__ == "deerflow.knowledge.embeddings"
-        assert knowledge_pkg.tools.__name__ == "deerflow.knowledge.tools"
+        assert knowledge_pkg.agent_tools.__name__ == "deerflow.knowledge.agent_tools"
         assert knowledge_pkg.pg_retrieval.__name__ == "deerflow.knowledge.pg_retrieval"
 
     def test_knowledge_import_stays_light(self) -> None:

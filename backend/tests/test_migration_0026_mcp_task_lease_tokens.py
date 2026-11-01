@@ -2,8 +2,7 @@
 
 Adds the nullable per-claim token columns ``McpTaskRepository`` uses to fence
 poll, cancel, and notification mutations to the exact claim generation. The
-chain-head pin moved on to ``test_migration_0040_merge_quantflow_upstream``,
-joining the upstream 0029-0039 leg with the local knowledge leg.
+chain-head pin lives in ``test_migration_0050_merge_quantflow_upstream``.
 """
 
 from __future__ import annotations

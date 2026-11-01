@@ -28,6 +28,12 @@ class FakeChannel:
         self.sent: list[tuple[str, str]] = []
         self.is_running = running
 
+    # The merged worker sends through the owner-scoped channel interface
+    # (matching test_notification_delivery_worker.py's fake); sends still
+    # land in `sent` so every assertion below is unchanged (merge-verify fix).
+    async def send_notification_for_owner(self, *, owner_user_id, target, text_markdown):
+        self.sent.append((target, text_markdown))
+
     async def send_notification(self, *, target, text_markdown):
         self.sent.append((target, text_markdown))
 
@@ -356,7 +362,7 @@ async def test_migration_0044_upgrade_downgrade_cycle(tmp_path):
         assert "notify_policy" not in columns and "notify_quiet" not in columns
 
         await asyncio.to_thread(alembic_command.upgrade, cfg, "head")
-        assert _get_head_revision() == "0044_scheduled_task_notify_policy"
+        assert _get_head_revision() == "0050_merge_quantflow_upstream"
         async with engine.connect() as conn:
             columns = await conn.run_sync(lambda sync: {c["name"] for c in sa.inspect(sync).get_columns("scheduled_tasks")})
         assert {"notify_policy", "notify_quiet"} <= columns

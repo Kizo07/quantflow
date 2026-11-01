@@ -6,6 +6,7 @@ import type { ChatStatus } from "ai";
 import {
   AtSignIcon,
   CheckIcon,
+  ChevronDownIcon,
   GraduationCapIcon,
   LightbulbIcon,
   Loader2Icon,
@@ -126,6 +127,7 @@ import {
   type ComposerDraft,
   writeComposerDraft,
 } from "@/core/threads/composer-draft";
+import type { RunInputMode } from "@/core/threads/run-inputs";
 import { threadTokenUsageQueryKey } from "@/core/threads/token-usage";
 import { textOfMessage } from "@/core/threads/utils";
 import {
@@ -347,6 +349,7 @@ export function InputBox({
   onPrepareThread,
   onReferenceFileAttached,
   onSubmit,
+  onBusySubmit,
   onStop,
   canStopStreaming = true,
   canCreateRuns = true,
@@ -420,6 +423,7 @@ export function InputBox({
     options?: InputBoxSubmitOptions,
   ) => void | Promise<void>;
   onStop?: () => void;
+  onBusySubmit?: (text: string, mode: RunInputMode) => Promise<unknown>;
   /**
    * Whether the caller's role holds `runs:cancel` (RFC #4063 Phase 4).
    * Defaults to true so callers that don't resolve permissions (pre-Phase-4
@@ -436,6 +440,11 @@ export function InputBox({
   canCreateRuns?: boolean;
 }) {
   const { locale, t } = useI18n();
+  const [runInputMode, setRunInputMode] = useState<RunInputMode>("queue");
+  const [runInputSending, setRunInputSending] = useState(false);
+  const runInputInFlight = useRef(false);
+  const canSendBusyInput = !!onBusySubmit && canCreateRuns;
+  useEffect(() => setRunInputMode("queue"), [threadId]);
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const mentionListId = useId();
@@ -1649,6 +1658,32 @@ export function InputBox({
       if (mentionInFlight.current)
         return Promise.reject(new Error("Reference is loading"));
       if (status === "streaming") {
+        if (canSendBusyInput && onBusySubmit) {
+          if (runInputInFlight.current)
+            return Promise.reject(new Error("input-in-flight"));
+          if (
+            !message.text.trim() ||
+            message.files.length ||
+            projectAttachments.length ||
+            conversationReferences.length ||
+            inlineRefs.length ||
+            (sidecar?.conversationQuotes.length ?? 0) ||
+            message.text.trimStart().startsWith("/")
+          ) {
+            toast.info(t.inputBox.runInputTextOnly);
+            return Promise.reject(new Error("text-input-required"));
+          }
+          abortVoiceInput();
+          runInputInFlight.current = true;
+          setRunInputSending(true);
+          try {
+            await onBusySubmit(message.text, runInputMode);
+            return;
+          } finally {
+            runInputInFlight.current = false;
+            setRunInputSending(false);
+          }
+        }
         toast.info(t.inputBox.pleaseWaitStreaming);
         return Promise.reject(new Error("streaming"));
       }
@@ -1755,16 +1790,21 @@ export function InputBox({
     [
       abortVoiceInput,
       canCreateRuns,
+      canSendBusyInput,
+      onBusySubmit,
+      runInputMode,
       handleCompactCommand,
       handleGoalCommand,
       onPrepareThread,
       projectAttachments.length,
       conversationReferences.length,
       inlineRefs.length,
+      sidecar?.conversationQuotes.length,
       status,
       submitThreadMessage,
       t.inputBox.goalTooLong,
       t.inputBox.pleaseWaitStreaming,
+      t.inputBox.runInputTextOnly,
       t.inputBox.startTurnUnavailable,
     ],
   );
@@ -1843,7 +1883,8 @@ export function InputBox({
     dismissedCommandSuggestionValue !== textInput.value;
   const isComposerDisabled = disabled === true;
   const isMockThread = isMock === true;
-  const composerLocked = isComposerDisabled || polishingInput || mentionBusy;
+  const composerLocked =
+    isComposerDisabled || polishingInput || mentionBusy || runInputSending;
   const showMentions =
     !disabled &&
     !polishingInput &&
@@ -1898,14 +1939,12 @@ export function InputBox({
     [],
   );
   const focusComposerAt = useCallback((offset: number) => {
-    requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (textarea) {
-        textarea.focus();
-        textarea.setSelectionRange(offset, offset);
-      } else if (inlineSkillTextRef.current)
-        focusReferenceAt(inlineSkillTextRef.current, offset);
-    });
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.focus();
+      textarea.setSelectionRange(offset, offset);
+    } else if (inlineSkillTextRef.current)
+      focusReferenceAt(inlineSkillTextRef.current, offset);
   }, []);
   const selectMention = useCallback(
     async (selection: MentionSelection) => {
@@ -1941,9 +1980,11 @@ export function InputBox({
           setConversationReferences((previous) =>
             previous.filter((ref) => ref.threadId !== selectionId),
           );
-        textInput.setInput(next);
-        setMentionQuery(null);
-        setMentionButtonOpen(false);
+        flushSync(() => {
+          textInput.setInput(next);
+          setMentionQuery(null);
+          setMentionButtonOpen(false);
+        });
         focusComposerAt(Math.min(caret, next.length));
         return;
       }
@@ -2077,10 +2118,14 @@ export function InputBox({
         latestDraftRef.current = null;
         clearComposerDraft(storage, draftKey);
       }
-      textInput.setInput(nextText);
-      setMentionQuery(null);
-      setMentionButtonOpen(false);
-      setMentionError(null);
+      // Commit the replacement editor before restoring its selection. Deferring
+      // to the next frame can misplace typing or overwrite a later caret move.
+      flushSync(() => {
+        textInput.setInput(nextText);
+        setMentionQuery(null);
+        setMentionButtonOpen(false);
+        setMentionError(null);
+      });
       focusComposerAt(caret + inserted.length);
       if (selection.kind === "file") onReferenceFileAttached?.();
     },
@@ -3226,8 +3271,8 @@ export function InputBox({
             />
           )}
         </div>
-        <PromptInputFooter className="flex flex-wrap gap-2 sm:flex-nowrap">
-          <PromptInputTools className="min-w-0 flex-1 flex-wrap">
+        <PromptInputFooter className="flex flex-col gap-2 sm:flex-row sm:flex-nowrap">
+          <PromptInputTools className="w-full min-w-0 flex-wrap sm:w-auto sm:flex-1">
             <Tooltip content={t.inputBox.mentionPicker}>
               <PromptInputButton
                 aria-label={t.inputBox.mentionPicker}
@@ -3510,7 +3555,7 @@ export function InputBox({
               </PromptInputActionMenu>
             )}
           </PromptInputTools>
-          <PromptInputTools className="min-w-0 justify-end">
+          <PromptInputTools className="w-full min-w-0 justify-end sm:w-auto">
             {goalObjectiveCounter && (
               <span
                 aria-label={t.inputBox.goalLengthCounter
@@ -3535,7 +3580,12 @@ export function InputBox({
             >
               <ModelPickerTrigger asChild>
                 <PromptInputButton
-                  className="max-w-40 min-w-0 sm:max-w-56"
+                  className={cn(
+                    "max-w-40 min-w-0 sm:max-w-56",
+                    status === "streaming" &&
+                      canSendBusyInput &&
+                      "max-sm:max-w-28",
+                  )}
                   disabled={composerLocked}
                 >
                   <div className="flex min-w-0 flex-col text-left">
@@ -3552,6 +3602,61 @@ export function InputBox({
                 onModelSelect={handleModelSelect}
               />
             </ModelPicker>
+            {status === "streaming" && canSendBusyInput && (
+              <>
+                <PromptInputActionMenu>
+                  <PromptInputActionMenuTrigger
+                    aria-label={t.inputBox.runInputMode}
+                    disabled={composerLocked}
+                  >
+                    {runInputMode === "queue"
+                      ? t.inputBox.queueMode
+                      : t.inputBox.steerMode}
+                    <ChevronDownIcon className="ml-1 size-3" aria-hidden />
+                  </PromptInputActionMenuTrigger>
+                  <PromptInputActionMenuContent>
+                    <PromptInputActionMenuItem
+                      onSelect={() => setRunInputMode("queue")}
+                    >
+                      <div>
+                        <div>{t.inputBox.queueMode}</div>
+                        <div className="text-muted-foreground text-xs">
+                          {t.inputBox.queueModeHelp}
+                        </div>
+                      </div>
+                      {runInputMode === "queue" && (
+                        <CheckIcon className="ml-auto size-4" />
+                      )}
+                    </PromptInputActionMenuItem>
+                    <PromptInputActionMenuItem
+                      onSelect={() => setRunInputMode("steer")}
+                    >
+                      <div>
+                        <div>{t.inputBox.steerMode}</div>
+                        <div className="text-muted-foreground text-xs">
+                          {t.inputBox.steerModeHelp}
+                        </div>
+                      </div>
+                      {runInputMode === "steer" && (
+                        <CheckIcon className="ml-auto size-4" />
+                      )}
+                    </PromptInputActionMenuItem>
+                  </PromptInputActionMenuContent>
+                </PromptInputActionMenu>
+                <PromptInputSubmit
+                  aria-label={t.inputBox.runInputSend}
+                  title={
+                    runInputMode === "queue"
+                      ? t.inputBox.queueModeHelp
+                      : t.inputBox.steerModeHelp
+                  }
+                  className="rounded-full"
+                  variant="outline"
+                  status={runInputSending ? "submitted" : "ready"}
+                  disabled={composerLocked || !textInput.value.trim()}
+                />
+              </>
+            )}
             <PromptInputSubmit
               className="rounded-full"
               disabled={
@@ -3562,6 +3667,12 @@ export function InputBox({
               }
               variant="outline"
               status={status}
+              {...(status === "streaming" && canSendBusyInput
+                ? {
+                    "aria-label": t.inputBox.stopRun,
+                    title: t.inputBox.stopRun,
+                  }
+                : {})}
               // A bare disabled square reads as a broken composer; explain
               // the permission boundary (native title, since a Radix
               // tooltip won't fire on a disabled button). Spread

@@ -4,6 +4,7 @@ import { type Metadata } from "next";
 import { IBM_Plex_Mono, Inter } from "next/font/google";
 
 import { ThemeProvider } from "@/components/theme-provider";
+import { ArtifactDraftsProvider } from "@/core/artifacts/draft-context";
 import { DEFAULT_LOCALE } from "@/core/i18n/locale";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -41,7 +42,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.variable} ${plexMono.variable}`}>
         <ThemeProvider attribute="class" enableSystem disableTransitionOnChange>
-          {children}
+          <ArtifactDraftsProvider>{children}</ArtifactDraftsProvider>
         </ThemeProvider>
       </body>
     </html>

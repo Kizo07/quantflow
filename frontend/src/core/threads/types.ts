@@ -71,7 +71,14 @@ export interface AgentThreadState extends Record<string, unknown> {
   todos?: Todo[];
   goal?: GoalState | null;
   goal_outcome?: ThreadGoalOutcome | null;
+  applied_run_inputs?: { run_id: string; ids: string[] } | null;
   tool_artifacts?: ArtifactEntry[];
+}
+
+export interface AgentClientContext {
+  name?: string;
+  capabilities?: Record<string, boolean>;
+  preferences?: Record<string, string | number | boolean>;
 }
 
 export interface AgentThreadContext extends Record<string, unknown> {
@@ -82,6 +89,7 @@ export interface AgentThreadContext extends Record<string, unknown> {
   subagent_enabled: boolean;
   reasoning_effort?: ReasoningEffortValue;
   agent_name?: string;
+  client?: AgentClientContext;
 }
 
 export interface AgentThread extends Thread<AgentThreadState> {

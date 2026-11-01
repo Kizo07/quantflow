@@ -15,10 +15,10 @@ retrieval plane defines to the real KB tables (migrations
 * :class:`SQLRelationalExpansionStore` →
   :class:`deerflow.knowledge.retrieval.planner.RelationalExpansionStore`
 * :class:`KnowledgeRetrievalService` →
-  :class:`deerflow.knowledge.tools.lookup.KnowledgeRetrievalBackend`
+  :class:`deerflow.knowledge.agent_tools.lookup.KnowledgeRetrievalBackend`
   (adapter over :func:`deerflow.knowledge.retrieval.planner.execute_retrieval`)
 * :class:`SQLExperimentLookupStore` →
-  :class:`deerflow.knowledge.tools.lookup.ExperimentLookupStore`
+  :class:`deerflow.knowledge.agent_tools.lookup.ExperimentLookupStore`
 * :class:`SQLFindingTextSource` / :class:`SQLEmbeddingVectorStore` →
   :class:`deerflow.knowledge.embeddings.FindingTextSource` /
   :class:`deerflow.knowledge.embeddings.EmbeddingVectorStore`
@@ -111,6 +111,13 @@ from typing import Any
 from sqlalchemy import bindparam, func, select
 from sqlalchemy.orm import Session
 
+from deerflow.knowledge.agent_tools.lookup import (
+    ArtifactStoreReader,
+    KnowledgeBackends,
+    RetrievalDocument,
+    RetrievalPage,
+    bind_knowledge_backends,
+)
 from deerflow.knowledge.config import get_knowledge_config
 from deerflow.knowledge.embeddings import (
     EMBEDDING_DIM,
@@ -144,13 +151,6 @@ from deerflow.knowledge.schema.experiments import (
     ExperimentRow,
 )
 from deerflow.knowledge.schema.findings import FindingRow, NativeVector
-from deerflow.knowledge.tools.lookup import (
-    ArtifactStoreReader,
-    KnowledgeBackends,
-    RetrievalDocument,
-    RetrievalPage,
-    bind_knowledge_backends,
-)
 from deerflow.knowledge.write_api import ExperimentRecord, KnowledgeError, KnowledgeValidationError
 
 logger = logging.getLogger(__name__)
@@ -1479,7 +1479,7 @@ def open_pg_backends(dsn: str, *, embedding_model: str | None = None, artifact_s
 
     Reuses the process-wide sync-engine cache (one engine/pool per URL), so
     repeated calls with the same DSN share connections. Pass the result to
-    :func:`deerflow.knowledge.tools.lookup.bind_knowledge_backends` to arm
+    :func:`deerflow.knowledge.agent_tools.lookup.bind_knowledge_backends` to arm
     the ``@tool`` wrappers and the bootstrap middleware.
 
     Args:
@@ -1515,7 +1515,7 @@ def bind_knowledge_backends_from_config(*, artifact_store: Any | None = None) ->
     reads the database DSN plus the embedding model from
     :func:`deerflow.knowledge.config.get_knowledge_config`, opens the
     backend bundle with :func:`open_pg_backends`, and registers it via
-    :func:`deerflow.knowledge.tools.lookup.bind_knowledge_backends` so the
+    :func:`deerflow.knowledge.agent_tools.lookup.bind_knowledge_backends` so the
     ``ledger_*``/``experiment_get`` tools and the run-start bootstrap
     middleware resolve real PG bindings.
 

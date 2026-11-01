@@ -36,7 +36,10 @@ import {
   resolveArtifactURL,
   resolveMessageImageURL,
 } from "@/core/artifacts/utils";
-import { extractCitationSources } from "@/core/citations/sources";
+import {
+  type RetrievalSource,
+  extractCitationSources,
+} from "@/core/citations/sources";
 import { readConversationReferences } from "@/core/conversation-references";
 import { useI18n } from "@/core/i18n/hooks";
 import {
@@ -54,6 +57,7 @@ import {
 } from "@/core/skills";
 import { useSkills } from "@/core/skills/hooks";
 import { pathOfThread } from "@/core/threads/utils";
+import { isIMEComposing } from "@/lib/ime";
 import { cn } from "@/lib/utils";
 
 import { WorkspaceChangeBadge } from "../changes";
@@ -67,7 +71,10 @@ import { Tooltip } from "../tooltip";
 
 import { KnowledgeScopeSummary } from "./knowledge-scope-summary";
 import { MarkdownContent } from "./markdown-content";
-import { createMarkdownLinkComponent } from "./markdown-link";
+import {
+  createMarkdownLinkComponent,
+  MessageArtifactPathsContext,
+} from "./markdown-link";
 import { MessageReasoning } from "./message-reasoning";
 
 function FeedbackButtons({
@@ -145,6 +152,7 @@ export function MessageListItem({
   runId,
   threadId,
   artifactPaths = [],
+  knowledgeSources = [],
   showCopyButton = true,
   showWorkspaceChanges = false,
   durationSeconds,
@@ -158,6 +166,7 @@ export function MessageListItem({
   isLoading?: boolean;
   threadId: string;
   artifactPaths?: readonly string[];
+  knowledgeSources?: readonly RetrievalSource[];
   feedback?: FeedbackData | null;
   runId?: string;
   showCopyButton?: boolean;
@@ -230,6 +239,7 @@ export function MessageListItem({
         isLoading={isLoading}
         threadId={threadId}
         artifactPaths={artifactPaths}
+        knowledgeSources={knowledgeSources}
         runId={runId}
         showWorkspaceChanges={showWorkspaceChanges}
         durationSeconds={durationSeconds}
@@ -411,6 +421,7 @@ function MessageContent_({
   isLoading = false,
   threadId,
   artifactPaths,
+  knowledgeSources = [],
   runId,
   showWorkspaceChanges = false,
   durationSeconds,
@@ -421,6 +432,7 @@ function MessageContent_({
   isLoading?: boolean;
   threadId: string;
   artifactPaths: readonly string[];
+  knowledgeSources?: readonly RetrievalSource[];
   runId?: string;
   showWorkspaceChanges?: boolean;
   durationSeconds?: number;
@@ -445,9 +457,9 @@ function MessageContent_({
           maxWidth="90%"
         />
       ),
-      a: createMarkdownLinkComponent(threadId),
+      a: createMarkdownLinkComponent(threadId, knowledgeSources),
     }),
-    [artifactPaths, threadId],
+    [artifactPaths, threadId, knowledgeSources],
   );
 
   const rawContent = extractContentFromMessage(message);
@@ -494,8 +506,9 @@ function MessageContent_({
     return rawContent ?? "";
   }, [rawContent, isHuman]);
   const citationSources = useMemo(
-    () => (isHuman ? [] : extractCitationSources(contentToDisplay)),
-    [contentToDisplay, isHuman],
+    () =>
+      isHuman ? [] : extractCitationSources(contentToDisplay, knowledgeSources),
+    [contentToDisplay, isHuman, knowledgeSources],
   );
 
   const filesList =
@@ -582,6 +595,7 @@ function MessageContent_({
                 editState.onDraftChange(event.currentTarget.value)
               }
               onKeyDown={(event) => {
+                if (isIMEComposing(event)) return;
                 if (event.key === "Escape") {
                   event.preventDefault();
                   editState.onCancel();
@@ -642,12 +656,14 @@ function MessageContent_({
           {reasoningContent}
         </MessageReasoning>
       )}
-      <MarkdownContent
-        content={contentToDisplay}
-        isLoading={isLoading}
-        className="my-3"
-        components={components}
-      />
+      <MessageArtifactPathsContext.Provider value={artifactPaths}>
+        <MarkdownContent
+          content={contentToDisplay}
+          isLoading={isLoading}
+          className="my-3"
+          components={components}
+        />
+      </MessageArtifactPathsContext.Provider>
       <CitationSourcesPanel sources={citationSources} />
       <KnowledgeSourcesPanel content={contentToDisplay} />
       {message.type === "ai" && showWorkspaceChanges && (

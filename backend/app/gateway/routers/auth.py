@@ -41,7 +41,7 @@ from app.gateway.auth.user_provisioning import get_or_provision_oidc_user
 from app.gateway.csrf_middleware import CSRF_COOKIE_NAME, _request_origin, auth_csrf_cookie_settings, generate_csrf_token, is_secure_request
 from app.gateway.deps import get_current_user_from_request, get_local_provider
 from app.gateway.utils import constant_time_equals
-from deerflow.config.auth_config import OIDCProviderConfig
+from deerflow.config.auth_config import OIDCAuthConfig, OIDCProviderConfig
 from deerflow.persistence.login_throttle import LoginThrottleStore
 
 logger = logging.getLogger(__name__)
@@ -169,9 +169,7 @@ class ChangePasswordRequest(BaseModel):
     remember_me: bool | None = None
 
     _strong_password = field_validator("new_password")(classmethod(lambda cls, v: _validate_strong_password(v)))
-    _concise_new_email = field_validator("new_email")(
-        classmethod(lambda cls, v: v if v is None else _validate_concise_email(v))
-    )
+    _concise_new_email = field_validator("new_email")(classmethod(lambda cls, v: v if v is None else _validate_concise_email(v)))
 
 
 class MessageResponse(BaseModel):
@@ -500,6 +498,8 @@ def _local_registration_enabled() -> bool:
 
     ``/register`` reads this fresh on every request (``get_app_config`` reloads on file
     change); ``/setup-status`` may serve it up to 60s stale via its per-IP result cache.
+    Both are unauthenticated and ``get_app_config`` stats and re-hashes the config
+    files on every call, so they run this through ``asyncio.to_thread``.
     """
     from deerflow.config.app_config import get_app_config
 
@@ -518,7 +518,7 @@ async def register(request: Request, response: Response, body: RegisterRequest):
 
     Returns 403 when ``auth.local.allow_registration`` is false.
     """
-    if not _local_registration_enabled():
+    if not await asyncio.to_thread(_local_registration_enabled):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=AuthErrorResponse(code=AuthErrorCode.REGISTRATION_DISABLED, message="Self-registration is disabled on this deployment").model_dump(),
@@ -810,7 +810,8 @@ async def setup_status(request: Request):
 
             async def _compute_setup_status() -> dict:
                 admin_count = await get_local_provider().count_admin_users()
-                return {"needs_setup": admin_count == 0, "registration_enabled": _local_registration_enabled()}
+                registration_enabled = await asyncio.to_thread(_local_registration_enabled)
+                return {"needs_setup": admin_count == 0, "registration_enabled": registration_enabled}
 
             task = asyncio.create_task(_compute_setup_status())
             _SETUP_STATUS_INFLIGHT[client_ip] = task
@@ -917,6 +918,21 @@ def _set_csrf_cookie(response: Response, request: Request) -> None:
     )
 
 
+def _live_oidc_config() -> OIDCAuthConfig:
+    from deerflow.config.app_config import get_app_config
+
+    return get_app_config().auth.oidc
+
+
+async def _oidc_config() -> OIDCAuthConfig:
+    """The live ``auth.oidc`` config, read off the event loop.
+
+    The SSO routes are unauthenticated, and ``get_app_config`` stats and
+    re-hashes the config files on every call.
+    """
+    return await asyncio.to_thread(_live_oidc_config)
+
+
 def _resolve_oidc_redirect_uri(request: Request, provider_id: str, provider_config: OIDCProviderConfig) -> str:
     """Resolve the redirect URI for an OIDC provider.
 
@@ -943,10 +959,7 @@ async def list_auth_providers():
     Returns only safe frontend metadata — no secrets, endpoints, or
     internal configuration.
     """
-    from deerflow.config.app_config import get_app_config
-
-    app_config = get_app_config()
-    oidc_config = app_config.auth.oidc
+    oidc_config = await _oidc_config()
 
     if not oidc_config.enabled:
         return {"providers": []}
@@ -976,10 +989,7 @@ async def oauth_login(
     and PKCE parameters. The ``next`` query parameter specifies where to
     redirect after successful login (default: /workspace).
     """
-    from deerflow.config.app_config import get_app_config
-
-    app_config = get_app_config()
-    oidc_config = app_config.auth.oidc
+    oidc_config = await _oidc_config()
 
     if not oidc_config.enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SSO authentication is not enabled")
@@ -1058,10 +1068,7 @@ async def oauth_callback(
     the ID token, provisions/links the DeerFlow user, and sets the
     session cookie.
     """
-    from deerflow.config.app_config import get_app_config
-
-    app_config = get_app_config()
-    oidc_config = app_config.auth.oidc
+    oidc_config = await _oidc_config()
 
     # ── Provider error ───────────────────────────────────────────────
     if error:
@@ -1172,8 +1179,10 @@ def validate_next_param(next_param: str | None) -> str | None:
     """Validate and sanitize the ``next`` redirect parameter.
 
     Only allows relative paths starting with ``/``. Rejects protocol-relative
-    URLs (``//``), absolute URLs, URLs with embedded protocols, and backslashes
-    that URL parsers may reinterpret as forward slashes.
+    URLs (``//``), absolute URLs, URLs with embedded protocols, backslashes
+    that URL parsers may reinterpret as forward slashes, and control
+    characters: browsers delete tab, LF and CR before parsing a URL, so
+    ``/\\n//evil.example`` would otherwise reach the frontend as ``//evil.example``.
     """
     if not next_param:
         return None
@@ -1184,5 +1193,7 @@ def validate_next_param(next_param: str | None) -> str | None:
     if "\\" in next_param:
         return None
     if ":" in next_param:
+        return None
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in next_param):
         return None
     return next_param

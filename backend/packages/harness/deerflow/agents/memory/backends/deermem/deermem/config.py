@@ -40,6 +40,7 @@ class DeerMemModelConfig(BaseModel):
     )
     api_key: str | None = Field(default=None, description="API key (or rely on the provider's env var).")
     base_url: str | None = Field(default=None, description="Override base URL (e.g. an OpenAI-compatible gateway).")
+    default_headers: dict[str, str] | None = Field(default=None, description="Extra HTTP headers for the provider client (e.g. routing/session headers a gateway requires).")
     temperature: float | None = Field(default=None, description="Sampling temperature.")
 
 

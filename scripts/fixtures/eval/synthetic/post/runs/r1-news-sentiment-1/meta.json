@@ -1,0 +1,18 @@
+{
+  "run_key": "r1-news-sentiment-1",
+  "prompt_id": "news-sentiment-1",
+  "category": "news_sentiment",
+  "mode": "pro",
+  "repeat": 1,
+  "cap": 20,
+  "stop_reason": "completed",
+  "thread_id": "7fe605b4-be0b-42d0-a894-af660ef2a4d6",
+  "run_id": "run-489e77cd15e1",
+  "gateway_run": {
+    "status": "success",
+    "total_tokens": 101600,
+    "total_input_tokens": 99568,
+    "total_output_tokens": 2032
+  },
+  "total_tokens": 101600
+}

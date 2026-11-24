@@ -1,0 +1,18 @@
+{
+  "run_key": "u1-factor-idea-1-ultra",
+  "prompt_id": "factor-idea-1",
+  "category": "factor_idea",
+  "mode": "ultra",
+  "repeat": 1,
+  "cap": 60,
+  "stop_reason": "completed",
+  "thread_id": "df01f01c-5f18-47df-937d-db4c890beae3",
+  "run_id": "run-8df28952c816",
+  "gateway_run": {
+    "status": "success",
+    "total_tokens": 355800,
+    "total_input_tokens": 348684,
+    "total_output_tokens": 7116
+  },
+  "total_tokens": 355800
+}

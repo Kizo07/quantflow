@@ -1,0 +1,18 @@
+{
+  "run_key": "r1-report-1",
+  "prompt_id": "report-1",
+  "category": "report_request",
+  "mode": "full",
+  "repeat": 1,
+  "cap": null,
+  "stop_reason": "completed",
+  "thread_id": "bdaf3e57-3f46-42fb-b6d2-c9935d0ebf07",
+  "run_id": "run-6e45bfa07004",
+  "gateway_run": {
+    "status": "success",
+    "total_tokens": 203200,
+    "total_input_tokens": 199136,
+    "total_output_tokens": 4064
+  },
+  "total_tokens": 203200
+}

@@ -1,0 +1,432 @@
+# QuantFlow tool-awareness eval: prompt set (Phase 0b).
+#
+# Read by scripts/qf_eval.py. 20 prompts, 2 per category. No prompt names a tool,
+# server, skill or subagent (qf_eval.py --dry-run checks this).
+#
+# Per prompt:
+#   mode            pro | full. "pro" is capped at defaults.tool_call_cap.pro;
+#                   "full" sends the same Pro flags but runs to completion (report
+#                   prompts, so publish/present can be reached). Ultra runs are
+#                   listed separately under ultra_runs and reuse these prompts.
+#   required_tools  list of groups; each group is an any-of list of exact tool
+#                   names. The run passes when every group has at least one call
+#                   (lead or subagent). Status tools never satisfy a group.
+#   forbidden_tools exact names or prefix globs ("alpha_engine_*"); any call fails
+#                   the run (used by the non-finance control).
+#   registration_required  yes | no on idea prompts. "yes" = self-constructed
+#                   signal: spark_register_hypothesis must come before the first
+#                   backtest-like call. Well-known factors (12-1 momentum, value)
+#                   are "no" (decision 3).
+#   tool_call_cap   optional override of the mode default.
+#   anti_patterns   counted, not pass/fail. Each: id, severity (hard|soft),
+#                   tools (exact or prefix glob), optional args_regex (Python re,
+#                   searched in the JSON-serialised call args).
+#   upload          fixture file (relative to scripts/fixtures/eval/) uploaded to
+#                   the thread before the run, as the UI does.
+
+version: 1
+
+defaults:
+  # Same model id the UI selects by default (first entry in config.yaml models:).
+  model_name: muse-spark-1.3-responses
+  locale: en-US
+  client_timezone: America/Chicago
+  tool_call_cap:
+    pro: 20            # Pro default (F5/F12)
+    full: null         # report prompts run to completion
+    ultra_baseline: 60 # one capped desk run at baseline (F5c)
+    ultra_post: null   # five uncapped desk runs after Phase 3
+  # Hard ceiling for uncapped runs so a looping run cannot burn the pass budget.
+  safety_tool_call_ceiling: 250
+  timeout_s:
+    pro: 1200
+    full: 3600
+    ultra: 5400
+  repeats: 3
+
+# Calls that never satisfy a required group (F12a).
+status_tools:
+  - alpha_engine_engine_status
+  - alpha_engine_describe
+  - kizonlp_kizo_status
+  - kizonlp_list_models
+  - reportforge_capabilities
+  - spark_spark_health
+  - spark_spark_doctor
+
+# Calls excluded from the tool-call cap and from share denominators (F12d):
+# plan-mode todo writes, and read_file on a skill file.
+cap_exempt_tools: [write_todos]
+skill_read_tools: [read_file]
+skill_path_regex: '(^/mnt/skills/|/skills/|SKILL\.md$)'
+
+# Ordering rule for registration_required: yes.
+registration_tools: [spark_register_hypothesis]
+backtest_tools:
+  - spark_backtest_run
+  - alpha_engine_run_backtest
+  - alpha_engine_run_momentum_backtest
+  - alpha_engine_run_param_sweep
+  - alpha_engine_run_factor_analysis
+
+# Code-bearing calls checked for raw alpha_engine data reads (hard anti-pattern).
+code_tools:
+  - reportforge_run_code
+  - reportforge_run_file
+  - reportforge_notebook_*
+  - read_file
+  - write_file
+  - str_replace
+  - ls
+  - glob
+  - grep
+  - bash
+run_code_tools: [reportforge_run_code, reportforge_run_file, reportforge_notebook_run_cell, reportforge_notebook_run_all]
+
+global_anti_patterns:
+  - id: raw_data_read
+    severity: hard
+    description: Code or file call touching the alpha_engine store (parquet, catalog DB, data dir) instead of an alpha_engine tool.
+    tools: [reportforge_run_code, reportforge_run_file, reportforge_notebook_*, read_file, write_file, str_replace, ls, glob, grep, bash]
+    args_regex: '(?i)(alpha_engine/data|read_parquet\s*\(|pq\.read_table|pyarrow\.parquet|\.parquet\b|catalog\.(db|duckdb)\b|duckdb\.connect|/snapshots/\d{8}T)'
+  - id: run_file_sh
+    severity: hard
+    description: reportforge_run_file on a shell script.
+    tools: [reportforge_run_file]
+    args_regex: '\.sh"'
+
+ultra_runs:
+  baseline: [factor-idea-1]
+  post: [stock-compare-1, factor-idea-1, backtest-idea-2, news-sentiment-1, portfolio-1]
+
+# Pilot (F5a): one capped Pro run, one full report run, one capped Ultra run.
+pilot_runs:
+  - {prompt: stock-compare-1, mode: pro}
+  - {prompt: report-1, mode: full}
+  - {prompt: factor-idea-1, mode: ultra}
+
+prompts:
+  # ---------------------------------------------------------------- stock compare
+  - id: stock-compare-1
+    category: stock_compare
+    mode: pro
+    text: >-
+      Compare NVDA and AMD over the last 12 months: returns, volatility, worst drawdown,
+      and how correlated they've been. Which one looks riskier right now?
+    required_tools:
+      - [alpha_engine_get_price_history, alpha_engine_cross_section_returns, alpha_engine_sql]
+    anti_patterns:
+      - id: web_for_prices
+        severity: soft
+        tools: [web_search, web_search_advanced_exa, web_fetch, web_fetch_exa]
+        args_regex: '(?i)(price|return|volatil|drawdown|correlat)'
+      - id: handrolled_risk_stats
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(\.std\(|cummax|pct_change|\.corr\()'
+  - id: stock-compare-2
+    category: stock_compare
+    mode: pro
+    text: >-
+      How have JPMorgan, Bank of America and Wells Fargo traded since the start of the year:
+      total return, max drawdown and beta to the market? Which one held up best in the worst week?
+    required_tools:
+      - [alpha_engine_get_price_history, alpha_engine_cross_section_returns, alpha_engine_sql]
+    anti_patterns:
+      - id: web_for_prices
+        severity: soft
+        tools: [web_search, web_search_advanced_exa, web_fetch, web_fetch_exa]
+        args_regex: '(?i)(price|return|beta|drawdown)'
+      - id: handrolled_risk_stats
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(\.std\(|cummax|pct_change|\.cov\(|polyfit|linregress)'
+
+  # ---------------------------------------------------------------- factor idea
+  - id: factor-idea-1
+    category: factor_idea
+    mode: pro
+    registration_required: yes
+    text: >-
+      I have a hunch that S&P 500 stocks with low recent volatility but strong 6-month momentum
+      keep outperforming. Is there anything to it?
+    required_tools:
+      - [alpha_engine_run_factor_analysis, alpha_engine_run_backtest, spark_backtest_run]
+      - [spark_register_hypothesis]
+    anti_patterns:
+      - id: handrolled_ic_quantiles
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(spearmanr|qcut|newey|\bOLS\b|statsmodels|rank\(.*pct)'
+      - id: web_only_answer
+        severity: soft
+        tools: [web_search, web_search_advanced_exa]
+        args_regex: '(?i)(low.?vol|momentum|anomal)'
+  - id: factor-idea-2
+    category: factor_idea
+    mode: pro
+    registration_required: no
+    text: >-
+      People keep saying value investing is dead in US large caps. Has the value premium really
+      disappeared over the last fifteen years, or is it just in a long drawdown?
+    required_tools:
+      - [alpha_engine_run_factor_analysis, alpha_engine_get_factor_history]
+    anti_patterns:
+      - id: handrolled_factor_math
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(\bOLS\b|statsmodels|cumprod|cummax)'
+      - id: web_only_answer
+        severity: soft
+        tools: [web_search, web_search_advanced_exa]
+        args_regex: '(?i)(value (premium|factor)|hml)'
+
+  # ---------------------------------------------------------------- backtest idea
+  - id: backtest-idea-1
+    category: backtest_idea
+    mode: pro
+    registration_required: no
+    text: >-
+      Would a monthly top-50 12-1 momentum strategy on the S&P 500 since 2005 still have worked
+      after 2020, with 10 bps trading costs?
+    required_tools:
+      - [alpha_engine_run_momentum_backtest, alpha_engine_run_backtest, spark_backtest_run]
+    anti_patterns:
+      - id: handwritten_backtest_loop
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(rebal|cumprod|for .* in .*(month|date))'
+  - id: backtest-idea-2
+    category: backtest_idea
+    mode: pro
+    registration_required: yes
+    text: >-
+      Test this for me: each month, hold the 30 S&P 500 stocks with the lowest 60-day volatility
+      among those trading above their 200-day moving average, equal weighted, since 2010, with
+      10 bps costs. Does it beat the index after costs?
+    required_tools:
+      - [alpha_engine_run_backtest, spark_backtest_run, alpha_engine_run_factor_analysis]
+      - [spark_register_hypothesis]
+    anti_patterns:
+      - id: handwritten_backtest_loop
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(rebal|cumprod|rolling\(200|for .* in .*(month|date))'
+
+  # ---------------------------------------------------------------- news sentiment
+  - id: news-sentiment-1
+    category: news_sentiment
+    mode: pro
+    text: >-
+      What's the market mood around Micron this week, and has it shifted versus a month ago?
+    required_tools:
+      - [web_search, web_search_advanced_exa, web_fetch, web_fetch_exa]
+      - [kizonlp_fin_sentiment, kizonlp_entity_sentiment]
+    anti_patterns:
+      - id: handrolled_sentiment_code
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(sentiment|vader|textblob|positive_words)'
+  - id: news-sentiment-2
+    category: news_sentiment
+    mode: pro
+    text: >-
+      Pull together what the news has said about Boeing over the last two weeks. Is the coverage
+      getting more negative or more positive?
+    required_tools:
+      - [web_search, web_search_advanced_exa, web_fetch, web_fetch_exa]
+      - [kizonlp_fin_sentiment, kizonlp_entity_sentiment]
+    anti_patterns:
+      - id: handrolled_sentiment_code
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(sentiment|vader|textblob|positive_words)'
+
+  # ---------------------------------------------------------------- filing read (upload)
+  - id: filing-read-1
+    category: filing_read
+    mode: pro
+    upload: northwind-10q-q3fy2026-excerpt.pdf
+    text: >-
+      I've uploaded the latest 10-Q excerpt for Northwind Instruments, a small-cap we're looking at.
+      What changed in the risk factors, and how did segment margins move compared with the prior quarter?
+    required_tools:
+      - [kizonlp_parse_document]
+    anti_patterns:
+      - id: web_for_filing
+        severity: soft
+        tools: [web_search, web_search_advanced_exa, web_fetch, web_fetch_exa]
+        args_regex: '(?i)(northwind|10-q)'
+      - id: handwritten_pdf_parse
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(pypdf|pdfminer|fitz|pdfplumber|PyPDF2)'
+  - id: filing-read-2
+    category: filing_read
+    mode: pro
+    upload: northwind-q3fy2026-earnings-release.pdf
+    text: >-
+      Here's the earnings release Northwind put out this morning (attached). How confident does
+      management sound about next year, and which statements are forward-looking rather than
+      about the quarter that just ended?
+    required_tools:
+      - [kizonlp_forward_looking, kizonlp_fin_sentiment, kizonlp_entity_sentiment]
+    anti_patterns:
+      - id: web_for_filing
+        severity: soft
+        tools: [web_search, web_search_advanced_exa, web_fetch, web_fetch_exa]
+        args_regex: '(?i)(northwind|earnings release)'
+      - id: handwritten_pdf_parse
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(pypdf|pdfminer|fitz|pdfplumber|PyPDF2)'
+
+  # ---------------------------------------------------------------- portfolio construction
+  - id: portfolio-1
+    category: portfolio_construction
+    mode: pro
+    text: >-
+      Build me a defensive 10-stock portfolio from S&P 500 healthcare and consumer-staples names,
+      targeting roughly 12% annual volatility.
+    required_tools:
+      - [alpha_engine_list_instruments, alpha_engine_sql, alpha_engine_universe_members_as_of]
+      - [alpha_engine_optimize_portfolio]
+      - [alpha_engine_portfolio_risk_decomposition]
+    anti_patterns:
+      - id: handrolled_optimizer
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(cvxpy|scipy\.optimize|minimize\(|PyPortfolioOpt)'
+  - id: portfolio-2
+    category: portfolio_construction
+    mode: pro
+    text: >-
+      I want to split $1M across about 15 large-cap US tech and industrial names for the best
+      risk-adjusted return, with no single name above 10%. What would you hold, and how much of each?
+    required_tools:
+      - [alpha_engine_optimize_portfolio]
+    anti_patterns:
+      - id: handrolled_optimizer
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(cvxpy|scipy\.optimize|minimize\(|PyPortfolioOpt)'
+
+  # ---------------------------------------------------------------- risk / attribution
+  - id: risk-1
+    category: risk_attribution
+    mode: pro
+    text: >-
+      My book is 30% AAPL, 25% MSFT, 20% JPM, 15% XOM, 10% PFE. What drove its performance over
+      the past year, and what are its main factor exposures?
+    required_tools:
+      - [alpha_engine_attribute_portfolio, alpha_engine_brinson_attribution]
+      - [alpha_engine_portfolio_risk_decomposition, alpha_engine_get_factor_history, alpha_engine_risk_decompose]
+    anti_patterns:
+      - id: handrolled_regression
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(\bOLS\b|lstsq|linregress|statsmodels|LinearRegression)'
+  - id: risk-2
+    category: risk_attribution
+    mode: pro
+    text: >-
+      If rates jump and growth stocks sell off, how exposed is a 50/50 mix of mega-cap tech
+      (AAPL, MSFT, NVDA, AMZN, GOOGL, META) and the big banks (JPM, BAC, WFC, C)? Break down
+      where the risk comes from.
+    required_tools:
+      - [alpha_engine_portfolio_risk_decomposition, alpha_engine_risk_decompose]
+    anti_patterns:
+      - id: handrolled_regression
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(\bOLS\b|lstsq|linregress|statsmodels|LinearRegression|\.cov\()'
+
+  # ---------------------------------------------------------------- report request (full mode)
+  - id: report-1
+    category: report_request
+    mode: full
+    text: >-
+      Put together a short PDF tearsheet on Costco: price performance, valuation context and the key risks.
+    required_tools:
+      - [reportforge_scaffold_report, reportforge_scaffold_from_brief, reportforge_compose_report]
+      - [reportforge_render_report]
+      - [reportforge_publish_report, present_files]
+      - [alpha_engine_get_price_history, alpha_engine_cross_section_returns, alpha_engine_sql, alpha_engine_chart_price]
+    anti_patterns:
+      - id: matplotlib_charts
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(matplotlib|plt\.)'
+      - id: markdown_only_deliverable
+        severity: soft
+        tools: [write_file]
+        args_regex: '(?i)/mnt/user-data/outputs/[^"]*\.md"'
+  - id: report-2
+    category: report_request
+    mode: full
+    text: >-
+      Write me a two-page PDF brief on how S&P 500 sector leadership has shifted this year,
+      with a couple of charts.
+    required_tools:
+      - [reportforge_scaffold_report, reportforge_scaffold_from_brief, reportforge_compose_report]
+      - [reportforge_render_report]
+      - [reportforge_publish_report, present_files]
+      - [alpha_engine_cross_section_returns, alpha_engine_sql, alpha_engine_get_price_history]
+    anti_patterns:
+      - id: matplotlib_charts
+        severity: soft
+        tools: [reportforge_run_code, reportforge_notebook_*]
+        args_regex: '(?i)(matplotlib|plt\.)'
+      - id: markdown_only_deliverable
+        severity: soft
+        tools: [write_file]
+        args_regex: '(?i)/mnt/user-data/outputs/[^"]*\.md"'
+
+  # ---------------------------------------------------------------- PIT historical question
+  - id: pit-1
+    category: pit_historical
+    mode: pro
+    text: >-
+      In March 2009, which S&P 500 members at the time had fallen furthest from their 2007 highs,
+      and how did they do over the following 12 months?
+    required_tools:
+      - [alpha_engine_universe_members_as_of]
+      - [alpha_engine_sql, alpha_engine_cross_section_returns, alpha_engine_get_price_history]
+    anti_patterns:
+      - id: web_constituent_list
+        severity: soft
+        tools: [web_search, web_search_advanced_exa, web_fetch, web_fetch_exa]
+        args_regex: '(?i)(constituent|members|components|list of s&p)'
+  - id: pit-2
+    category: pit_historical
+    mode: pro
+    text: >-
+      Which companies were in the S&P 500 at the start of 2015 but had left it by the end of 2018,
+      and how did their shares do over that period?
+    required_tools:
+      - [alpha_engine_universe_members_as_of]
+      - [alpha_engine_sql, alpha_engine_cross_section_returns, alpha_engine_get_price_history]
+    anti_patterns:
+      - id: web_constituent_list
+        severity: soft
+        tools: [web_search, web_search_advanced_exa, web_fetch, web_fetch_exa]
+        args_regex: '(?i)(constituent|members|components|removed from|deleted from)'
+
+  # ---------------------------------------------------------------- non-finance control
+  - id: control-1
+    category: control
+    mode: pro
+    text: >-
+      Write a short Python function that checks whether a string is a palindrome, ignoring
+      punctuation and case, and explain its time complexity.
+    required_tools: []
+    forbidden_tools: [alpha_engine_*, spark_*, kizonlp_*]
+    anti_patterns: []
+  - id: control-2
+    category: control
+    mode: pro
+    text: >-
+      Plan a three-day first visit to Kyoto in late autumn, with a rough daily budget in dollars.
+    required_tools: []
+    forbidden_tools: [alpha_engine_*, spark_*, kizonlp_*]
+    anti_patterns: []

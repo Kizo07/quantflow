@@ -54,19 +54,24 @@ the scheduler-off notice).
 
 ## Features
 
-**Quant desk** (`skills/custom/quant-desk/`) — a CIO-style evidence-first
-workflow: frame the brief, gather evidence in parallel, run a recorded
+**Quant desk** (`skills/public/quant-desk/`) — a CIO-style evidence-first
+workflow in three tiers: Q (1–3 call lookup), A (direct analysis by the lead,
+the only tier in Pro mode) and D (desk run with subagents when `task` is
+available): frame the brief, gather evidence in parallel, run a recorded
 bull-vs-bear debate with demotions, pass a risk-manager veto, then compile
-a sourced synthesis. Research only, never financial advice. Eleven
-specialists on call: `quant-analyst` (owns every number), `technical-`,
-`news-`, `earnings-analyst`, `sector-researcher`, `macro-`,
-`thematic-`, `demand-`, `document-analyst`, plus `bull`/`bear-researcher`
-and `risk-manager`. Reader-facing output is always branded
-`QuantFlow Research`.
+a sourced synthesis. Research only, never financial advice. Seven
+specialists on call, each with a `tools:` allowlist in `config.yaml`:
+`quant-analyst` (owns every number and every spark ledger call),
+`technical-`, `news-` (also earnings prints, macro, themes, demand),
+`document-analyst`, plus `bull`/`bear-researcher` and `risk-manager`.
+The default agent carries the QuantFlow identity (runtime-home `SOUL.md`)
+and a `<quantflow_routing>` block (`lead_prompt_overlay.append`); per-tool
+`routing` hints and the skill allowlist live in `extensions_config.json`.
+Reader-facing output is always branded `QuantFlow Research`.
 
-**Market data & research engine** (alpha_engine MCP, local stdio) — 27 tools
-catalogued in `config/quant_tools.yaml` and dealt out per desk agent
-(machine-checked by `scripts/validate_quant_tools.py`): freshness-first
+**Market data & research engine** (alpha_engine MCP, local stdio) — 28 tools
+catalogued with every other desk MCP tool in `config/quant_tools.yaml` and dealt
+out per desk agent (machine-checked by `scripts/quant_tools.py --smoke/--check`): freshness-first
 `engine_status`; S&P 500 prices, quotes, and whole-universe breadth;
 point-in-time membership (`universe_members_as_of`, mandatory for any
 historical selection); LSE vendor candles to 2003, bond yields, and
@@ -259,10 +264,10 @@ outlook on TICKER"*.
 | Path | Contents |
 |------|----------|
 | `config.example.yaml` / `config.yaml` | models, token budgets, tool policy |
-| `config/quant_tools.yaml` | alpha_engine tool catalog per desk agent |
+| `config/quant_tools.yaml` / `quant_tools.lock.json` | desk tool manifest (all MCP servers, tiers, per-agent sets) and its live lock |
 | `extensions_config.example.json` | MCP server template (local copy gitignored) |
-| `skills/custom/quant-desk/` | desk playbook; `skills/public/` — upstream skills |
-| `scripts/validate_quant_tools.py` | keeps the tool catalog in sync with the engine |
+| `skills/public/quant-desk/` | desk playbook (+ `references/`); other `skills/public/` entries are upstream skills |
+| `scripts/quant_tools.py` | `--smoke` (live MCP lock), `--check` (tool names in prompts/skills/configs), `--emit` (allowlist/routing fragments) |
 | `docs/plans/` | design notes (report-forge flexibility, remediation logs) |
 | `docs/showcase/` | flagship report artifacts |
 | `backend/` + `frontend/` | the harness itself (upstream DeerFlow 2.0) |

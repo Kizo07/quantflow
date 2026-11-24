@@ -152,6 +152,18 @@ fi
 
 # ── Prerequisites (checked only when WE would start the stack) ───────────────
 
+# EXA preflight. True when EXA_API_KEY is non-empty AFTER serve.sh applies
+# .env (which overrides inherited variables, even with an empty value). Runs
+# in a subshell so nothing leaks into this script; the value is never printed.
+_exa_key_effective() (
+    if [ -f "$REPO_ROOT/.env" ]; then
+        command -v python3 >/dev/null 2>&1 || exit 1
+        exports="$(python3 "$REPO_ROOT/scripts/dotenv_exports.py" "$REPO_ROOT/.env" 2>/dev/null)" || exit 1
+        eval "$exports"
+    fi
+    [ -n "${EXA_API_KEY:-}" ]
+)
+
 _check_prereqs() {
     local missing=0
     # Mirror serve.sh: explicit env path wins, then backend/, then repo root.
@@ -164,6 +176,12 @@ _check_prereqs() {
     if [ ! -f "$REPO_ROOT/.env" ]; then
         echo "✗ Missing $REPO_ROOT/.env." >&2
         echo "  Run 'make setup' to create it; quantflow-app.sh never generates configs or secrets." >&2
+        missing=1
+    elif ! _exa_key_effective; then
+        echo "✗ EXA_API_KEY is unset or empty in the environment the gateway would get." >&2
+        echo "  web_search/web_fetch and the exa MCP server need it. Export it from your shell" >&2
+        echo "  profile / systemd user env (not .env), and make sure .env has no empty" >&2
+        echo "  EXA_API_KEY= line (serve.sh lets .env override inherited variables)." >&2
         missing=1
     fi
     if ! { { [ -n "${DEER_FLOW_EXTENSIONS_CONFIG_PATH:-}" ] && [ -f "$DEER_FLOW_EXTENSIONS_CONFIG_PATH" ]; } || \

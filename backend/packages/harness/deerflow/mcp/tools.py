@@ -42,7 +42,7 @@ from deerflow.mcp.tasks.runtime import (
 from deerflow.mcp_scope import mcp_session_scope_key, runtime_thread_incarnation
 from deerflow.reflection import resolve_variable
 from deerflow.runtime.user_context import resolve_runtime_user_id
-from deerflow.tools.mcp_metadata import tag_mcp_routing, tag_mcp_tool
+from deerflow.tools.mcp_metadata import apply_mcp_use_when, tag_mcp_prompt_guidance, tag_mcp_routing, tag_mcp_tool
 from deerflow.tools.resource_placeholder import model_visible_location, resource_placeholder_text
 from deerflow.tools.sync import make_sync_tool_wrapper
 from deerflow.tools.types import Runtime
@@ -1185,6 +1185,9 @@ def _wrap_discovered_server_tools(
     server_cfg = extensions_config.mcp_servers.get(server_name)
     transport = connection.get("transport", "stdio")
     current_server_tools: list[BaseTool] = []
+    # Server guidance is rendered into the system prompt, so only the
+    # operator-owned deployment config may supply it, never a personal config.
+    prompt_guidance = server_cfg.prompt_guidance_text if server_cfg is not None and connection_scope != "personal" else None
 
     for tool in raw_discovery.tools:
         if not _VALID_MCP_TOOL_NAME.fullmatch(tool.name or ""):
@@ -1198,6 +1201,16 @@ def _wrap_discovered_server_tools(
         tag_mcp_tool(tool, server_name=server_name, transport=transport)
         prefix = f"{server_name}_"
         original_name = tool.name[len(prefix) :] if tool_name_prefix and tool.name.startswith(prefix) else tool.name
+        override = server_cfg.tools.get(original_name) if server_cfg is not None else None
+        if override is not None and not override.exposed:
+            # H1: hidden before wrapping, so no agent, subagent or tool_search
+            # catalog can bind it. task_toolsets tools cannot be hidden
+            # (rejected by McpServerConfig validation).
+            continue
+        if override is not None and (use_when := override.use_when_line):
+            apply_mcp_use_when(tool, use_when)
+        if prompt_guidance:
+            tag_mcp_prompt_guidance(tool, prompt_guidance)
         routing = resolve_effective_mcp_routing(server_cfg, original_name)
         if routing.get("mode") != "off":
             tag_mcp_routing(tool, routing)

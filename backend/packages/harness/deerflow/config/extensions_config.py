@@ -70,11 +70,58 @@ class McpRoutingConfig(BaseModel):
         return value
 
 
+# Generic presentation hooks. They are validated *extra* keys rather than
+# declared fields on purpose: the Gateway's config API merges unknown keys
+# verbatim (including across partial PUTs), and ``model_dump()`` never writes a
+# default for them into an operator's ``extensions_config.json``.
+MCP_TOOL_EXPOSE_KEY = "expose"
+MCP_TOOL_USE_WHEN_KEY = "use_when"
+MCP_SERVER_PROMPT_GUIDANCE_KEY = "prompt_guidance"
+MCP_TOOL_USE_WHEN_MAX_CHARS = 200
+MCP_SERVER_PROMPT_GUIDANCE_MAX_CHARS = 1200
+
+
+def _optional_text(extra: dict[str, Any] | None, key: str, *, max_chars: int) -> str | None:
+    value = (extra or {}).get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be a string")
+    if len(value) > max_chars:
+        raise ValueError(f"{key} must be at most {max_chars} characters (got {len(value)})")
+    return value.strip() or None
+
+
 class McpToolOverride(BaseModel):
-    """Per-tool MCP configuration overrides."""
+    """Per-tool MCP configuration overrides.
+
+    Besides ``routing``, two optional presentation keys are recognized:
+    ``expose`` (bool, default true; false drops the tool at discovery) and
+    ``use_when`` (one line, at most 200 characters, prepended to the
+    description the model sees).
+    """
 
     routing: McpRoutingConfig = Field(default_factory=McpRoutingConfig)
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def _validate_presentation_keys(self) -> "McpToolOverride":
+        extra = self.model_extra or {}
+        if MCP_TOOL_EXPOSE_KEY in extra and not isinstance(extra[MCP_TOOL_EXPOSE_KEY], bool):
+            raise ValueError(f"{MCP_TOOL_EXPOSE_KEY} must be true or false")
+        _optional_text(extra, MCP_TOOL_USE_WHEN_KEY, max_chars=MCP_TOOL_USE_WHEN_MAX_CHARS)
+        return self
+
+    @property
+    def exposed(self) -> bool:
+        """False only when the operator set ``expose: false``."""
+        return (self.model_extra or {}).get(MCP_TOOL_EXPOSE_KEY) is not False
+
+    @property
+    def use_when_line(self) -> str | None:
+        """The ``use_when`` text collapsed onto one line, or ``None``."""
+        text = _optional_text(self.model_extra, MCP_TOOL_USE_WHEN_KEY, max_chars=MCP_TOOL_USE_WHEN_MAX_CHARS)
+        return " ".join(text.split()) if text else None
 
 
 class McpTaskToolsetConfig(BaseModel):
@@ -313,6 +360,22 @@ class McpServerConfig(BaseModel):
                     raise ValueError(f"MCP task tool {raw_name!r} must be unique across task_toolsets and roles; it is configured as both {previous} and {toolset.name}.{role}")
                 claimed[raw_name] = f"{toolset.name}.{role}"
         return self
+
+    @model_validator(mode="after")
+    def _validate_presentation_keys(self) -> "McpServerConfig":
+        _optional_text(self.model_extra, MCP_SERVER_PROMPT_GUIDANCE_KEY, max_chars=MCP_SERVER_PROMPT_GUIDANCE_MAX_CHARS)
+        # The durable task runtime drives submit/status/cancel by raw name, and
+        # task wrapping already decides which of them the model sees.
+        task_tools = {raw for toolset in self.task_toolsets for raw in (toolset.submit_tool, toolset.status_tool, toolset.cancel_tool)}
+        hidden_task_tools = sorted(name for name, override in self.tools.items() if name in task_tools and not override.exposed)
+        if hidden_task_tools:
+            raise ValueError(f"tools {', '.join(hidden_task_tools)} are referenced by task_toolsets and cannot set {MCP_TOOL_EXPOSE_KEY}: false")
+        return self
+
+    @property
+    def prompt_guidance_text(self) -> str | None:
+        """Operator guidance for prompts about this server, or ``None`` when unset/blank."""
+        return _optional_text(self.model_extra, MCP_SERVER_PROMPT_GUIDANCE_KEY, max_chars=MCP_SERVER_PROMPT_GUIDANCE_MAX_CHARS)
 
 
 def resolve_effective_mcp_routing(server_config: McpServerConfig | None, original_tool_name: str) -> dict[str, Any]:

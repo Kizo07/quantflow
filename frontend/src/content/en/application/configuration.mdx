@@ -119,10 +119,10 @@ models:
 
 `llama-server` exposes an OpenAI-compatible `/v1/chat/completions` endpoint, so point `base_url` at its `/v1` root. `ChatOpenAI` expects a non-empty API key; `no-key` is only a placeholder when llama.cpp authentication is disabled. If the server uses `--api-key`, configure that value instead.
 
-For Docker deployments, `localhost` refers to the DeerFlow container. Use a host address reachable from the container, such as `http://host.docker.internal:8080/v1` on Docker Desktop.
+For Docker deployments, `localhost` refers to the QuantFlow container. Use a host address reachable from the container, such as `http://host.docker.internal:8080/v1` on Docker Desktop.
 
 <Callout type="warning">
-  DeerFlow relies on tool calling. Make sure the GGUF model's chat template supports
+  QuantFlow relies on tool calling. Make sure the GGUF model's chat template supports
   function/tool calls. Current llama.cpp enables its Jinja chat-template engine by
   default; custom templates must preserve tool-call support.
 </Callout>
@@ -144,7 +144,7 @@ models:
 
 #### Reasoning capabilities
 
-`supports_thinking` and `supports_reasoning_effort` only say whether a knob exists. When a provider's contract differs from DeerFlow's generic assumptions — thinking that cannot be turned off, or an effort vocabulary other than `minimal/low/medium/high` — declare a mapping-valued `reasoning` block instead. The two booleans are then derived from it, the chat UI offers only the values the model accepts, and every model call (chat, summarization, title generation, subagents) follows the same policy. Existing Ollama `reasoning: true` / `false` values, and the `low` / `medium` / `high` level strings gpt-oss style models take, remain native ChatOllama settings and do not opt into this contract.
+`supports_thinking` and `supports_reasoning_effort` only say whether a knob exists. When a provider's contract differs from QuantFlow's generic assumptions — thinking that cannot be turned off, or an effort vocabulary other than `minimal/low/medium/high` — declare a mapping-valued `reasoning` block instead. The two booleans are then derived from it, the chat UI offers only the values the model accepts, and every model call (chat, summarization, title generation, subagents) follows the same policy. Existing Ollama `reasoning: true` / `false` values, and the `low` / `medium` / `high` level strings gpt-oss style models take, remain native ChatOllama settings and do not opt into this contract.
 
 ```yaml
 models:
@@ -161,7 +161,7 @@ models:
       effort:
         values: [low, high, max]    # the provider's own vocabulary
         default: high               # used when the caller does not choose
-        aliases:                    # DeerFlow generic value -> provider value
+        aliases:                    # QuantFlow generic value -> provider value
           minimal: low
           medium: high
     extra_body:
@@ -185,7 +185,6 @@ Choose the execution environment for agent file and command operations:
 ```yaml
 sandbox:
   use: deerflow.sandbox.local:LocalSandboxProvider
-  allow_host_bash: false  # set true only for trusted single-user workflows
 ```
   </Tabs.Tab>
   <Tabs.Tab>
@@ -216,24 +215,46 @@ Configure which tools the agent has access to. The defaults use DuckDuckGo (no A
 ```yaml
 tools:
   # Web search (choose one)
-  - use: deerflow.community.ddg_search.tools:web_search_tool # default, no key required
-  # - use: deerflow.community.tavily.tools:web_search_tool
+  - name: web_search
+    group: web
+    use: deerflow.community.ddg_search.tools:web_search_tool # default, no key required
+  # - name: web_search
+  #   group: web
+  #   use: deerflow.community.tavily.tools:web_search_tool
   #   api_key: $TAVILY_API_KEY
 
   # Web fetch (choose one)
-  - use: deerflow.community.jina_ai.tools:web_fetch_tool
+  - name: web_fetch
+    group: web
+    use: deerflow.community.jina_ai.tools:web_fetch_tool
 
   # Image search
-  - use: deerflow.community.image_search.tools:image_search_tool
+  - name: image_search
+    group: web
+    use: deerflow.community.image_search.tools:image_search_tool
 
   # File operations
-  - use: deerflow.sandbox.tools:ls_tool
-  - use: deerflow.sandbox.tools:read_file_tool
-  - use: deerflow.sandbox.tools:glob_tool
-  - use: deerflow.sandbox.tools:grep_tool
-  - use: deerflow.sandbox.tools:write_file_tool
-  - use: deerflow.sandbox.tools:str_replace_tool
-  - use: deerflow.sandbox.tools:bash_tool
+  - name: ls
+    group: file:read
+    use: deerflow.sandbox.tools:ls_tool
+  - name: read_file
+    group: file:read
+    use: deerflow.sandbox.tools:read_file_tool
+  - name: glob
+    group: file:read
+    use: deerflow.sandbox.tools:glob_tool
+  - name: grep
+    group: file:read
+    use: deerflow.sandbox.tools:grep_tool
+  - name: write_file
+    group: file:write
+    use: deerflow.sandbox.tools:write_file_tool
+  - name: str_replace
+    group: file:write
+    use: deerflow.sandbox.tools:str_replace_tool
+  - name: bash
+    group: bash
+    use: deerflow.sandbox.tools:bash_tool
 ```
 
 ### Database backend
@@ -292,10 +313,13 @@ memory:
 ```
 
 The optional `openviking` backend connects to an independent OpenViking server
-through `langchain-openviking` and currently supports one QuantFlow user in
-`mode: middleware`. Its private configuration uses `base_url`,
-`owner_user_id`, `api_key_env`, `failure_policy`, and `retrieval` with an
-ordinary OpenViking USER API key instead of the DeerMem fields shown above. See
+through `langchain-openviking` in `mode: middleware` instead of using the
+DeerMem fields shown above. It supports single-user QuantFlow deployments
+(`owner_user_id` + `api_key_env`, with an ordinary OpenViking USER API key) as
+well as fail-closed multi-user and multi-tenant isolation using per-user
+OpenViking USER API keys via `user_credentials` or `credential_provider`
+(with optional `tenant_id` and `client_pool`), alongside `base_url`,
+`failure_policy`, and `retrieval`. See
 `docs/OPENVIKING.md` in the repository for the complete configuration and
 Docker startup sequence.
 
@@ -349,7 +373,7 @@ make config-upgrade
 
 ## Runtime environment variables
 
-DeerFlow reads these from its own process environment — via a `.env` file, the
+QuantFlow reads these from its own process environment — via a `.env` file, the
 Docker environment, or the shell.
 
 Only `DEER_FLOW_SKILLS_PATH` resolves a relative value against
@@ -371,10 +395,10 @@ instead (`debug`, `info`, `warning`, or `error`; default `info`). See
 [Harness Configuration](/docs/harness/configuration) for the module reference.
 
 `DEER_FLOW_ROOT` is a host-side variable for the Docker Compose dev stack only;
-the DeerFlow process does not read it. See the
+the QuantFlow process does not read it. See the
 [Deployment Guide](/docs/application/deployment-guide).
 
-When `AUTH_JWT_SECRET` is unset, DeerFlow generates a secret on first start and
+When `AUTH_JWT_SECRET` is unset, QuantFlow generates a secret on first start and
 persists it to `.jwt_secret`, so sessions survive restarts. Set it explicitly in
 production to keep a stable, secret value.
 

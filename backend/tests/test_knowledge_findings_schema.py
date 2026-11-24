@@ -150,7 +150,7 @@ class TestRevisionChain:
         config = Config()
         config.set_main_option("script_location", migrations_dir.as_posix())
         script = ScriptDirectory.from_config(config)
-        assert script.get_heads() == ["0050_merge_quantflow_upstream"]
+        assert script.get_heads() == ["0061_merge_quantflow_upstream"]
 
     def test_vocabulary_matches_kb_contract(self) -> None:
         assert FINDING_TYPES == ("empirical", "methodological", "data_quality", "failure", "prior")

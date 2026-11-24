@@ -16,8 +16,6 @@ from pathlib import Path
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
-from deerflow.persistence import bootstrap
-
 migration = importlib.import_module("deerflow.persistence.migrations.versions.0050_merge_quantflow_upstream")
 
 REVISION = "0050_merge_quantflow_upstream"
@@ -31,12 +29,15 @@ def test_0050_joins_both_legs():
     assert len(REVISION) <= 32
 
 
-def test_0050_is_the_single_chain_head():
-    assert bootstrap._get_head_revision() == REVISION
+def test_0050_is_ancestor_of_the_single_chain_head():
+    # The chain-head pin moved on to 0061_merge_quantflow_upstream with the
+    # 2026-11-24 upstream sync (owned by its test); 0050 only needs to remain
+    # on the single chain.
     migrations_dir = Path(migration.__file__).resolve().parent.parent
     config = Config()
     config.set_main_option("script_location", migrations_dir.as_posix())
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == [REVISION]
+    assert len(script.get_heads()) == 1
+    assert REVISION in {rev.revision for rev in script.walk_revisions()}
     assert script.get_revision("0049_run_inputs").down_revision == "0048_extension_execution_leases"
     assert script.get_revision("0044_scheduled_task_notify_policy").down_revision == "0043_persistent_bot"

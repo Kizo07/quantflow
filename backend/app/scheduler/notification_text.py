@@ -48,13 +48,18 @@ _CONDITION_LIMIT = 200
 _TITLE_LIMIT = 200
 
 _EGRESS_REDACTION = "[redacted]"
-# Best-effort scrub before run content leaves for a third-party IM platform.
-# Patterns mirror the high-confidence secret detectors in skillscan.
-_EGRESS_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
+# Whole blocks go before the line rules: a header rule would otherwise consume
+# the opening delimiter, leaving the block pattern without a start marker and
+# the key body behind it in plain text.
+_EGRESS_BLOCK_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
         re.DOTALL,
     ),
+)
+# Best-effort scrub before run content leaves for a third-party IM platform.
+# Patterns mirror the high-confidence secret detectors in skillscan.
+_EGRESS_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
@@ -71,18 +76,58 @@ _EGRESS_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
 # (``"api_key": "…"`` in JSON) and prefixed/suffixed env names
 # (``DB_PASSWORD=…``, ``aws_secret_access_key=…``) are the same protected
 # values under other spellings, so the keyword may sit inside a longer
-# snake/kebab name and inside quotes.
+# snake/kebab name and inside quotes. ``signature`` (upstream SigV4 field)
+# is the same protected value under that spelling, so it redacts too.
 _EGRESS_ASSIGNMENT_PATTERN = re.compile(
     r"(?im)[\"']?((?:[A-Za-z0-9]+[ _-])*(?:access[ _-]?token|auth(?:orization)?[ _-]?token|api[ _-]?key|client[ _-]?secret|private[ _-]?key|"
-    r"token|password|passwd|passphrase|secret|credentials?)(?:[ _-][A-Za-z0-9]+)*)[\"']?\s*[:=]\s*[\"']?([^\"'\s#&,}]+)"
+    r"token|password|passwd|passphrase|secret|signature|credentials?)(?:[ _-][A-Za-z0-9]+)*)[\"']?\s*[:=]\s*[\"']?([^\"'\s#&,}]+)"
 )
 # Credential headers. Authorization carries one token (optionally after a
 # scheme word), so only that token is scrubbed and any following text on
 # the line survives; a cookie header's whole value is credential material.
-_EGRESS_AUTHORIZATION_PATTERN = re.compile(r"(?i)\b(Authorization)(\s*:\s*)(Bearer\s+)?[^\s;]+")
+# The Digest scheme is excluded: the upstream Digest rule below has already
+# replaced its whole value by the time this pattern runs.
+_EGRESS_AUTHORIZATION_PATTERN = re.compile(r"(?i)\b(Authorization)(\s*:\s*)(Bearer\s+)?(?!Digest\b)[^\s;]+")
 _EGRESS_HEADER_PATTERN = re.compile(r"(?im)^(Cookie|Set-Cookie|X-Api-Key)(\s*:\s*)\S.*$")
 _EGRESS_BEARER_PATTERN = re.compile(r"(?i)\b(Bearer)\s+[A-Za-z0-9._~+/=-]{8,}")
 _EGRESS_URL_SECRET_PATTERN = re.compile(r"(?i)([?&](?:access[_-]?token|api[_-]?key|token|key|secret|signature|sig|password)=)[^&\s\"']+")
+# The patterns above only reach a value that follows a secret-like key. Two
+# credential carriers have no such key: a URL's user info
+# (``postgres://user:pass@host``) and an ``Authorization``/``Cookie`` header
+# value (``Authorization: Bearer [REDACTED]``). Both are common in agent replies about
+# deployments and API calls, and both would otherwise reach the IM platform
+# verbatim. Only the credential itself is replaced, so the scheme and the rest
+# of the line keep reading normally.
+_URL_USERINFO_RE = re.compile(r"([a-zA-Z][\w+.-]*://)([^/?#\s@]+)@")
+# The value may be quoted with the scheme outside the quotes, so both
+# ``Authorization: Bearer [REDACTED]`` and ``Authorization: "Bearer [REDACTED]"`` are covered.
+_AUTH_HEADER_RE = re.compile(r"(?i)(\bauthorization\b\s*[:=]\s*)(?:[\"']?(?:(bearer|basic|token|digest)\s+)?[\"']?)([^\s\"';]+)[\"']?")
+# ``Digest`` carries the credential as a list of ``name=value`` fields
+# (``username="…", nonce="…", response="…"``). Only the first field follows the
+# scheme, so the token rule would leave the rest visible; the whole header value
+# goes instead, the same way the cookie rule handles its pair list.
+_DIGEST_HEADER_RE = re.compile(r"(?i)(\bauthorization\b\s*[:=]\s*)(?:[\"']?digest\s+)([^\n]+)")
+# A cookie header carries one ``name=value`` pair per ``;``-separated segment,
+# and only the first pair follows the header name, so the whole value goes.
+_COOKIE_HEADER_RE = re.compile(r"(?i)(\bcookie\b\s*[:=]\s*)([^\n]+)")
+
+
+def _redact_url_userinfo(match: re.Match[str]) -> str:
+    return f"{match.group(1)}{_EGRESS_REDACTION}@"
+
+
+def _redact_auth_header(match: re.Match[str]) -> str:
+    scheme = match.group(2)
+    prefix = f"{match.group(1)}{scheme} " if scheme else match.group(1)
+    return f"{prefix}{_EGRESS_REDACTION}"
+
+
+def _redact_digest_header(match: re.Match[str]) -> str:
+    return f"{match.group(1)}Digest {_EGRESS_REDACTION}"
+
+
+def _redact_cookie_header(match: re.Match[str]) -> str:
+    return f"{match.group(1)}{_EGRESS_REDACTION}"
 
 
 def redact_egress_text(text: str) -> str:
@@ -90,6 +135,12 @@ def redact_egress_text(text: str) -> str:
     if not text:
         return text
     redacted = text
+    for pattern in _EGRESS_BLOCK_PATTERNS:
+        redacted = pattern.sub(_EGRESS_REDACTION, redacted)
+    redacted = _URL_USERINFO_RE.sub(_redact_url_userinfo, redacted)
+    redacted = _DIGEST_HEADER_RE.sub(_redact_digest_header, redacted)
+    redacted = _AUTH_HEADER_RE.sub(_redact_auth_header, redacted)
+    redacted = _COOKIE_HEADER_RE.sub(_redact_cookie_header, redacted)
     for pattern in _EGRESS_SECRET_PATTERNS:
         redacted = pattern.sub(_EGRESS_REDACTION, redacted)
     # URL query secrets first: the assignment pass below would otherwise

@@ -272,7 +272,6 @@ async def notebook_connector_health(user=Depends(get_current_user_from_request))
     )
 
 
-@router.api_route("/{proxy_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def relay_to_sidecar(proxy_path: str, request: Request) -> Response:
     """Relay one request to the sidecar, streaming the response unbuffered."""
     if not _is_contained_proxy_path(proxy_path):
@@ -366,3 +365,15 @@ async def relay_to_sidecar(proxy_path: str, request: Request) -> Response:
     # media_type stays None so the upstream Content-Type (charset and all)
     # passes through verbatim instead of being re-rendered by Starlette.
     return StreamingResponse(_stream_body(), status_code=status_code, headers=response_headers)
+
+
+# One route per method with an explicit operation_id: a single api_route with
+# methods=[...] makes FastAPI reuse the function name as the operationId for
+# every method, which emits duplicate-operationId warnings (test_openapi_operation_ids).
+for _relay_method in ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"):
+    router.add_api_route(
+        "/{proxy_path:path}",
+        relay_to_sidecar,
+        methods=[_relay_method],
+        operation_id=f"relay_to_sidecar_{_relay_method.lower()}",
+    )

@@ -17,6 +17,7 @@ import {
   NotebookPenIcon,
   SearchIcon,
   SquareTerminalIcon,
+  ShieldCheckIcon,
   WrenchIcon,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
@@ -75,6 +76,7 @@ interface MessageGroupProps {
   showToolCallDetails?: boolean;
   threadId?: string;
   toolArtifacts?: ArtifactEntry[];
+  awaitingApproval?: boolean;
 }
 
 function MessageGroupComponent({
@@ -88,6 +90,7 @@ function MessageGroupComponent({
   showToolCallDetails = false,
   threadId,
   toolArtifacts,
+  awaitingApproval = false,
 }: MessageGroupProps) {
   const { t } = useI18n();
   const markdownComponents = useMemo(
@@ -519,6 +522,16 @@ function MessageGroupComponent({
 
   return (
     <>
+      {awaitingApproval ? (
+        <p
+          className="text-muted-foreground flex items-center gap-1.5 text-sm"
+          data-testid="awaiting-approval"
+          role="status"
+        >
+          <ShieldCheckIcon className="size-4" />
+          {t.humanInput.approval.waiting}
+        </p>
+      ) : null}
       {processingPanel}
       {clarificationTextSteps.map((step) => (
         <div key={step.id} className="w-full">
@@ -550,6 +563,7 @@ function areMessageGroupPropsEqual(
     previous.className === next.className &&
     previous.durationSeconds === next.durationSeconds &&
     Boolean(previous.isLoading) === Boolean(next.isLoading) &&
+    Boolean(previous.awaitingApproval) === Boolean(next.awaitingApproval) &&
     Boolean(previous.deferBrowserPreviews) ===
       Boolean(next.deferBrowserPreviews) &&
     Boolean(previous.showTokenDebugSummaries) ===

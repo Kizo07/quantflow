@@ -186,7 +186,7 @@ class TestRevisionChain:
         config = Config()
         config.set_main_option("script_location", migrations_dir.as_posix())
         script = ScriptDirectory.from_config(config)
-        assert script.get_heads() == ["0050_merge_quantflow_upstream"]
+        assert script.get_heads() == ["0061_merge_quantflow_upstream"]
 
 
 class TestModels:

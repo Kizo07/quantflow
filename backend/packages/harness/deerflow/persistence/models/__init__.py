@@ -52,6 +52,7 @@ from deerflow.persistence.channel_leases.model import ChannelLeaseRow
 from deerflow.persistence.channel_runtime_configs.model import ChannelRuntimeConfigRow
 from deerflow.persistence.channel_thread_bindings.model import ChannelThreadBindingRow
 from deerflow.persistence.cli_sessions.model import CliAuditRow, CliPresetRow, CliSessionRow
+from deerflow.persistence.coordination.model import CoordinationArtifactRow, CoordinationAssignmentRow, CoordinationExecutionRow, CoordinationGrantRow, CoordinationInputRow, CoordinationTaskRow
 from deerflow.persistence.extension_leases.model import ExtensionExecutionLeaseRow
 from deerflow.persistence.feedback.model import FeedbackRow
 from deerflow.persistence.login_throttle.model import LoginThrottleRow
@@ -71,11 +72,16 @@ from deerflow.persistence.skill_mutations.model import SkillAssetRow, SkillOpera
 from deerflow.persistence.subagent_batches.model import SubagentBatchItemRow, SubagentBatchRow
 from deerflow.persistence.thread_meta.model import ThreadMetaRow
 from deerflow.persistence.thread_reads.model import ThreadReadMarkerRow, ThreadReadVersionRow
+from deerflow.persistence.thread_shares.model import ShareArtifactRow, ThreadShareRow
+from deerflow.persistence.tool_approvals.model import ToolApprovalRow
 from deerflow.persistence.user.im_notifications import ImNotificationPreferenceRow
 from deerflow.persistence.user.model import UserPreferenceRow, UserRow
 from deerflow.persistence.webhook_delivery.model import WebhookDeliveryRow
 
 __all__ = [
+    "ShareArtifactRow",
+    "ThreadShareRow",
+    "ToolApprovalRow",
     "ExtensionExecutionLeaseRow",
     "AgentRow",
     "ChannelConnectionRow",
@@ -88,6 +94,12 @@ __all__ = [
     "CliAuditRow",
     "CliPresetRow",
     "CliSessionRow",
+    "CoordinationArtifactRow",
+    "CoordinationAssignmentRow",
+    "CoordinationExecutionRow",
+    "CoordinationGrantRow",
+    "CoordinationInputRow",
+    "CoordinationTaskRow",
     "FeedbackRow",
     "KnowledgeAgentRunRow",
     "KnowledgeArtifactRow",

@@ -6,16 +6,19 @@ import {
   CalendarClock,
   ChartColumn,
   MessagesSquare,
+  SearchIcon,
   Terminal,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import {
   SidebarGroup,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   Tooltip,
@@ -24,15 +27,46 @@ import {
 } from "@/components/ui/tooltip";
 import { CliSidebarSessions } from "@/components/workspace/cli-sessions/cli-sidebar-sessions";
 import { useAgentsApiEnabled } from "@/core/agents";
+import { useAuth } from "@/core/auth/AuthProvider";
+import { hasPermission, PERMISSIONS } from "@/core/auth/permissions";
 import { useI18n } from "@/core/i18n/hooks";
+import { OPEN_SEARCH_EVENT } from "@/core/search/api";
+import { isStaticWebsiteOnly } from "@/core/static-mode";
 
 export function WorkspaceNavChatList() {
   const { t } = useI18n();
   const pathname = usePathname();
   const { enabled: agentsEnabled } = useAgentsApiEnabled();
+  const { user } = useAuth();
+  const { setOpenMobile } = useSidebar();
+  const [shortcut, setShortcut] = useState("⌘K");
+  useEffect(() => {
+    setShortcut(navigator.userAgent.includes("Mac") ? "⌘K" : "Ctrl K");
+  }, []);
+  const usageEnabled =
+    !!user &&
+    hasPermission(user, PERMISSIONS.RUNS_READ) &&
+    !isStaticWebsiteOnly();
   return (
     <SidebarGroup className="pt-1">
       <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            onClick={() => {
+              setOpenMobile(false);
+              window.dispatchEvent(new Event(OPEN_SEARCH_EVENT));
+            }}
+            aria-label={t.workspaceSearch.open}
+            tooltip={t.workspaceSearch.title}
+            className="text-muted-foreground"
+          >
+            <SearchIcon />
+            <span>{t.workspaceSearch.open}</span>
+            <kbd aria-hidden className="ml-auto text-xs">
+              {shortcut}
+            </kbd>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
         <SidebarMenuItem>
           <SidebarMenuButton isActive={pathname === "/workspace/chats"} asChild>
             <Link className="text-muted-foreground" href="/workspace/chats">
@@ -97,6 +131,19 @@ export function WorkspaceNavChatList() {
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>
+        {usageEnabled && (
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={pathname.startsWith("/workspace/usage")}
+              asChild
+            >
+              <Link className="text-muted-foreground" href="/workspace/usage">
+                <ChartColumn />
+                <span>{t.usage.title}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )}
         <SidebarMenuItem>
           <SidebarMenuButton
             isActive={pathname.startsWith("/workspace/cli-sessions")}
@@ -113,17 +160,6 @@ export function WorkspaceNavChatList() {
           {pathname.startsWith("/workspace/cli-sessions") && (
             <CliSidebarSessions />
           )}
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            isActive={pathname.startsWith("/workspace/usage")}
-            asChild
-          >
-            <Link className="text-muted-foreground" href="/workspace/usage">
-              <ChartColumn />
-              <span>{t.sidebar.usage}</span>
-            </Link>
-          </SidebarMenuButton>
         </SidebarMenuItem>
         <SidebarMenuItem>
           <SidebarMenuButton

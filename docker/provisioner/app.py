@@ -31,20 +31,21 @@ Architecture (docker-compose-dev):
 from __future__ import annotations
 
 import logging
+import ntpath
 import os
 import posixpath
 import re
 import secrets
 import time
 from contextlib import asynccontextmanager
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 
 import urllib3
 from fastapi import FastAPI, HTTPException, Request, Response
 from kubernetes import client as k8s_client
 from kubernetes import config as k8s_config
 from kubernetes.client.rest import ApiException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # Suppress only the InsecureRequestWarning from urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -76,6 +77,14 @@ LARK_CLI_RUNTIME_VOLUME_NAME = "lark-cli-runtime"
 # broker off (Pattern A / legacy behavior). Broker supersedes Pattern A when both
 # are set.
 LARK_CLI_BROKER_IMAGE = os.environ.get("LARK_CLI_BROKER_IMAGE", "")
+
+# Sandbox Pod environment the Gateway forwards from ``sandbox.environment``.
+# Entries whose names the provisioner already sets from dedicated request fields
+# are dropped so one Pod never carries two sources for the same setting.
+RESERVED_SANDBOX_ENVIRONMENT_KEYS = frozenset({"AIO_BASH_MAX_SESSIONS", "MAX_SHELL_SESSIONS", "DEERFLOW_LARK_BROKER_URL"})
+MAX_SANDBOX_ENVIRONMENT_ENTRIES = 32
+MAX_SANDBOX_ENVIRONMENT_VALUE_CHARS = 1024
+SANDBOX_ENVIRONMENT_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 # Machine-readable marker attached to lark provisioning-config conflict
 # responses (409/503) telling the Gateway to drop its cached broker
 # capability observation for this endpoint. Keep in sync with
@@ -152,34 +161,70 @@ NODE_HOST = os.environ.get("NODE_HOST", "host.docker.internal")
 
 
 def join_host_path(base: str, *parts: str) -> str:
-    """Join host filesystem path segments while preserving native style."""
+    """Join host filesystem path segments for a Kubernetes hostPath.
+
+    Windows-styled bases keep Windows separators; every other base joins
+    POSIX-style regardless of the OS running the provisioner — a hostPath in
+    a pod spec is always interpreted by the (Linux) kubelet, and joining with
+    the native separator here would emit invalid backslash paths when the
+    provisioner itself runs on Windows.
+    """
     if not parts:
         return base
 
-    if re.match(r"^[A-Za-z]:[\\/]", base) or base.startswith("\\\\") or "\\" in base:
-        from pathlib import PureWindowsPath
-
+    if _is_windows_host_path(base):
         result = PureWindowsPath(base)
         for part in parts:
             result /= part
         return str(result)
 
-    from pathlib import Path
-
-    result = Path(base)
+    result = PurePosixPath(base)
     for part in parts:
         result /= part
     return str(result)
 
 
+def _is_windows_host_path(path: str) -> bool:
+    """Whether *path* is expressed with Windows host-path syntax."""
+    return bool(re.match(r"^[A-Za-z]:[\\/]", path) or path.startswith("\\\\") or "\\" in path)
+
+
+def _norm_host_path(path: str) -> str:
+    """Normalize a host path, keeping POSIX-style paths POSIX on any host OS.
+
+    Kubernetes hostPath values are interpreted by a Linux kubelet, so a
+    ``/state/...`` root must not pick up the running OS's separators when the
+    provisioner itself happens to run on Windows. Windows-styled paths use
+    ``ntpath`` explicitly so their semantics do not flip with the host OS
+    either.
+    """
+    if _is_windows_host_path(path):
+        return ntpath.normpath(path)
+    return posixpath.normpath(path)
+
+
+def _is_abs_host_path(path: str) -> bool:
+    """Whether *path* is absolute under its own style.
+
+    ``ntpath.isabs`` reports drive-less leading-slash paths like ``/state/x``
+    as relative since Python 3.13, so POSIX-styled paths must be judged by
+    ``posixpath.isabs`` or a valid extra mount would be rejected on a Windows
+    host.
+    """
+    if _is_windows_host_path(path):
+        return ntpath.isabs(path)
+    return posixpath.isabs(path)
+
+
 def _host_base_dir_for_extra_mounts() -> str:
     """Return the host-visible DeerFlow state root used for controlled mounts."""
     if DEER_FLOW_HOST_BASE_DIR:
-        return os.path.normpath(DEER_FLOW_HOST_BASE_DIR)
+        return _norm_host_path(DEER_FLOW_HOST_BASE_DIR)
 
-    normalized_threads = os.path.normpath(THREADS_HOST_PATH)
-    if os.path.basename(normalized_threads) == "threads":
-        return os.path.dirname(normalized_threads)
+    normalized_threads = _norm_host_path(THREADS_HOST_PATH)
+    segments = ntpath if _is_windows_host_path(normalized_threads) else posixpath
+    if segments.basename(normalized_threads) == "threads":
+        return segments.dirname(normalized_threads)
     return ""
 
 
@@ -187,8 +232,9 @@ def _is_path_under_base(path: str, base: str) -> bool:
     """Return whether *path* is inside *base* after normalization."""
     if not base:
         return False
+    segments = ntpath if _is_windows_host_path(path) or _is_windows_host_path(base) else posixpath
     try:
-        return os.path.commonpath([os.path.normpath(path), os.path.normpath(base)]) == os.path.normpath(base)
+        return segments.commonpath([segments.normpath(path), segments.normpath(base)]) == segments.normpath(base)
     except ValueError:
         return False
 
@@ -254,8 +300,8 @@ def _validated_extra_mounts(
     seen_container_paths: set[str] = set()
     validated: list[ExtraMount] = []
     for mount in extra_mounts:
-        host_path = os.path.normpath(mount.host_path)
-        if not os.path.isabs(host_path):
+        host_path = _norm_host_path(mount.host_path)
+        if not _is_abs_host_path(host_path):
             raise HTTPException(status_code=400, detail=f"Extra mount host path must be absolute: {mount.host_path}")
         if not _is_path_under_base(host_path, host_base_dir):
             raise HTTPException(status_code=400, detail=f"Extra mount host path is outside DeerFlow state: {mount.host_path}")
@@ -374,7 +420,10 @@ def _extra_mount_pvc_sub_path(host_path: str) -> str:
     if not _is_path_under_base(host_path, host_base_dir):
         raise HTTPException(status_code=400, detail=f"Extra mount host path is outside DeerFlow state: {host_path}")
 
-    rel_path = os.path.relpath(os.path.normpath(host_path), host_base_dir)
+    if _is_windows_host_path(host_path):
+        rel_path = ntpath.relpath(ntpath.normpath(host_path), host_base_dir)
+    else:
+        rel_path = posixpath.relpath(posixpath.normpath(host_path), host_base_dir)
     rel_parts = [part for part in rel_path.replace(os.sep, "/").split("/") if part and part != "."]
     if not rel_parts or any(part == ".." for part in rel_parts):
         raise HTTPException(status_code=400, detail=f"Invalid extra mount host path: {host_path}")
@@ -527,6 +576,26 @@ class CreateSandboxRequest(BaseModel):
     # New Gateways size this from their process-wide subagent capacity. None
     # keeps requests from older Gateways and custom provisioner callers working.
     max_shell_sessions: int | None = Field(default=None, gt=0)
+    max_bash_sessions: int | None = Field(default=None, gt=0)
+    # Operator ``sandbox.environment`` forwarded by the Gateway. The AIO image
+    # reads these to disable optional services (DISABLE_JUPYTER, ...), which is
+    # how a deployment lowers idle per-sandbox memory (#3213). Keys the
+    # provisioner owns are dropped in ``_build_pod``.
+    environment: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("environment")
+    @classmethod
+    def _validate_environment(cls, value: dict[str, str]) -> dict[str, str]:
+        if len(value) > MAX_SANDBOX_ENVIRONMENT_ENTRIES:
+            raise ValueError(f"environment accepts at most {MAX_SANDBOX_ENVIRONMENT_ENTRIES} entries")
+        for name, entry in value.items():
+            if not SANDBOX_ENVIRONMENT_KEY_PATTERN.fullmatch(name):
+                raise ValueError(f"environment key {name!r} must match [A-Za-z_][A-Za-z0-9_]* and be at most 64 characters")
+            if "\x00" in entry:
+                raise ValueError(f"environment value for {name!r} contains a NUL byte")
+            if len(entry) > MAX_SANDBOX_ENVIRONMENT_VALUE_CHARS:
+                raise ValueError(f"environment value for {name!r} exceeds {MAX_SANDBOX_ENVIRONMENT_VALUE_CHARS} characters")
+        return value
 
 
 class SandboxResponse(BaseModel):
@@ -534,6 +603,7 @@ class SandboxResponse(BaseModel):
     sandbox_url: str
     status: str
     max_shell_sessions: int | None = None
+    max_bash_sessions: int | None = None
     container_id: str | None = None
     lark_cli_broker: bool | None = None
 
@@ -988,6 +1058,17 @@ def _build_lark_cli_broker_sidecars(
     ]
 
 
+def _pod_environment_value(value: str) -> str:
+    """Escape a container value so Kubernetes stores it literally.
+
+    Kubelet treats ``$(NAME)`` in a plain ``env.value`` as a reference to an
+    earlier variable and collapses ``$$`` to ``$``. Doubling every dollar sign
+    cancels both rewrites, so the container reads the value the operator wrote
+    instead of one the API server derived from it.
+    """
+    return value.replace("$", "$$")
+
+
 def _build_pod(
     sandbox_id: str,
     thread_id: str,
@@ -998,6 +1079,8 @@ def _build_pod(
     provision_lark_cli_runtime: bool = False,
     provision_lark_cli_broker: bool = False,
     max_shell_sessions: int | None = None,
+    max_bash_sessions: int | None = None,
+    environment: dict[str, str] | None = None,
 ) -> k8s_client.V1Pod:
     """Construct a Pod manifest for a single sandbox."""
     _validate_lark_provisioning_request(provision_lark_cli_runtime, provision_lark_cli_broker)
@@ -1005,20 +1088,26 @@ def _build_pod(
         _build_lark_cli_init_containers(provision_lark_cli_runtime, provision_lark_cli_broker) or None
     )
     sandbox_env: list[k8s_client.V1EnvVar] = []
+    if max_bash_sessions is not None:
+        sandbox_env.append(k8s_client.V1EnvVar(name="AIO_BASH_MAX_SESSIONS", value=_pod_environment_value(str(max_bash_sessions))))
     if max_shell_sessions is not None:
         sandbox_env.append(
             k8s_client.V1EnvVar(
                 name="MAX_SHELL_SESSIONS",
-                value=str(max_shell_sessions),
+                value=_pod_environment_value(str(max_shell_sessions)),
             )
         )
     if _lark_cli_broker_enabled(provision_lark_cli_broker):
         sandbox_env.append(
             k8s_client.V1EnvVar(
                 name="DEERFLOW_LARK_BROKER_URL",
-                value=LARK_BROKER_URL,
+                value=_pod_environment_value(LARK_BROKER_URL),
             )
         )
+    for name, value in sorted((environment or {}).items()):
+        if name in RESERVED_SANDBOX_ENVIRONMENT_KEYS:
+            continue
+        sandbox_env.append(k8s_client.V1EnvVar(name=name, value=_pod_environment_value(value)))
     return k8s_client.V1Pod(
         metadata=k8s_client.V1ObjectMeta(
             name=_pod_name(sandbox_id),
@@ -1186,17 +1275,37 @@ def _pod_shell_capacity(pod) -> int:
     return DEFAULT_MAX_SHELL_SESSIONS
 
 
+def _pod_bash_capacity(pod) -> int:
+    containers = getattr(getattr(pod, "spec", None), "containers", None) or []
+    sandbox_container = next((container for container in containers if getattr(container, "name", None) == "sandbox"), None)
+    for env_var in getattr(sandbox_container, "env", None) or []:
+        if getattr(env_var, "name", None) != "AIO_BASH_MAX_SESSIONS":
+            continue
+        try:
+            value = int(env_var.value)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("Persisted sandbox has an invalid AIO_BASH_MAX_SESSIONS value") from exc
+        if value <= 0:
+            raise RuntimeError("Persisted sandbox has an invalid AIO_BASH_MAX_SESSIONS value")
+        return value
+    return 50
+
+
 def _sandbox_response(
     sandbox_id: str,
     sandbox_url: str,
     *,
     required_capacity: int | None = None,
+    required_bash_capacity: int | None = None,
     required_broker: bool | None = None,
 ) -> SandboxResponse:
     # Attest mode, generation and capacity from the same Pod observation,
     # including idempotent create and the AlreadyExists race.
     pod = core_v1.read_namespaced_pod(_pod_name(sandbox_id), K8S_NAMESPACE)
     capacity = _pod_shell_capacity(pod)
+    bash_capacity = _pod_bash_capacity(pod)
+    if required_bash_capacity is not None and bash_capacity < required_bash_capacity:
+        raise HTTPException(status_code=409, detail="Existing sandbox Bash capacity is below the requested value; replacement must be coordinated by the Gateway")
     containers = getattr(getattr(pod, "spec", None), "containers", None) or []
     init_containers = getattr(getattr(pod, "spec", None), "init_containers", None) or []
     sidecar = any(container.name == "lark-cli-broker" for container in containers)
@@ -1226,13 +1335,14 @@ def _sandbox_response(
     # Terminating Pod; status/get/list callers pass no requirements and read
     # the phase as data — raising here would fail the whole fleet listing for
     # one terminating Pod (HTTPException escapes their narrower catch clause).
-    if (required_capacity is not None or required_broker is not None) and status == "Terminating":
+    if (required_capacity is not None or required_bash_capacity is not None or required_broker is not None) and status == "Terminating":
         raise HTTPException(status_code=409, detail="Existing sandbox is still terminating")
     return SandboxResponse(
         sandbox_id=sandbox_id,
         sandbox_url=sandbox_url,
         status=status,
         max_shell_sessions=capacity,
+        max_bash_sessions=bash_capacity,
         container_id=getattr(metadata, "uid", None),
         lark_cli_broker=broker,
     )
@@ -1277,6 +1387,7 @@ def create_sandbox(req: CreateSandboxRequest):
     provision_lark_cli_runtime = req.provision_lark_cli_runtime
     provision_lark_cli_broker = req.provision_lark_cli_broker
     max_shell_sessions = req.max_shell_sessions
+    max_bash_sessions = req.max_bash_sessions
     _validate_lark_provisioning_request(provision_lark_cli_runtime, provision_lark_cli_broker)
     required_broker = provision_lark_cli_broker if provision_lark_cli_runtime or provision_lark_cli_broker else None
 
@@ -1300,6 +1411,7 @@ def create_sandbox(req: CreateSandboxRequest):
                 sandbox_id,
                 existing_url,
                 required_capacity=max_shell_sessions,
+                required_bash_capacity=max_bash_sessions,
                 required_broker=required_broker,
             )
         except (ApiException, RuntimeError) as exc:
@@ -1321,6 +1433,8 @@ def create_sandbox(req: CreateSandboxRequest):
                 provision_lark_cli_runtime=provision_lark_cli_runtime,
                 provision_lark_cli_broker=provision_lark_cli_broker,
                 max_shell_sessions=max_shell_sessions,
+                max_bash_sessions=max_bash_sessions,
+                environment=req.environment,
             ),
         )
         logger.info(f"Created Pod {_pod_name(sandbox_id)}")
@@ -1359,6 +1473,7 @@ def create_sandbox(req: CreateSandboxRequest):
             sandbox_id,
             sandbox_url,
             required_capacity=max_shell_sessions,
+            required_bash_capacity=max_bash_sessions,
             required_broker=required_broker,
         )
     except (ApiException, RuntimeError) as exc:

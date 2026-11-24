@@ -1,7 +1,7 @@
 {
  "version": 1,
  "generated_by": "scripts/quant_tools.py --smoke",
- "generated_at": "2026-11-24T21:16:34Z",
+ "generated_at": "2026-11-24T21:59:28Z",
  "servers": {
   "alpha_engine": {
    "server_name": "alpha_engine",

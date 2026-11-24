@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect } from "react";
+
 import { UsageDashboard } from "@/components/workspace/usage/usage-dashboard";
 import {
-  WorkspaceBody,
   WorkspaceContainer,
   WorkspaceHeader,
 } from "@/components/workspace/workspace-container";
@@ -10,15 +11,15 @@ import { useI18n } from "@/core/i18n/hooks";
 
 export default function UsagePage() {
   const { t } = useI18n();
+  useEffect(() => {
+    document.title = `${t.usage.title} - ${t.pages.appName}`;
+  }, [t.usage.title, t.pages.appName]);
   return (
     <WorkspaceContainer>
       <WorkspaceHeader />
-      <WorkspaceBody>
-        <div className="mx-auto w-full max-w-3xl px-4 py-6">
-          <h1 className="mb-4 text-2xl font-semibold">{t.usage.title}</h1>
-          <UsageDashboard />
-        </div>
-      </WorkspaceBody>
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <UsageDashboard />
+      </main>
     </WorkspaceContainer>
   );
 }

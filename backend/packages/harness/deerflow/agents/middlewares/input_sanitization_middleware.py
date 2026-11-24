@@ -94,6 +94,8 @@ _BLOCKED_TAG_NAMES: frozenset[str] = frozenset(
         "durable_context_data",
         "slash_skill_activation",
         "mcp_routing_hints",
+        # Operator per-server MCP guidance, rendered after the routing hints.
+        "mcp_server_guidance",
         "available-deferred-tools",
         "goal_continuation",
         "active_goal",

@@ -1,0 +1,18 @@
+{
+  "run_key": "r1-pit-1",
+  "prompt_id": "pit-1",
+  "category": "pit_historical",
+  "mode": "pro",
+  "repeat": 1,
+  "cap": 20,
+  "stop_reason": "completed",
+  "thread_id": "6bebab37-f76d-413d-8e6a-b660227e893d",
+  "run_id": "run-38753c71b224",
+  "gateway_run": {
+    "status": "success",
+    "total_tokens": 101600,
+    "total_input_tokens": 99568,
+    "total_output_tokens": 2032
+  },
+  "total_tokens": 101600
+}

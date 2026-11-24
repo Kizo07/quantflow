@@ -21,6 +21,7 @@ from langchain.tools import BaseTool
 MCP_TOOL_METADATA_KEY = "deerflow_mcp"
 MCP_TOOL_ROUTING_METADATA_KEY = "deerflow_mcp_routing"
 MCP_TOOL_SOURCE_METADATA_KEY = "deerflow_mcp_source"
+MCP_TOOL_GUIDANCE_METADATA_KEY = "deerflow_mcp_prompt_guidance"
 
 
 def tag_mcp_tool(
@@ -68,6 +69,32 @@ def tag_mcp_routing(tool: BaseTool, routing: Mapping[str, Any]) -> BaseTool:
         MCP_TOOL_ROUTING_METADATA_KEY: dict(routing),
     }
     return tool
+
+
+def apply_mcp_use_when(tool: BaseTool, use_when: str) -> BaseTool:
+    """Lead ``tool.description`` with an operator ``Use when:`` line (idempotent)."""
+    line = f"Use when: {use_when}"
+    description = tool.description or ""
+    if not description.startswith(line):
+        tool.description = f"{line}\n\n{description}" if description else line
+    return tool
+
+
+def tag_mcp_prompt_guidance(tool: BaseTool, guidance: str) -> BaseTool:
+    """Attach the owning server's operator prompt guidance to ``tool``."""
+    tool.metadata = {**(tool.metadata or {}), MCP_TOOL_GUIDANCE_METADATA_KEY: guidance}
+    return tool
+
+
+def get_mcp_prompt_guidance(tool: BaseTool) -> tuple[str, str] | None:
+    """Return ``(server_name, guidance)`` for an MCP tool tagged with server guidance."""
+    if not is_mcp_tool(tool):
+        return None
+    guidance = (getattr(tool, "metadata", None) or {}).get(MCP_TOOL_GUIDANCE_METADATA_KEY)
+    source = get_mcp_source(tool)
+    if not isinstance(guidance, str) or not guidance or source is None:
+        return None
+    return source["server_name"], guidance
 
 
 def get_mcp_routing(tool: BaseTool) -> dict[str, Any] | None:

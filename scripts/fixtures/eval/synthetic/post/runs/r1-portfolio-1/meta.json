@@ -1,0 +1,18 @@
+{
+  "run_key": "r1-portfolio-1",
+  "prompt_id": "portfolio-1",
+  "category": "portfolio_construction",
+  "mode": "pro",
+  "repeat": 1,
+  "cap": 20,
+  "stop_reason": "cap",
+  "thread_id": "0729be33-d3c4-4947-9a84-c579dfaf9f89",
+  "run_id": "run-10a591356aef",
+  "gateway_run": {
+    "status": "interrupted",
+    "total_tokens": 526800,
+    "total_input_tokens": 516264,
+    "total_output_tokens": 10536
+  },
+  "total_tokens": 526800
+}

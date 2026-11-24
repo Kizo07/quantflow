@@ -1,0 +1,18 @@
+{
+  "run_key": "r1-control-1",
+  "prompt_id": "control-1",
+  "category": "control",
+  "mode": "pro",
+  "repeat": 1,
+  "cap": 20,
+  "stop_reason": "completed",
+  "thread_id": "da3ff81d-18eb-4274-bf76-2cef51c7de1c",
+  "run_id": "run-8f42362fa2e8",
+  "gateway_run": {
+    "status": "success",
+    "total_tokens": 101600,
+    "total_input_tokens": 99568,
+    "total_output_tokens": 2032
+  },
+  "total_tokens": 101600
+}

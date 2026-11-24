@@ -1,0 +1,11 @@
+{
+  "pass": "post",
+  "started_at": "2026-11-18T12:00:00+00:00",
+  "snapshot_id": "20261118T044522Z-809bbb36",
+  "eval_user": {
+    "id": "synthetic",
+    "email": "qf-eval@example.com"
+  },
+  "prompts_sha256": "synthetic",
+  "tree_changed_during_pass": false
+}

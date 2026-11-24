@@ -1019,6 +1019,26 @@ def test_build_llm_degrades_to_none_on_init_failure(caplog):
     assert any("build_llm failed" in r.message for r in caplog.records)
 
 
+def test_build_llm_forwards_default_headers():
+    """A gateway that requires routing/session headers (e.g. OpenCode Go's
+    ``x-opencode-session``) must receive them on the memory client too:
+    DeerMemModelConfig carries ``default_headers`` and build_llm forwards
+    them to init_chat_model instead of silently dropping the key."""
+    from unittest.mock import patch
+
+    from deerflow.agents.memory.backends.deermem.deermem.config import DeerMemModelConfig
+    from deerflow.agents.memory.backends.deermem.deermem.core.llm import build_llm
+
+    headers = {"x-opencode-session": "sess-1", "User-Agent": "opencode/2.3.2"}
+    model_config = DeerMemModelConfig(provider="openai", model="m", api_key="k", default_headers=headers)
+
+    with patch("langchain.chat_models.init_chat_model", return_value="llm") as mock_init:
+        result = build_llm(model_config)
+
+    assert result == "llm"
+    assert mock_init.call_args.kwargs["default_headers"] == headers
+
+
 def test_from_backend_config_warns_on_unknown_keys(caplog):
     """Unknown backend_config keys log a WARNING so a typo (e.g. ``storage_pat``
     missing the ``h``) does not silently fall back to the default and write

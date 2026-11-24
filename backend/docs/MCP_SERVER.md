@@ -213,6 +213,46 @@ top-level `config.yaml -> tool_search.auto_promote_top_k` setting.
 - `tool_search.auto_promote_top_k`: global limit for auto-promoted deferred MCP
   schemas per model call. Default `3`; valid range `1..5`.
 
+## Presentation Overrides
+
+Three optional keys change what the model sees from an MCP server without
+touching the server or its connection. All are off by default.
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "prompt_guidance": "Read a repository's README before changing it. Never push to the default branch.",
+      "tools": {
+        "create_repository": { "expose": false },
+        "search_code": { "use_when": "you need code that matches a pattern across repositories" }
+      }
+    }
+  }
+}
+```
+
+- `tools.<original_tool_name>.expose`: `false` drops the tool at discovery, so
+  it is bound to neither the lead agent nor any subagent and never appears in
+  the `tool_search` catalog. A tool named in `task_toolsets` cannot be hidden
+  (config validation fails).
+- `tools.<original_tool_name>.use_when`: one line (at most 200 characters,
+  whitespace collapsed) shown as `Use when: ...` at the start of the tool
+  description the model receives. Use it only when the server's own description
+  lacks this guidance.
+- `prompt_guidance`: server-level text (at most 1,200 characters) rendered once
+  per server in an `<mcp_server_guidance>` block after `<mcp_routing_hints>`.
+  An agent sees guidance only for servers whose tools it holds, so a subagent
+  with a narrowed `tools:` list gets only its own servers' guidance. Text is
+  HTML-escaped. Only the deployment `extensions_config.json` can supply it;
+  personal MCP configs cannot.
+
+Tool keys use the original (unprefixed) tool name, like `routing`. These keys
+are presentation-only: editing them re-presents the server's tools but never
+changes the connection fingerprint or the durable-task runtime snapshot. The
+Gateway config API preserves them as unknown keys, including on partial PUTs.
+MCP servers' own `initialize` instructions are not forwarded.
+
 ## Tool Name Prefixes
 
 DeerFlow prefixes discovered MCP tool names with `<server_name>_` by default.
@@ -639,6 +679,17 @@ Declare interceptors in `extensions_config.json` using the `mcpInterceptors` fie
 ```
 
 Each entry is a Python import path in `module:variable` format (resolved via `resolve_variable`). The variable must be a **no-arg builder function** that returns an async interceptor compatible with `MultiServerMCPClient`’s `tool_interceptors` interface, or `None` to skip.
+
+Built-in opt-in interceptor: `deerflow.mcp.virtual_path_args:build_virtual_path_args_interceptor` translates `/mnt/user-data/...` tool arguments to host paths for stdio servers that set `"translate_virtual_paths": true` on their `mcpServers` entry.
+
+```json
+{
+  "mcpInterceptors": ["deerflow.mcp.virtual_path_args:build_virtual_path_args_interceptor"],
+  "mcpServers": {
+    "docs-parser": { "type": "stdio", "command": "docs-parser-mcp", "translate_virtual_paths": true }
+  }
+}
+```
 
 **Lifecycle.** Builders run once per enabled MCP server, not once per discovery.
 Tool discovery is server-scoped, so every server gets its own interceptor instance built

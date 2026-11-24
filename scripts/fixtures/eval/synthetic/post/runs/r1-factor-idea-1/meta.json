@@ -1,0 +1,18 @@
+{
+  "run_key": "r1-factor-idea-1",
+  "prompt_id": "factor-idea-1",
+  "category": "factor_idea",
+  "mode": "pro",
+  "repeat": 1,
+  "cap": 20,
+  "stop_reason": "completed",
+  "thread_id": "5598a2c7-1412-4832-81eb-e5c86ff6f825",
+  "run_id": "run-7f8c284a8d31",
+  "gateway_run": {
+    "status": "success",
+    "total_tokens": 304800,
+    "total_input_tokens": 298704,
+    "total_output_tokens": 6096
+  },
+  "total_tokens": 304800
+}

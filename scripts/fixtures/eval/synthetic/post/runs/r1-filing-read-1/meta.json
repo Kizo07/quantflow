@@ -1,0 +1,18 @@
+{
+  "run_key": "r1-filing-read-1",
+  "prompt_id": "filing-read-1",
+  "category": "filing_read",
+  "mode": "pro",
+  "repeat": 1,
+  "cap": 20,
+  "stop_reason": "completed",
+  "thread_id": "730665ca-3411-453d-9b00-a7a88e4204e0",
+  "run_id": "run-4d3f6830d2d8",
+  "gateway_run": {
+    "status": "success",
+    "total_tokens": 50800,
+    "total_input_tokens": 49784,
+    "total_output_tokens": 1016
+  },
+  "total_tokens": 50800
+}

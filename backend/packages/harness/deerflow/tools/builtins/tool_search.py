@@ -34,7 +34,7 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langchain_core.utils.function_calling import convert_to_openai_function
 from langgraph.types import Command
 
-from deerflow.tools.mcp_metadata import get_mcp_routing, get_mcp_source, is_mcp_tool
+from deerflow.tools.mcp_metadata import get_mcp_prompt_guidance, get_mcp_routing, get_mcp_source, is_mcp_tool
 
 if TYPE_CHECKING:
     from langchain.agents.middleware import AgentMiddleware
@@ -409,13 +409,45 @@ def _format_keyword_list(keywords: list[str]) -> str:
     return f"{', '.join(keywords[:-1])}, or {keywords[-1]}"
 
 
-def get_mcp_routing_hints_prompt_section(tools: Iterable[BaseTool], *, deferred_names: frozenset[str] = frozenset()) -> str:
-    """Render <mcp_routing_hints> from MCP tools carrying routing metadata.
+def get_mcp_server_guidance_prompt_section(tools: Iterable[BaseTool]) -> str:
+    """Render <mcp_server_guidance>: operator ``prompt_guidance`` once per server.
 
-    When tool_search has deferred an MCP tool, the hint must point the model at
-    promotion first; otherwise it may try to call a schema that is hidden from
-    the bound model request.
+    Only servers with at least one tool in ``tools`` appear, so a subagent that
+    holds a narrowed tool list sees guidance for its own servers only. Server
+    names and text are escaped so neither can close the block.
     """
+    guidance_by_server: dict[str, str] = {}
+    for candidate in tools:
+        tagged = get_mcp_prompt_guidance(candidate)
+        if tagged is not None:
+            guidance_by_server.setdefault(*tagged)
+    if not guidance_by_server:
+        return ""
+    lines = ["<mcp_server_guidance>"]
+    for server_name in sorted(guidance_by_server):
+        lines.append(f"Server `{html.escape(server_name, quote=False)}`:")
+        lines.append(html.escape(guidance_by_server[server_name], quote=False))
+    lines.append("</mcp_server_guidance>")
+    return "\n".join(lines)
+
+
+def get_mcp_routing_hints_prompt_section(tools: Iterable[BaseTool], *, deferred_names: frozenset[str] = frozenset()) -> str:
+    """Render <mcp_routing_hints>, then <mcp_server_guidance>, for MCP tools.
+
+    Routing hints come from per-tool routing metadata. When tool_search has
+    deferred an MCP tool, the hint must point the model at promotion first;
+    otherwise it may try to call a schema that is hidden from the bound model
+    request. Server guidance (see :func:`get_mcp_server_guidance_prompt_section`)
+    is appended here so the lead, embedded-client and subagent call sites all
+    render it from the same tool list without further wiring.
+    """
+    tools = list(tools)
+    hints_section = _render_mcp_routing_hints(tools, deferred_names=deferred_names)
+    guidance_section = get_mcp_server_guidance_prompt_section(tools)
+    return "\n\n".join(section for section in (hints_section, guidance_section) if section)
+
+
+def _render_mcp_routing_hints(tools: list[BaseTool], *, deferred_names: frozenset[str]) -> str:
     hints: list[tuple[int, str, list[str]]] = []
     for candidate in tools:
         routing = get_mcp_routing(candidate)

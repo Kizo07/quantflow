@@ -10,8 +10,10 @@ from __future__ import annotations
 from typing import Any
 
 # Server fields that only affect how tools are presented or routed to the
-# model, never how a durable-task server is contacted or driven.
-TASK_PRESENTATION_FIELDS = ("description", "routing", "tools", "tool_name_prefix")
+# model, never how a durable-task server is contacted or driven. ``tools``
+# covers the per-tool ``routing``/``expose``/``use_when`` overrides;
+# ``prompt_guidance`` is the per-server prompt text (an extra key).
+TASK_PRESENTATION_FIELDS = ("description", "routing", "tools", "tool_name_prefix", "prompt_guidance")
 
 
 def normalize_mcp_interceptor_paths(raw: Any) -> list[Any]:

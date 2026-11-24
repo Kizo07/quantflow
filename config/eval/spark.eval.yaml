@@ -1,0 +1,39 @@
+# Spark MCP config for QuantFlow eval passes only (tool-awareness plan, Phase 0b).
+#
+# Same semantics as ~/.spark/config.yaml, except:
+#   - storage points at a scratch DB/artifacts dir under ~/.spark/eval/, so eval
+#     runs never write hypotheses, trials or tombstones into the real ledger (F3a);
+#   - llm.degraded_mode is never-llm (decision 8 / F7): deterministic scoring and
+#     FTS5 retrieval, no LLM key read even if one is present;
+#   - the alpha_engine peer is the v2 .venv python, like the live config.
+#
+# Do not point SPARK_CONFIG at this file directly. scripts/qf_eval.py renders it to
+# ~/.spark/eval/spark.eval.yaml at the start of every pass, adding the pinned
+# ALPHA_ENGINE_SNAPSHOT_ID to the peer command (spark's peer config has no env
+# field and fastmcp starts the peer with a scrubbed env, so the pin is passed with
+# /usr/bin/env). The integrator points the spark entry's SPARK_CONFIG in
+# extensions_config.json at that rendered path for the duration of the pass.
+# The runner deletes and recreates the scratch DB before every run.
+
+storage:
+  db_path: ~/.spark/eval/spark-eval.db
+  artifacts_dir: ~/.spark/eval/artifacts
+
+llm:
+  provider: none
+  base_url: null
+  model: none
+  api_key_env: SPARK_EVAL_NO_LLM_KEY # deliberately never set
+  degraded_mode: never-llm
+
+peers:
+  quantflow:
+    enabled: true
+  alpha_engine:
+    enabled: true
+    transport: stdio
+    command: /home/fire/Documents/alpha_engine/.venv/bin/python
+    args: ["-m", "alpha_engine.mcp_server"]
+  gateway:
+    enabled: false
+    url: null

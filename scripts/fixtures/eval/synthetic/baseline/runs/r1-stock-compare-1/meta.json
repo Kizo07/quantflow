@@ -1,0 +1,18 @@
+{
+  "run_key": "r1-stock-compare-1",
+  "prompt_id": "stock-compare-1",
+  "category": "stock_compare",
+  "mode": "pro",
+  "repeat": 1,
+  "cap": 20,
+  "stop_reason": "completed",
+  "thread_id": "551436c3-7824-44e1-8298-1001e97d03b8",
+  "run_id": "run-a2c98d3608ac",
+  "gateway_run": {
+    "status": "success",
+    "total_tokens": 152400,
+    "total_input_tokens": 149352,
+    "total_output_tokens": 3048
+  },
+  "total_tokens": 152400
+}

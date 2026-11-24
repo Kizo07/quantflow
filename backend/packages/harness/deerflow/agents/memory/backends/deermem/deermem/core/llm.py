@@ -46,6 +46,8 @@ def build_llm(model_config: DeerMemModelConfig | None) -> Any:
         kwargs["api_key"] = model_config.api_key
     if model_config.base_url is not None:
         kwargs["base_url"] = model_config.base_url
+    if model_config.default_headers:
+        kwargs["default_headers"] = model_config.default_headers
     if model_config.temperature is not None:
         kwargs["temperature"] = model_config.temperature
     try:

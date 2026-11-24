@@ -1,0 +1,1081 @@
+{
+ "version": 1,
+ "generated_by": "scripts/quant_tools.py --smoke",
+ "generated_at": "2026-11-24T21:16:34Z",
+ "servers": {
+  "alpha_engine": {
+   "server_name": "alpha_engine",
+   "version": "4.0.5",
+   "tool_name_prefix": true,
+   "instructions_sha256": "7f3b9ab0a4b46cb5",
+   "tool_count": 28,
+   "tools": {
+    "alpha_engine_attribute_portfolio": {
+     "original": "attribute_portfolio",
+     "schema_sha256": "72fc0902be91129c",
+     "description_sha256": "1f3399a386674e8c",
+     "summary": "Factor attribution of fixed weights ('AAPL:0.25,MSFT:0.75', renormalized) on marts.factors_daily factor_ids: betas, t-stats, annualized contributions, R^2. Caller weights are never PIT-validated (univ",
+     "tokens": 156
+    },
+    "alpha_engine_brinson_attribution": {
+     "original": "brinson_attribution",
+     "schema_sha256": "7eb12e84c1b3a8d8",
+     "description_sha256": "7090faaf48bcaddb",
+     "summary": "Brinson-Fachler attribution over >= 2 dated rows 'YYYY-MM-DD:TICK:w,TICK:w;...'. Empty benchmark_rows = snapshot equal weight (survivorship_biased=true), else caller-supplied. Per-period allocation/se",
+     "tokens": 134
+    },
+    "alpha_engine_causal_test": {
+     "original": "causal_test",
+     "schema_sha256": "dbfdbc71d8ecc48e",
+     "description_sha256": "3d1212f72ca2dfef",
+     "summary": "Pairwise Granger-causality F-tests on real daily returns (spark-mcp",
+     "tokens": 326
+    },
+    "alpha_engine_chart_bars": {
+     "original": "chart_bars",
+     "schema_sha256": "936ae654c5b9e279",
+     "description_sha256": "be3ef1d79b175800",
+     "summary": "Themed sorted bar PNG for agent-computed numbers (2..24 unique labels, equal-length values; mismatches raise). signed=True only for true deltas. Never hand-roll matplotlib. Returns JSON {path, title, ",
+     "tokens": 162
+    },
+    "alpha_engine_chart_fan": {
+     "original": "chart_fan",
+     "schema_sha256": "9f5c53242b815469",
+     "description_sha256": "0323ed9f34e7db3f",
+     "summary": "Themed bear/base/bull projection fan from JSON arrays (all four",
+     "tokens": 189
+    },
+    "alpha_engine_chart_fundamentals": {
+     "original": "chart_fundamentals",
+     "schema_sha256": "aa4867fca1aa569b",
+     "description_sha256": "949ac40b6bfd8a07",
+     "summary": "Themed statement bars for one symbol from LSE fundamentals",
+     "tokens": 101
+    },
+    "alpha_engine_chart_price": {
+     "original": "chart_price",
+     "schema_sha256": "c7407b82e5f6e8c6",
+     "description_sha256": "270a97ece2d7d5c4",
+     "summary": "Themed price PNG from the local store: line (+volume, RSI) or OHLC candles. Returns JSON {path, symbol, style, rows, start, end}.",
+     "tokens": 158
+    },
+    "alpha_engine_cross_section_returns": {
+     "original": "cross_section_returns",
+     "schema_sha256": "f7ab388f58c873b9",
+     "description_sha256": "1615acb2690f697b",
+     "summary": "N-day returns of every locally priced name on `date` (default latest): JSON {as_of, n_stocks, gini, ret_mean/median/p10/p90, returns}. Basis prices-availability (pit_covered=false), not PIT membership",
+     "tokens": 213
+    },
+    "alpha_engine_describe": {
+     "original": "describe",
+     "schema_sha256": "b245e76dcce4f374",
+     "description_sha256": "b11cf1b348ef3f6f",
+     "summary": "Index of this engine: ops (cost, profiles, PIT policy, params), datasets (relation, columns, coverage), error kinds, stamp vocabulary. detail=true or name=<op|dataset> for full schemas.",
+     "tokens": 112
+    },
+    "alpha_engine_engine_status": {
+     "original": "engine_status",
+     "schema_sha256": "99334726611ccf58",
+     "description_sha256": "6528cdef8f71d4bc",
+     "summary": "Engine version, local data/marts summary, storage use and a per-dataset FRESHNESS digest (stale list). Call first.",
+     "tokens": 70
+    },
+    "alpha_engine_get_factor_history": {
+     "original": "get_factor_history",
+     "schema_sha256": "1ae659ddb9a40529",
+     "description_sha256": "a7b263b60fe09d4a",
+     "summary": "Factor returns (marts.factors_daily) for comma-separated factor_ids: ff_mkt_rf/smb/hml/rmw/cma/mom/st_rev/lt_rev, aqr_qmj_us/bab_us/hml_devil_us, jkp_<name>. AQR/JKP rows are month-end (frequency colu",
+     "tokens": 194
+    },
+    "alpha_engine_get_latest_quotes": {
+     "original": "get_latest_quotes",
+     "schema_sha256": "e86064c5cc998dd1",
+     "description_sha256": "98c0d1057eb9752e",
+     "summary": "Latest close/adj close/volume for a comma-separated list of symbols.",
+     "tokens": 88
+    },
+    "alpha_engine_get_lse_fundamentals": {
+     "original": "get_lse_fundamentals",
+     "schema_sha256": "b98fb410892c6b21",
+     "description_sha256": "e6c5cc84ccacbad5",
+     "summary": "Vendor financial-statement rows (long format: metric/val) for one",
+     "tokens": 134
+    },
+    "alpha_engine_get_lse_history": {
+     "original": "get_lse_history",
+     "schema_sha256": "848d769e8c1e8361",
+     "description_sha256": "df784108a170c85c",
+     "summary": "Vendor (LSE) daily OHLCV candles for any vendor symbol, back to 2003. Last `limit` rows.",
+     "tokens": 151
+    },
+    "alpha_engine_get_lse_yields": {
+     "original": "get_lse_yields",
+     "schema_sha256": "a35dab1ae7c79d52",
+     "description_sha256": "f8e101b3b76716cd",
+     "summary": "Daily government-bond yield series (percent) for comma-separated",
+     "tokens": 185
+    },
+    "alpha_engine_get_price_history": {
+     "original": "get_price_history",
+     "schema_sha256": "848d769e8c1e8361",
+     "description_sha256": "eb4ebb101b16ee57",
+     "summary": "Daily OHLCV history for one symbol (local data).",
+     "tokens": 151
+    },
+    "alpha_engine_list_instruments": {
+     "original": "list_instruments",
+     "schema_sha256": "3ffcaca5263cb49c",
+     "description_sha256": "d28eb420893fa6bf",
+     "summary": "List tradable instruments (S&P500 universe) with name and sector.",
+     "tokens": 99
+    },
+    "alpha_engine_ml_signal_scores": {
+     "original": "ml_signal_scores",
+     "schema_sha256": "41ffa7966cedf084",
+     "description_sha256": "1d486d34fe7e2044",
+     "summary": "Walk-forward ML composite of builtin signals / DSL expressions (commas inside DSL calls do not split). ridge|ols|rf fit only on data before each rebalance (no look-ahead) to predict forward `horizon`-",
+     "tokens": 219
+    },
+    "alpha_engine_optimize_portfolio": {
+     "original": "optimize_portfolio",
+     "schema_sha256": "d79d4f61231abe57",
+     "description_sha256": "c4b4b8901787bb4e",
+     "summary": "Optimize weights over comma-separated symbols: max_sharpe | min_volatility | max_return | hrp | black_litterman (equal-cap prior, historical-mean views). max_weight caps single names. Caller list is n",
+     "tokens": 162
+    },
+    "alpha_engine_portfolio_risk_decomposition": {
+     "original": "portfolio_risk_decomposition",
+     "schema_sha256": "fbb0fde0b14cf7f8",
+     "description_sha256": "f18529c671a8b505",
+     "summary": "Cross-sectional factor risk model for fixed weights ('AAPL:0.25,...', renormalized): style (momentum/volatility/size) + sector regressions, ewma|sample factor covariance (optional Newey-West), idiosyn",
+     "tokens": 213
+    },
+    "alpha_engine_render_report": {
+     "original": "render_report",
+     "schema_sha256": "59698c565b634c75",
+     "description_sha256": "8e40d19a659a11d3",
+     "summary": "Interactive HTML research report (plotly), returns its path. report=backtest (momentum tearsheet: lookback_days, top_n, rebalance, fees) | factor (signal_name or expression, q, horizon) | single_name ",
+     "tokens": 460
+    },
+    "alpha_engine_risk_decompose": {
+     "original": "risk_decompose",
+     "schema_sha256": "d2a8dc6444d2cfe2",
+     "description_sha256": "b2ddc56ead12c285",
+     "summary": "Factor-exposure decomposition of a book (spark-mcp \u00a715.2). Exactly",
+     "tokens": 376
+    },
+    "alpha_engine_run_backtest": {
+     "original": "run_backtest",
+     "schema_sha256": "c08e6e7197d3ac81",
+     "description_sha256": "7bc7018f46441edb",
+     "summary": "Cross-sectional signal backtest on real store returns (spark-mcp",
+     "tokens": 587
+    },
+    "alpha_engine_run_factor_analysis": {
+     "original": "run_factor_analysis",
+     "schema_sha256": "71f5a7f5a42d0f1a",
+     "description_sha256": "52ab280651aaee6e",
+     "summary": "Single-factor evaluation: `expression` (factor DSL, e.g. 'CLOSE / @mavg(CLOSE, 1y) - 1'; CLOSE/OPEN/HIGH/LOW/VOLUME) or builtin `signal_name` (mom_21d/63d/126d/252d, vol_63d, rsi_14). Returns IC stats",
+     "tokens": 274
+    },
+    "alpha_engine_run_momentum_backtest": {
+     "original": "run_momentum_backtest",
+     "schema_sha256": "b397d928c4df830e",
+     "description_sha256": "413b43b9b18fff2b",
+     "summary": "Cross-sectional momentum backtest: each rebalance (ME|W) buy the top_n names by trailing lookback_days return, equal weight, drift between rebalances, fees on traded notional. Returns metrics + equity",
+     "tokens": 271
+    },
+    "alpha_engine_run_param_sweep": {
+     "original": "run_param_sweep",
+     "schema_sha256": "4870e4b50f8f9dad",
+     "description_sha256": "f3ae091992faf1c2",
+     "summary": "Grid-sweep momentum (lookback x top_n) with the numba kernel (CPU; use_gpu for float32 CUDA screening). Same strategy as run_momentum_backtest; returns cagr/vol/sharpe/max_drawdown per combo sorted by",
+     "tokens": 242
+    },
+    "alpha_engine_sql": {
+     "original": "sql",
+     "schema_sha256": "f51bf6c05c8a9723",
+     "description_sha256": "ee780e84d1de1f9e",
+     "summary": "Read-only DuckDB SQL over the pinned snapshot's catalog (raw views, staging.*, marts.*). One SELECT/WITH/DESCRIBE/SHOW/EXPLAIN/SUMMARIZE statement; no file/network/ATTACH/COPY/SET. Returns JSON {snaps",
+     "tokens": 178
+    },
+    "alpha_engine_universe_members_as_of": {
+     "original": "universe_members_as_of",
+     "schema_sha256": "76303d61c98f91d8",
+     "description_sha256": "1f8fc6ee7b3c56ba",
+     "summary": "Point-in-time S&P 500 roster on `as_of` (default today) from the 1996->present intervals (survivorship-free): JSON {as_of, universe_basis, pit_covered, pit_tail_provisional, n, tickers}. Uncovered dat",
+     "tokens": 139
+    }
+   }
+  },
+  "exa": {
+   "server_name": "exa-search-server",
+   "version": "3.4.3",
+   "tool_name_prefix": false,
+   "instructions_sha256": "12ae32cb1ec02d01",
+   "tool_count": 2,
+   "tools": {
+    "web_fetch_exa": {
+     "original": "web_fetch_exa",
+     "schema_sha256": "d72ee7687517df49",
+     "description_sha256": "fe273c0aa03af31b",
+     "summary": "Read a webpage's full content as clean markdown. Use after web_search_exa when highlights are insufficient or to read any URL.",
+     "tokens": 192
+    },
+    "web_search_advanced_exa": {
+     "original": "web_search_advanced_exa",
+     "schema_sha256": "affefa133e133dd0",
+     "description_sha256": "32d3f61791d75959",
+     "summary": "Advanced web search with full control over filters, domains, dates, and content options.",
+     "tokens": 1158
+    }
+   }
+  },
+  "kizonlp": {
+   "server_name": "kizoNLP",
+   "version": "0.4.0",
+   "tool_name_prefix": true,
+   "instructions_sha256": "96991401b8517918",
+   "tool_count": 17,
+   "tools": {
+    "kizonlp_check_faithfulness": {
+     "original": "check_faithfulness",
+     "schema_sha256": "0d5fa9a867478cf0",
+     "description_sha256": "3b7381707a046925",
+     "summary": "Check a summary against its source, claim by claim.",
+     "tokens": 215
+    },
+    "kizonlp_embed_texts": {
+     "original": "embed_texts",
+     "schema_sha256": "0e4bcd24f574a307",
+     "description_sha256": "1865af31825b640c",
+     "summary": "Embed texts with a registered embedder.",
+     "tokens": 340
+    },
+    "kizonlp_entities": {
+     "original": "entities",
+     "schema_sha256": "ac25199808eb6030",
+     "description_sha256": "a4c6d39cb58163d6",
+     "summary": "Zero-shot named entities with character offsets (GLiNER2.5).",
+     "tokens": 295
+    },
+    "kizonlp_entity_sentiment": {
+     "original": "entity_sentiment",
+     "schema_sha256": "1eb7cac41322215b",
+     "description_sha256": "002cb958f648b790",
+     "summary": "Entity-level sentiment: entities (company/ticker/product) -> their",
+     "tokens": 281
+    },
+    "kizonlp_extract": {
+     "original": "extract",
+     "schema_sha256": "473ea2d6164168c1",
+     "description_sha256": "d3a71cb5a7ba33dd",
+     "summary": "Structured JSON extraction with an instruct LLM.",
+     "tokens": 341
+    },
+    "kizonlp_extract_keyphrases": {
+     "original": "extract_keyphrases",
+     "schema_sha256": "14a0046080d97afe",
+     "description_sha256": "0da3a2f1c794a181",
+     "summary": "Keyphrases per document (KeyBERT on the kizoNLP embedder).",
+     "tokens": 301
+    },
+    "kizonlp_fin_sentiment": {
+     "original": "fin_sentiment",
+     "schema_sha256": "130039080d94dfae",
+     "description_sha256": "eb5328c66fde4dc2",
+     "summary": "Financial sentiment of each text (probabilities per label + argmax).",
+     "tokens": 191
+    },
+    "kizonlp_fit_topics": {
+     "original": "fit_topics",
+     "schema_sha256": "3c2b390ca9160adc",
+     "description_sha256": "6663defb9d322fdf",
+     "summary": "Topic modeling over a document collection (TopicEngine on BERTopic).",
+     "tokens": 427
+    },
+    "kizonlp_forward_looking": {
+     "original": "forward_looking",
+     "schema_sha256": "1583b8203bed3b1b",
+     "description_sha256": "0297877ebbb11127",
+     "summary": "Forward-looking-statement classification of sentences.",
+     "tokens": 205
+    },
+    "kizonlp_kizo_status": {
+     "original": "kizo_status",
+     "schema_sha256": "99334726611ccf58",
+     "description_sha256": "d9b808fc8242ca5a",
+     "summary": "Server status: version, optional dependencies, GPU memory, model-pool",
+     "tokens": 90
+    },
+    "kizonlp_list_models": {
+     "original": "list_models",
+     "schema_sha256": "2ca608351b47481a",
+     "description_sha256": "b8c7fa1c971ddf3d",
+     "summary": "List registered model aliases with their Hugging Face Hub ids (or API",
+     "tokens": 191
+    },
+    "kizonlp_parse_document": {
+     "original": "parse_document",
+     "schema_sha256": "65f1a1dce2f0b0a5",
+     "description_sha256": "63a2cd03640b0cf5",
+     "summary": "Parse a PDF / HTML (SEC .htm, iXBRL) / DOCX / PPTX / XLSX / image file.",
+     "tokens": 475
+    },
+    "kizonlp_rerank": {
+     "original": "rerank",
+     "schema_sha256": "4020dace5de13e78",
+     "description_sha256": "c6515b4725078f5d",
+     "summary": "Rank documents by relevance to a query with a cross-encoder.",
+     "tokens": 286
+    },
+    "kizonlp_segment": {
+     "original": "segment",
+     "schema_sha256": "88541fcf19cf7dc3",
+     "description_sha256": "5559486279c5778c",
+     "summary": "Split texts into sentences, paragraphs, earnings-call speaker turns or",
+     "tokens": 280
+    },
+    "kizonlp_setfit_train_predict": {
+     "original": "setfit_train_predict",
+     "schema_sha256": "166e96da86b92664",
+     "description_sha256": "62f6a9446f68df78",
+     "summary": "Few-shot classification: fine-tune a SetFit model on the provided",
+     "tokens": 336
+    },
+    "kizonlp_summarize": {
+     "original": "summarize",
+     "schema_sha256": "e3bf6f3b705a5ac2",
+     "description_sha256": "1905a7c301d0b911",
+     "summary": "Summarize financial documents.",
+     "tokens": 508
+    },
+    "kizonlp_zero_shot_classify": {
+     "original": "zero_shot_classify",
+     "schema_sha256": "5d10969c21ee5228",
+     "description_sha256": "74cab5ca2f471d09",
+     "summary": "Label-flexible zero-shot classification.",
+     "tokens": 356
+    }
+   }
+  },
+  "reportforge": {
+   "server_name": "reportforge",
+   "version": "3.4.7",
+   "tool_name_prefix": false,
+   "instructions_sha256": "e0b5db0431ff82dc",
+   "tool_count": 67,
+   "tools": {
+    "reportforge_append_section": {
+     "original": "reportforge_append_section",
+     "schema_sha256": "fdd126da188d5b22",
+     "description_sha256": "c613a645de59f2d4",
+     "summary": "Append a markdown section to a project's index.qmd without rewriting it.",
+     "tokens": 819
+    },
+    "reportforge_capabilities": {
+     "original": "reportforge_capabilities",
+     "schema_sha256": "99334726611ccf58",
+     "description_sha256": "0886ccab8a9fbdf3",
+     "summary": "Capability discovery (\u00a76): templates, profiles, support matrix, env.",
+     "tokens": 101
+    },
+    "reportforge_check_readiness": {
+     "original": "reportforge_check_readiness",
+     "schema_sha256": "eeb09ec5bf9ae702",
+     "description_sha256": "6a418930ae1303b9",
+     "summary": "Unified readiness: structure, evidence, numerical, presentation, editorial.",
+     "tokens": 120
+    },
+    "reportforge_compose_report": {
+     "original": "reportforge_compose_report",
+     "schema_sha256": "62024251df80312a",
+     "description_sha256": "6f3f79c4884fca32",
+     "summary": "Create a whole report from one validated report_spec v1 (docs/report-spec-v1.md).",
+     "tokens": 367
+    },
+    "reportforge_cover_parity": {
+     "original": "reportforge_cover_parity",
+     "schema_sha256": "eeb09ec5bf9ae702",
+     "description_sha256": "e4cb8cf42256da30",
+     "summary": "Check that the rendered covers match the index.qmd frontmatter.",
+     "tokens": 185
+    },
+    "reportforge_create_restore_point": {
+     "original": "reportforge_create_restore_point",
+     "schema_sha256": "d879cbee8adc5591",
+     "description_sha256": "aaa30b6d51bf1392",
+     "summary": "Name the current revision as a restore point (before risky edits).",
+     "tokens": 155
+    },
+    "reportforge_delete_section": {
+     "original": "reportforge_delete_section",
+     "schema_sha256": "36c94b6edbab1272",
+     "description_sha256": "b560affa76e6dd8c",
+     "summary": "Remove a section block from a project's index.qmd.",
+     "tokens": 132
+    },
+    "reportforge_derive_cover": {
+     "original": "reportforge_derive_cover",
+     "schema_sha256": "02a715d5221b0b0d",
+     "description_sha256": "7cdf5b75be3f1512",
+     "summary": "Bind cover numerics to fact records (RF-04 deepening).",
+     "tokens": 204
+    },
+    "reportforge_describe_vocabulary": {
+     "original": "reportforge_describe_vocabulary",
+     "schema_sha256": "99334726611ccf58",
+     "description_sha256": "60b82eec896ce9c8",
+     "summary": "Catalogue of reusable body components (rf-blocks): kinds, props, examples.",
+     "tokens": 186
+    },
+    "reportforge_diff": {
+     "original": "reportforge_diff",
+     "schema_sha256": "2696feafd0517145",
+     "description_sha256": "04907fb9eb57e23f",
+     "summary": "Unified diff of index.qmd between two revisions/restore points.",
+     "tokens": 284
+    },
+    "reportforge_edit_report": {
+     "original": "reportforge_edit_report",
+     "schema_sha256": "54d9d5fae6590750",
+     "description_sha256": "ae0d18a7ec240904",
+     "summary": "Apply anchored text edits to index.qmd atomically, in one revision.",
+     "tokens": 623
+    },
+    "reportforge_export_release": {
+     "original": "reportforge_export_release",
+     "schema_sha256": "d52ccc968f096b91",
+     "description_sha256": "c41ee6cf9cc8320d",
+     "summary": "Export an approved, sealed revision as a self-contained bundle (\u00a73).",
+     "tokens": 584
+    },
+    "reportforge_freeze_release": {
+     "original": "reportforge_freeze_release",
+     "schema_sha256": "eeb09ec5bf9ae702",
+     "description_sha256": "0ef0b9d7406af2f3",
+     "summary": "Re-seal + verify output/release.json against current inputs (RF-09).",
+     "tokens": 88
+    },
+    "reportforge_get_section": {
+     "original": "reportforge_get_section",
+     "schema_sha256": "7bc0007d8dc2a785",
+     "description_sha256": "622c0bb9a37bf7d8",
+     "summary": "Read one report section's markdown, heading level, and byte range.",
+     "tokens": 151
+    },
+    "reportforge_history": {
+     "original": "reportforge_history",
+     "schema_sha256": "cd4ee9195aac40f7",
+     "description_sha256": "b0fe0116df9f50ed",
+     "summary": "List the captured revisions of index.qmd (newest first) and restore points.",
+     "tokens": 215
+    },
+    "reportforge_interrupt_cell": {
+     "original": "reportforge_interrupt_cell",
+     "schema_sha256": "11cdd512a41ae4b5",
+     "description_sha256": "d0f30d76d83d3ac2",
+     "summary": "Interrupt the project's live kernel (no-op when there is none).",
+     "tokens": 197
+    },
+    "reportforge_lifecycle_status": {
+     "original": "reportforge_lifecycle_status",
+     "schema_sha256": "eeb09ec5bf9ae702",
+     "description_sha256": "8fa20c987ac09f85",
+     "summary": "Lifecycle state, revision, approval record and whether it is current.",
+     "tokens": 138
+    },
+    "reportforge_list_blocks": {
+     "original": "reportforge_list_blocks",
+     "schema_sha256": "eeb09ec5bf9ae702",
+     "description_sha256": "2ea3adeba01beb76",
+     "summary": "List the components in a report: id, ref, kind, props, section, line.",
+     "tokens": 125
+    },
+    "reportforge_list_recipes": {
+     "original": "reportforge_list_recipes",
+     "schema_sha256": "99334726611ccf58",
+     "description_sha256": "5113e3d9bc9569a2",
+     "summary": "Section recipes: named section/component skeletons (e.g. equity-flagship).",
+     "tokens": 105
+    },
+    "reportforge_list_templates": {
+     "original": "reportforge_list_templates",
+     "schema_sha256": "dbe6f19a2412bef6",
+     "description_sha256": "020b21d68be7c3a4",
+     "summary": "List available report templates with their default formats and layout options.",
+     "tokens": 117
+    },
+    "reportforge_livefigure_discover": {
+     "original": "reportforge_livefigure_discover",
+     "schema_sha256": "eeb09ec5bf9ae702",
+     "description_sha256": "e787f2627b6299d5",
+     "summary": "List diagram sources in a project (no extension/node needed).",
+     "tokens": 116
+    },
+    "reportforge_livefigure_render_preview": {
+     "original": "reportforge_livefigure_render_preview",
+     "schema_sha256": "85da149574852b22",
+     "description_sha256": "bfa2d8d320a28350",
+     "summary": "Render one diagram source to a preview PNG (loop steps 2+3).",
+     "tokens": 177
+    },
+    "reportforge_livefigure_status": {
+     "original": "reportforge_livefigure_status",
+     "schema_sha256": "eeb09ec5bf9ae702",
+     "description_sha256": "cf7487351372f8ce",
+     "summary": "Adoption status: extension present/pinned? node new enough?",
+     "tokens": 112
+    },
+    "reportforge_livefigure_validate": {
+     "original": "reportforge_livefigure_validate",
+     "schema_sha256": "85da149574852b22",
+     "description_sha256": "843a117ad0bc300d",
+     "summary": "Validate one diagram source (loop step 1: catch broken sources).",
+     "tokens": 109
+    },
+    "reportforge_move_section": {
+     "original": "reportforge_move_section",
+     "schema_sha256": "5370dc12fe0c0009",
+     "description_sha256": "fdf6be359e133bd1",
+     "summary": "Move a section block before another section or to the document end.",
+     "tokens": 203
+    },
+    "reportforge_notebook_create": {
+     "original": "reportforge_notebook_create",
+     "schema_sha256": "cfaf5884f4afa9a5",
+     "description_sha256": "830d8bcfba7d61b2",
+     "summary": "Create a notebook in a report project, pinned to the reportforge kernel.",
+     "tokens": 298
+    },
+    "reportforge_notebook_create_cell": {
+     "original": "reportforge_notebook_create_cell",
+     "schema_sha256": "e4cd7e7717a3fed1",
+     "description_sha256": "3aceade92a3faa29",
+     "summary": "Insert a cell into a notebook (append when index is omitted).",
+     "tokens": 349
+    },
+    "reportforge_notebook_delete_cell": {
+     "original": "reportforge_notebook_delete_cell",
+     "schema_sha256": "514bb2d2dd4a7e49",
+     "description_sha256": "316bcf067f314d04",
+     "summary": "Remove a cell from a notebook. Fenced by expected_revision.",
+     "tokens": 225
+    },
+    "reportforge_notebook_from_ipynb": {
+     "original": "reportforge_notebook_from_ipynb",
+     "schema_sha256": "026beb7615f150bc",
+     "description_sha256": "8c3b41eb44c0db0c",
+     "summary": "Adopt an in-project .ipynb as a managed notebook (v1 provenance).",
+     "tokens": 318
+    },
+    "reportforge_notebook_from_qmd": {
+     "original": "reportforge_notebook_from_qmd",
+     "schema_sha256": "8e3edaecc7801311",
+     "description_sha256": "0b2df406aa5d9978",
+     "summary": "Sync a notebook's `.qmd` twin back into the `.ipynb` via jupytext.",
+     "tokens": 330
+    },
+    "reportforge_notebook_move_cell": {
+     "original": "reportforge_notebook_move_cell",
+     "schema_sha256": "813b45467220b279",
+     "description_sha256": "0b7a1ab40365d9a1",
+     "summary": "Move a cell to another position (byte-identical moves are no-ops).",
+     "tokens": 302
+    },
+    "reportforge_notebook_read": {
+     "original": "reportforge_notebook_read",
+     "schema_sha256": "91b43999ed249a94",
+     "description_sha256": "0f13d658c1847405",
+     "summary": "Read a notebook's cells: sources plus capped output previews. Read-only.",
+     "tokens": 229
+    },
+    "reportforge_notebook_run_all": {
+     "original": "reportforge_notebook_run_all",
+     "schema_sha256": "a2af46f822f3a65d",
+     "description_sha256": "0a46d86f6a688d77",
+     "summary": "Execute a whole notebook top-down in a fresh kernel. See run_cell.",
+     "tokens": 231
+    },
+    "reportforge_notebook_run_cell": {
+     "original": "reportforge_notebook_run_cell",
+     "schema_sha256": "0d61ce8013e15839",
+     "description_sha256": "df4ac8e0d0d694b4",
+     "summary": "Execute cells 0..index top-down in a FRESH kernel (ephemeral nbclient).",
+     "tokens": 347
+    },
+    "reportforge_notebook_to_qmd": {
+     "original": "reportforge_notebook_to_qmd",
+     "schema_sha256": "60aee7402fd33547",
+     "description_sha256": "d2cf9b36da4a1c85",
+     "summary": "Convert a notebook to .qmd via jupytext and pair the twins.",
+     "tokens": 326
+    },
+    "reportforge_notebook_write_cell": {
+     "original": "reportforge_notebook_write_cell",
+     "schema_sha256": "d16a9cff69ac71f9",
+     "description_sha256": "34d277233939b316",
+     "summary": "Replace a cell's source (and optionally its type).",
+     "tokens": 365
+    },
+    "reportforge_output_qa": {
+     "original": "reportforge_output_qa",
+     "schema_sha256": "eeb09ec5bf9ae702",
+     "description_sha256": "a94a99b8578562db",
+     "summary": "Re-run the output QA gate on a project's rendered outputs (no render).",
+     "tokens": 244
+    },
+    "reportforge_project_status": {
+     "original": "reportforge_project_status",
+     "schema_sha256": "eeb09ec5bf9ae702",
+     "description_sha256": "6e3bf0270dfa9b91",
+     "summary": "Summarize a report project for inspection and iteration.",
+     "tokens": 144
+    },
+    "reportforge_publish_report": {
+     "original": "reportforge_publish_report",
+     "schema_sha256": "298dd1c7fa6c365f",
+     "description_sha256": "6b4aba056581df87",
+     "summary": "Publish a rendered report project's artifacts into the run's thread outputs.",
+     "tokens": 533
+    },
+    "reportforge_read_project_file": {
+     "original": "reportforge_read_project_file",
+     "schema_sha256": "8dbef5bea3d95681",
+     "description_sha256": "54484fcaae416aaa",
+     "summary": "Read a text file from a report project (source, logs, generated data).",
+     "tokens": 239
+    },
+    "reportforge_read_report": {
+     "original": "reportforge_read_report",
+     "schema_sha256": "e796dadd91e197f3",
+     "description_sha256": "828594efa083e01c",
+     "summary": "Read index.qmd (or one section) plus a read_token for safe edits.",
+     "tokens": 224
+    },
+    "reportforge_record_review": {
+     "original": "reportforge_record_review",
+     "schema_sha256": "a4dba28f36b2be08",
+     "description_sha256": "8663a3d783a330d1",
+     "summary": "Record an advisory review decision against a revision (\u00a74.3).",
+     "tokens": 256
+    },
+    "reportforge_refresh_project_furniture": {
+     "original": "reportforge_refresh_project_furniture",
+     "schema_sha256": "7dbd8cbff9d59919",
+     "description_sha256": "7f1b3daf412ce640",
+     "summary": "Regenerate scaffold-baked cover furniture from the current frontmatter.",
+     "tokens": 200
+    },
+    "reportforge_register_exhibit": {
+     "original": "reportforge_register_exhibit",
+     "schema_sha256": "cec061450b2fd26f",
+     "description_sha256": "1178e1a1fac41231",
+     "summary": "Register an exhibit record: figure file or anchor linked to evidence.",
+     "tokens": 422
+    },
+    "reportforge_register_fact": {
+     "original": "reportforge_register_fact",
+     "schema_sha256": "436fdbe843af41f1",
+     "description_sha256": "eb769fbfd637a855",
+     "summary": "Register a shared typed fact record (RF-03).",
+     "tokens": 362
+    },
+    "reportforge_register_facts": {
+     "original": "reportforge_register_facts",
+     "schema_sha256": "de3f1583b18707d3",
+     "description_sha256": "fa4d6cda22c17254",
+     "summary": "Register or update many facts in one call (idempotent upsert).",
+     "tokens": 375
+    },
+    "reportforge_register_source": {
+     "original": "reportforge_register_source",
+     "schema_sha256": "0c99f0da3419f9c6",
+     "description_sha256": "661d077ccbbc806e",
+     "summary": "Register a citable source in the report's evidence registry (RF-03).",
+     "tokens": 461
+    },
+    "reportforge_render_preview": {
+     "original": "reportforge_render_preview",
+     "schema_sha256": "bf27736581d717f4",
+     "description_sha256": "83f6b05193484f72",
+     "summary": "Render preview artifacts for a report revision (RF-05).",
+     "tokens": 364
+    },
+    "reportforge_render_report": {
+     "original": "reportforge_render_report",
+     "schema_sha256": "e34d1f79fbb858bc",
+     "description_sha256": "4268f7d0a02974d7",
+     "summary": "Render a .qmd report to one or more output formats.",
+     "tokens": 203
+    },
+    "reportforge_reopen": {
+     "original": "reportforge_reopen",
+     "schema_sha256": "5931537cb0ec28d6",
+     "description_sha256": "1d093e5ddbc6c5c1",
+     "summary": "Reopen a report to draft (review/approved/exported -> draft).",
+     "tokens": 142
+    },
+    "reportforge_replace_section": {
+     "original": "reportforge_replace_section",
+     "schema_sha256": "ad1a7cb14b2b6c08",
+     "description_sha256": "e6a4da1602aa20e2",
+     "summary": "Replace a section's heading + body wholesale; other bytes preserved.",
+     "tokens": 190
+    },
+    "reportforge_restart_kernel": {
+     "original": "reportforge_restart_kernel",
+     "schema_sha256": "11cdd512a41ae4b5",
+     "description_sha256": "a184f182a8526743",
+     "summary": "Restart the project's kernel: fresh namespace, generation bump.",
+     "tokens": 203
+    },
+    "reportforge_restore": {
+     "original": "reportforge_restore",
+     "schema_sha256": "c6013faca90596d3",
+     "description_sha256": "889e743b230cb050",
+     "summary": "Restore index.qmd to an earlier revision or restore point.",
+     "tokens": 257
+    },
+    "reportforge_rollforward_report": {
+     "original": "reportforge_rollforward_report",
+     "schema_sha256": "69a7cee7431eee67",
+     "description_sha256": "90454aa2c05e49ae",
+     "summary": "Birth a next-period report from a finished one (RF-09).",
+     "tokens": 222
+    },
+    "reportforge_run_cell_persistent": {
+     "original": "reportforge_run_cell_persistent",
+     "schema_sha256": "a38146ac6bf13708",
+     "description_sha256": "fbe35e7c50eb34e7",
+     "summary": "Execute ONE cell in the project's persistent kernel (stateful).",
+     "tokens": 432
+    },
+    "reportforge_run_code": {
+     "original": "reportforge_run_code",
+     "schema_sha256": "ab95e2f2c1d4e4fd",
+     "description_sha256": "3b1c2713e5c0aa40",
+     "summary": "Execute Python code on the host inside a report project.",
+     "tokens": 372
+    },
+    "reportforge_run_file": {
+     "original": "reportforge_run_file",
+     "schema_sha256": "166266424b9eb8a5",
+     "description_sha256": "3a2b23e784e7abcd",
+     "summary": "Run a script that already lives inside a report project.",
+     "tokens": 272
+    },
+    "reportforge_save_asset": {
+     "original": "reportforge_save_asset",
+     "schema_sha256": "826a6321119e4b2b",
+     "description_sha256": "4942bd98f0c14e11",
+     "summary": "Write an asset file (text or base64 binary) into a report project.",
+     "tokens": 441
+    },
+    "reportforge_save_chart": {
+     "original": "reportforge_save_chart",
+     "schema_sha256": "2ee1ffb62a2be22f",
+     "description_sha256": "695a568c38570f0c",
+     "summary": "Export a Plotly figure to static PNG (+ standalone interactive HTML).",
+     "tokens": 550
+    },
+    "reportforge_save_table": {
+     "original": "reportforge_save_table",
+     "schema_sha256": "1bda4cf39fdcb54c",
+     "description_sha256": "c969b81cc3c04a9d",
+     "summary": "Write a formatted Markdown table to tables/<id>.md (no hand-typed tables).",
+     "tokens": 392
+    },
+    "reportforge_scaffold_from_brief": {
+     "original": "reportforge_scaffold_from_brief",
+     "schema_sha256": "8ea68d57dd7ad3de",
+     "description_sha256": "84f0e62fa1d4df44",
+     "summary": "Create a new report project from a structured report brief (schema",
+     "tokens": 241
+    },
+    "reportforge_scaffold_report": {
+     "original": "reportforge_scaffold_report",
+     "schema_sha256": "a7cd694fdb8fdfdb",
+     "description_sha256": "6c1c061678880a62",
+     "summary": "Create a new branded report project under ~/Documents/report-forge/reports/<slug>/.",
+     "tokens": 1799
+    },
+    "reportforge_submit_for_review": {
+     "original": "reportforge_submit_for_review",
+     "schema_sha256": "035dffa1d1051e0e",
+     "description_sha256": "0b599295e6f9b677",
+     "summary": "Submit a draft for human review (draft -> review).",
+     "tokens": 192
+    },
+    "reportforge_update_block": {
+     "original": "reportforge_update_block",
+     "schema_sha256": "867e7b1996b4db72",
+     "description_sha256": "6f055b04395d394f",
+     "summary": "Edit one component's props and/or inner Markdown by id; nothing else changes.",
+     "tokens": 304
+    },
+    "reportforge_update_fact": {
+     "original": "reportforge_update_fact",
+     "schema_sha256": "e520e863de4f70be",
+     "description_sha256": "1baa7b44d4f9c3d2",
+     "summary": "Update a fact record; superseded values stay in capped history (20).",
+     "tokens": 277
+    },
+    "reportforge_validate_blocks": {
+     "original": "reportforge_validate_blocks",
+     "schema_sha256": "eeb09ec5bf9ae702",
+     "description_sha256": "5fecbcf63d8cae87",
+     "summary": "Validate every component: kind, props, enums, children, ids, filter install.",
+     "tokens": 105
+    },
+    "reportforge_write_report_body": {
+     "original": "reportforge_write_report_body",
+     "schema_sha256": "81bd17f59a249977",
+     "description_sha256": "1e3788fa574a5f14",
+     "summary": "Write the complete .qmd body of a scaffolded report project.",
+     "tokens": 1343
+    }
+   }
+  },
+  "spark": {
+   "server_name": "spark",
+   "version": "0.1.0",
+   "tool_name_prefix": true,
+   "instructions_sha256": "12ae32cb1ec02d01",
+   "tool_count": 33,
+   "tools": {
+    "spark_approve": {
+     "original": "approve",
+     "schema_sha256": "fb470a85d757de75",
+     "description_sha256": "66abadd902624ebd",
+     "summary": "Human gate (plan \u00a76.3 tool 22, M11): target_type in {belief, skill,",
+     "tokens": 260
+    },
+    "spark_archive_status": {
+     "original": "archive_status",
+     "schema_sha256": "76303d61c98f91d8",
+     "description_sha256": "51fef637301edf92",
+     "summary": "Archive + exploration status (\u00a76.3 tool 19): coverage",
+     "tokens": 170
+    },
+    "spark_backtest_run": {
+     "original": "backtest_run",
+     "schema_sha256": "8e87bd640d5fb5f2",
+     "description_sha256": "8e73a6973396a453",
+     "summary": "Dispatch a backtest under the trial governor. Mandatory \u00a712.2",
+     "tokens": 261
+    },
+    "spark_causal_check": {
+     "original": "causal_check",
+     "schema_sha256": "62f018ca383f7af2",
+     "description_sha256": "6c8509d040f591bb",
+     "summary": "Type-B causal probe (\u00a79.3, C6 scoped): validate CausalSpec, delegate",
+     "tokens": 171
+    },
+    "spark_check_novelty": {
+     "original": "check_novelty",
+     "schema_sha256": "cfce36458e80f462",
+     "description_sha256": "3e701a2192939673",
+     "summary": "Bounded novelty/surprise per \u00a77: N = w\u00b7(1\u2212max_cos, 1\u2212structural_overlap,",
+     "tokens": 317
+    },
+    "spark_combine_methods": {
+     "original": "combine_methods",
+     "schema_sha256": "7d1775c66c018b0b",
+     "description_sha256": "1029925c12194c31",
+     "summary": "Compose 2-3 candidate compositions from method graph nodes (\u00a76.1",
+     "tokens": 259
+    },
+    "spark_consolidate": {
+     "original": "consolidate",
+     "schema_sha256": "bdec0067fd02a08c",
+     "description_sha256": "467711038e8c1e6a",
+     "summary": "On-demand consolidation pass (plan \u00a76.3 tool 20, \u00a713): applies",
+     "tokens": 335
+    },
+    "spark_debate_evidence": {
+     "original": "debate_evidence",
+     "schema_sha256": "6a49be23f0d06219",
+     "description_sha256": "427879350a5d1b84",
+     "summary": "Adversarial audit debate over one hypothesis' ledger record (P2-3):",
+     "tokens": 222
+    },
+    "spark_decide_skill_promotion": {
+     "original": "decide_skill_promotion",
+     "schema_sha256": "b8c8c95f28d7c700",
+     "description_sha256": "3c03b6e561ddbf37",
+     "summary": "The promotion gate (plan \u00a711), reachable from the product surface",
+     "tokens": 267
+    },
+    "spark_distill_skill": {
+     "original": "distill_skill",
+     "schema_sha256": "b223ed4766387fc5",
+     "description_sha256": "03a4b8a5fa6b77c9",
+     "summary": "Draft candidate from validated trajectories (plan \u00a76.3 tool 16,",
+     "tokens": 316
+    },
+    "spark_evolution_run": {
+     "original": "evolution_run",
+     "schema_sha256": "79be4d25f27331b0",
+     "description_sha256": "8ef3f84ee95c8fe3",
+     "summary": "Bounded RD-shaped evolution run over research artifacts (hypothesis",
+     "tokens": 416
+    },
+    "spark_evolution_status": {
+     "original": "evolution_status",
+     "schema_sha256": "f395e386f7c06ce6",
+     "description_sha256": "b10990ca3569579f",
+     "summary": "Read-only evolution run report: the run record, per-round feedback",
+     "tokens": 108
+    },
+    "spark_explore_methods": {
+     "original": "explore_methods",
+     "schema_sha256": "30b0c8ea1a1e6f85",
+     "description_sha256": "f40d18e84718c75a",
+     "summary": "Score, sample and diversify method candidates (\u00a76.1 tool 2, \u00a78.1/\u00a78.2).",
+     "tokens": 214
+    },
+    "spark_find_analogies": {
+     "original": "find_analogies",
+     "schema_sha256": "cfef361d1e9e660f",
+     "description_sha256": "46f44cd9cd502cf7",
+     "summary": "SME-lite structure-mapping analogy search (\u00a76.1 tool 4): bases from",
+     "tokens": 310
+    },
+    "spark_generate_exercise": {
+     "original": "generate_exercise",
+     "schema_sha256": "e489a3028b72454a",
+     "description_sha256": "2ea647288f4e0c16",
+     "summary": "Minimal curriculum (plan \u00a718.1 Phase 7): synthesize one exercise",
+     "tokens": 195
+    },
+    "spark_hypothesis_propose": {
+     "original": "hypothesis_propose",
+     "schema_sha256": "d6fcb207f118aa23",
+     "description_sha256": "18ecb52aeb5091c7",
+     "summary": "Propose a hypothesis. C6 refusal rule: mechanism, expected_direction,",
+     "tokens": 480
+    },
+    "spark_log_outcome": {
+     "original": "log_outcome",
+     "schema_sha256": "33e68171e9f9c60e",
+     "description_sha256": "47c322c6e1fd07c2",
+     "summary": "Close the loop on an episode: flip status per outcome; costs are",
+     "tokens": 318
+    },
+    "spark_memory_promote": {
+     "original": "memory_promote",
+     "schema_sha256": "651f15a0c8dc61f3",
+     "description_sha256": "cd565c90e193f128",
+     "summary": "Promote a belief: contradiction check first (lexical token overlap",
+     "tokens": 245
+    },
+    "spark_memory_recall": {
+     "original": "memory_recall",
+     "schema_sha256": "51c5d732546b4318",
+     "description_sha256": "2b1298c1b4114063",
+     "summary": "PIT-filtered belief recall ordered by effective confidence",
+     "tokens": 135
+    },
+    "spark_propose_skill_challenger": {
+     "original": "propose_skill_challenger",
+     "schema_sha256": "111e158ad5a5627b",
+     "description_sha256": "c739dd01bc1db85a",
+     "summary": "Challenger via mutation operators / mini-GEPA (plan \u00a76.3 tool 17).",
+     "tokens": 226
+    },
+    "spark_register_hypothesis": {
+     "original": "register_hypothesis",
+     "schema_sha256": "e12ae824aad30ca4",
+     "description_sha256": "14ebccd6e8ea4a63",
+     "summary": "Create the trial episode (status 'registered'), compute protocol_hash",
+     "tokens": 166
+    },
+    "spark_report_write": {
+     "original": "report_write",
+     "schema_sha256": "484c8e5d21094e3d",
+     "description_sha256": "8cd76739c7847abf",
+     "summary": "Ledger report (M13): exactly one of hypothesis_id / episode_id",
+     "tokens": 202
+    },
+    "spark_research_history": {
+     "original": "research_history",
+     "schema_sha256": "5b7ec515b4c0e652",
+     "description_sha256": "0d8f15e544ade335",
+     "summary": "PIT-filtered history search: beliefs (FTS5 on claim), tombstones",
+     "tokens": 183
+    },
+    "spark_retire_skill": {
+     "original": "retire_skill",
+     "schema_sha256": "21b5ab1522e7683a",
+     "description_sha256": "525a8454ca8a2340",
+     "summary": "Retire a skill version (plan \u00a711 lifecycle). A retired champion",
+     "tokens": 121
+    },
+    "spark_risk_decompose": {
+     "original": "risk_decompose",
+     "schema_sha256": "62f018ca383f7af2",
+     "description_sha256": "76572b8ce7b87ac8",
+     "summary": "Book risk decomposition (\u00a715.2): validate BookSpec (exactly one of",
+     "tokens": 164
+    },
+    "spark_run_replay": {
+     "original": "run_replay",
+     "schema_sha256": "9a200769deb05111",
+     "description_sha256": "c6aaf06c58432c0f",
+     "summary": "Replay-suite verdicts (plan \u00a76.3 tool 18, \u00a711): scores skill",
+     "tokens": 288
+    },
+    "spark_run_summary_ingest": {
+     "original": "run_summary_ingest",
+     "schema_sha256": "148bb3a77d313340",
+     "description_sha256": "9f2d7716a99f0ef1",
+     "summary": "Ingest a QuantFlow Tier-2 run summary (plan \u00a715.1 C9/C10): counts,",
+     "tokens": 254
+    },
+    "spark_significance_gate": {
+     "original": "significance_gate",
+     "schema_sha256": "97f1b90a53ab3d07",
+     "description_sha256": "9bae6d88c487ec08",
+     "summary": "Type-A gate (\u00a79.1): DSR = PSR(SR_hat; E[max SR|H0, M_family, skew,",
+     "tokens": 193
+    },
+    "spark_sota_status": {
+     "original": "sota_status",
+     "schema_sha256": "99334726611ccf58",
+     "description_sha256": "86926cf7997934b3",
+     "summary": "Pointer to the best gated trial in the ledger (P1-5), or",
+     "tokens": 107
+    },
+    "spark_spark_doctor": {
+     "original": "spark_doctor",
+     "schema_sha256": "99334726611ccf58",
+     "description_sha256": "be093037ce2bac48",
+     "summary": "Config/capability report: degraded mode, FTS5, sqlite-vec, peers.",
+     "tokens": 62
+    },
+    "spark_spark_health": {
+     "original": "spark_health",
+     "schema_sha256": "99334726611ccf58",
+     "description_sha256": "71ed3ea3d7903c91",
+     "summary": "Liveness + storage readiness.",
+     "tokens": 48
+    },
+    "spark_suggest_next": {
+     "original": "suggest_next",
+     "schema_sha256": "b6b8c8ebfc6e698a",
+     "description_sha256": "d80c35120081576f",
+     "summary": "Underexplored-region suggestions (\u00a76.1 tool 6): Thompson-sampled",
+     "tokens": 270
+    },
+    "spark_trace_hypothesis": {
+     "original": "trace_hypothesis",
+     "schema_sha256": "499d03dee43b7267",
+     "description_sha256": "8666bd94c18a0e9e",
+     "summary": "Ordered trace for one hypothesis (P1-5): the hypothesis root plus",
+     "tokens": 142
+    }
+   }
+  }
+ }
+}

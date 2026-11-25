@@ -207,7 +207,7 @@ describe("ScheduledTasksPage", () => {
     renderPage();
     expect(
       await screen.findByText(
-        "Tasks DeerFlow runs for you on a schedule. You can also just ask in any chat.",
+        "Tasks QuantFlow runs for you on a schedule. You can also just ask in any chat.",
       ),
     ).toBeTruthy();
   });

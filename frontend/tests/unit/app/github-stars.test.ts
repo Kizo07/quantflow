@@ -32,10 +32,11 @@ describe("runtime GitHub stars", () => {
     );
     const response = await GET();
     expect(fetch).toHaveBeenCalledWith(
-      "https://api.github.com/repos/bytedance/deer-flow",
+      "https://api.github.com/repos/Kizo07/quantflow",
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer runtime-test-token",
+          "Content-Type": "application/json",
         }),
         next: { revalidate: 3600 },
       }),

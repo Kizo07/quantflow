@@ -18,9 +18,7 @@ afterEach(() => {
 
 function renderSlim(node: ReactNode, locale: Locale = "en-US") {
   document.cookie = `locale=${locale}; path=/`;
-  return render(
-    <I18nProvider initialLocale={locale}>{node}</I18nProvider>,
-  );
+  return render(<I18nProvider initialLocale={locale}>{node}</I18nProvider>);
 }
 
 // jsdom does not turn a submit-button click into a form submit, so these
@@ -110,9 +108,7 @@ describe("SlimComposer", () => {
     const { rerender } = renderSlim(
       <SlimComposer onSubmit={rs.fn()} placeholder="Ask the bot" />,
     );
-    expect(
-      document.querySelector('[data-slot="suggestions-list"]'),
-    ).toBeNull();
+    expect(document.querySelector('[data-slot="suggestions-list"]')).toBeNull();
 
     rerender(
       <I18nProvider initialLocale="en-US">

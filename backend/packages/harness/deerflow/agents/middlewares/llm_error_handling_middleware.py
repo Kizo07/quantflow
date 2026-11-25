@@ -95,6 +95,7 @@ _RETRY_BUDGET_OVERRIDES: dict[str, int] = {
 # load rather than hammering the provider. Keys are ``_classify_error`` reasons.
 _REASON_RETRY_BUDGETS: dict[str, int] = {
     "burst_rate": 2,
+    "usage_limit": 1,
 }
 
 # Lower-cased message of the ``ValueError`` langchain_core raises when a
@@ -107,6 +108,16 @@ _EMPTY_STREAM_MARKER = "no generations found in stream."
 # ``generic`` under upstream's structured-evidence rule, and any explicit
 # status or code found earlier in ``_classify_error`` always wins.
 _STATUSLESS_BUSY_MARKERS = ("负载较高", "服务繁忙", "稍后重试")
+
+# Usage-limit / quota-exhausted providers (e.g. OpenCode Go's
+# ``GoUsageLimitError`` on HTTP 429). Retrying the same model is pointless
+# until the window resets (hours), and honoring a multi-hour ``Retry-After``
+# parks the run, so these are terminal for the primary model: they skip
+# same-model retries, swap to the fallback model when one is configured,
+# and otherwise surface a usage-limit error. Detection keys off the
+# structured error type or explicit exhausted phrasing, never bare prose.
+_USAGE_LIMIT_TYPE_MARKERS = frozenset({"gousagelimiterror", "go_usage_limit_error", "usagelimiterror", "usage_limit_error", "usage-limit-error"})
+_USAGE_LIMIT_PHRASES = ("usage limit", "usage-limit", "quota exhausted", "quota has been exhausted")
 
 # Process-global LLM call concurrency cap. ONE limiter is shared across every
 # ``LLMErrorHandlingMiddleware`` instance and every call path: the lead agent
@@ -542,7 +553,7 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
     # ``auth`` and ``generic`` are intentionally excluded: they indicate
     # configuration or request bugs that silently rerouting to another
     # provider would mask instead of surface.
-    _FALLBACK_REASONS = frozenset({"quota", "busy", "burst_rate", "transient"})
+    _FALLBACK_REASONS = frozenset({"quota", "busy", "burst_rate", "transient", "usage_limit"})
 
     def _build_fallback_model(self) -> Any | None:
         """Build the configured fallback model, or ``None`` to degrade.
@@ -639,6 +650,13 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
                 return True, "burst_rate"
             if code in {"rate_limit_exceeded", "rate_limit_error"}:
                 return True, "transient"
+            # Usage-limit/quota-exhausted (GoUsageLimitError & friends):
+            # terminal for this model. Same-model retries cannot succeed
+            # until the window resets, so never enter the retry loop (and
+            # never honor a multi-hour Retry-After as a sleep); the caller
+            # swaps to the fallback model or surfaces the usage-limit error.
+            if _is_usage_limit_error(exc):
+                return False, "usage_limit"
         if status is None:
             status = _extract_in_band_status(exc)
         if status is not None:
@@ -747,6 +765,11 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
         """
         retry_after = _extract_retry_after_ms(exc)
         if retry_after is not None:
+            # Usage-limit hints can be hours long (the 2026-11-24 Go 429
+            # carried ~7,257,000ms); parking on one stalls the run, so a
+            # usage-limit delay is always clamped to the retry cap.
+            if reason == "usage_limit" or _is_usage_limit_error(exc):
+                return min(retry_after, self.retry_cap_delay_ms)
             return retry_after
         base = self.burst_retry_base_delay_ms if reason == "burst_rate" else self.retry_base_delay_ms
         cap = self.retry_cap_delay_ms
@@ -774,6 +797,7 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
             "busy": "provider is busy",
             "burst_rate": "provider is throttling request burst rate",
             "empty_response": "provider returned an empty response",
+            "usage_limit": "provider usage limit reached",
         }.get(reason, "provider request failed temporarily")
         # ``max_attempts`` is the *effective* budget for this call (from
         # ``_max_attempts_for``), not the configured ceiling: a burst-rate call
@@ -814,6 +838,12 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
 
     def _build_user_message(self, exc: BaseException, reason: str) -> str:
         detail = _extract_error_detail(exc)
+        if reason == "usage_limit":
+            return (
+                "The configured LLM provider rejected the request because its usage limit has been reached "
+                "(usage limit / quota exhausted). Please wait for the usage limit to reset, fix the provider "
+                "account, or use a different model and try again."
+            )
         if reason == "quota":
             return "The configured LLM provider rejected the request because the account is out of quota, billing is unavailable, or usage is restricted. Please fix the provider account and try again."
         if reason == "auth":
@@ -1097,6 +1127,60 @@ def _extract_error_code(exc: BaseException) -> Any:
                 if value not in (None, ""):
                     return value
     return None
+
+
+def _extract_error_type(exc: BaseException) -> str | None:
+    value = getattr(exc, "type", None)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        value = body.get("type")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        error = body.get("error")
+        if isinstance(error, dict):
+            value = error.get("type")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _usage_limit_text(exc: BaseException) -> str:
+    parts: list[str] = [str(exc)]
+    message = getattr(exc, "message", None)
+    if isinstance(message, str):
+        parts.append(message)
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        for key in ("message", "type", "code"):
+            value = body.get(key)
+            if isinstance(value, str):
+                parts.append(value)
+        error = body.get("error")
+        if isinstance(error, dict):
+            for key in ("message", "type", "code"):
+                value = error.get(key)
+                if isinstance(value, str):
+                    parts.append(value)
+    return " ".join(parts).casefold()
+
+
+def _is_usage_limit_error(exc: BaseException) -> bool:
+    """Whether ``exc`` is a usage-limit/quota-exhausted error.
+
+    True for the structured ``GoUsageLimitError`` type (via ``type`` or the
+    code/type fallback) or explicit ``usage limit`` / ``quota exhausted``
+    phrasing in the structured detail. Ordinary rate-limit/busy prose
+    without that phrasing is not a usage limit.
+    """
+    for raw in (_extract_error_type(exc), _extract_error_code(exc)):
+        if isinstance(raw, str):
+            normalized = raw.strip().casefold()
+            if normalized in _USAGE_LIMIT_TYPE_MARKERS or "gousagelimit" in normalized or "usagelimit" in normalized:
+                return True
+    text = _usage_limit_text(exc)
+    return any(phrase in text for phrase in _USAGE_LIMIT_PHRASES)
 
 
 def _extract_status_code(exc: BaseException) -> int | None:

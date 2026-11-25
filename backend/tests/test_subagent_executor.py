@@ -33,6 +33,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from packaging.version import Version
 
+import deerflow.agents.lead_agent.agent  # noqa: F401 - warm sys.modules for the executor's lazy import
 import deerflow.models.factory as real_model_factory
 import deerflow.models.openai_codex_provider  # noqa: F401 - warm sys.modules for the factory's lazy import
 from deerflow.agents.middlewares.summarization_middleware import DeerFlowSummarizationMiddleware

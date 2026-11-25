@@ -640,7 +640,9 @@ export function CliSendComposer({
               ]}
             />
             <PromptInputSubmit
-              aria-label={stopping ? st.stopping : streaming ? st.stop : ct.send}
+              aria-label={
+                stopping ? st.stopping : streaming ? st.stop : ct.send
+              }
               className="rounded-full"
               variant="outline"
               disabled={streaming ? stopping : !canSend}

@@ -3217,6 +3217,95 @@ def test_llm_call_config_fallback_model_defaults_to_none() -> None:
     assert middleware.fallback_model is None
 
 
+_GO_USAGE_LIMIT_MESSAGE = "OpenCode Go usage limit reached (5-hour, resets in 2h 1m)"
+
+
+def _go_usage_limit_error() -> FakeError:
+    """The 2026-11-24 OpenCode Go 429 that parked a run for ~2h."""
+    return FakeError(
+        _GO_USAGE_LIMIT_MESSAGE,
+        status_code=429,
+        headers={"Retry-After": "7257"},
+        body={"type": "GoUsageLimitError", "message": _GO_USAGE_LIMIT_MESSAGE},
+    )
+
+
+def test_go_usage_limit_classifies_as_terminal_usage_limit() -> None:
+    middleware = _build_middleware(retry_max_attempts=3)
+    assert middleware._classify_error(_go_usage_limit_error()) == (False, "usage_limit")
+
+
+def test_go_usage_limit_retry_delay_never_exceeds_cap() -> None:
+    middleware = _build_middleware(retry_base_delay_ms=100, retry_cap_delay_ms=8000)
+    exc = _go_usage_limit_error()
+    assert middleware._build_retry_delay_ms(None, exc, reason="usage_limit") <= 8000
+    assert middleware._build_retry_delay_ms(None, exc, reason="transient") <= 8000
+
+
+def test_go_usage_limit_goes_straight_to_fallback_without_long_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A GoUsageLimitError must skip same-model retries: no sleep above the
+    cap is ever requested and the fallback model runs immediately."""
+    middleware = _build_middleware_with_fallback(retry_max_attempts=3, retry_cap_delay_ms=8000)
+    seen_models: list[Any] = []
+    sleeps: list[float] = []
+    events: list[dict] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    def fake_writer():
+        return events.append
+
+    async def fake_emit_custom_event(payload, *, writer):
+        writer(payload)
+
+    async def handler(request) -> AIMessage:
+        seen_models.append(request.model)
+        if len(seen_models) == 1:
+            raise _go_usage_limit_error()
+        return AIMessage(content="from-fallback")
+
+    monkeypatch.setattr("asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("langgraph.config.get_stream_writer", fake_writer)
+    monkeypatch.setattr(
+        "deerflow.agents.middlewares.llm_error_handling_middleware.aemit_custom_event",
+        fake_emit_custom_event,
+    )
+
+    result = asyncio.run(middleware.awrap_model_call(_make_request(), handler))
+
+    assert result.content == "from-fallback"
+    assert len(seen_models) == 2
+    assert all(s * 1000 <= middleware.retry_cap_delay_ms for s in sleeps)
+    assert sleeps == []
+    fallback_events = [e for e in events if e.get("type") == "llm_fallback"]
+    assert len(fallback_events) == 1
+    assert fallback_events[0]["reason"] == "usage_limit"
+
+
+def test_go_usage_limit_without_fallback_is_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    middleware = _build_middleware(retry_max_attempts=3, retry_cap_delay_ms=8000)
+    attempts = 0
+    sleeps: list[float] = []
+
+    def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    def handler(_request) -> AIMessage:
+        nonlocal attempts
+        attempts += 1
+        raise _go_usage_limit_error()
+
+    monkeypatch.setattr("time.sleep", fake_sleep)
+
+    result = middleware.wrap_model_call(_make_request(), handler)
+
+    assert attempts == 1
+    assert sleeps == []
+    assert result.additional_kwargs["error_reason"] == "usage_limit"
+    assert "usage limit" in str(result.content).casefold()
+
+
 class _FakeMonotonic:
     """A manually advanced monotonic clock for deterministic recovery timing."""
 

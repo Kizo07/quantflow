@@ -755,7 +755,9 @@ def build_middlewares(
         middlewares.append(LoopDetectionMiddleware.from_config(loop_detection_config))
 
     # Add SubagentLimitMiddleware to truncate excess parallel task calls
-    subagent_enabled = cfg.get("subagent_enabled", False)
+    # Delegation is on by default (QuantFlow desk policy); a run opts out by
+    # setting subagent_enabled explicitly to False in its context.
+    subagent_enabled = cfg.get("subagent_enabled", True)
     effective_max_subagents_per_run: int | None = None
     if subagent_enabled:
         max_concurrent_subagents = effective_subagent_concurrency(
@@ -1072,7 +1074,7 @@ def _assemble_lead_agent(
 
     requested_model_name: str | None = cfg.get("model_name") or cfg.get("model")
     is_plan_mode = cfg.get("is_plan_mode", False)
-    requested_subagent_enabled = cfg.get("subagent_enabled", False)
+    requested_subagent_enabled = cfg.get("subagent_enabled", True)
     subagent_execution_capacity = configured_subagent_max_running()
     max_concurrent_subagents = effective_subagent_concurrency(
         cfg.get("max_concurrent_subagents"),

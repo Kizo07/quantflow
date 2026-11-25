@@ -50,18 +50,18 @@ retired:
   spark_health: spark_spark_health
 ignore_tokens: []
 builtins:
-- {name: web_search, scope: all, agents: [lead, news-analyst, bull-researcher, bear-researcher], tokens: 184}
-- {name: web_fetch, scope: all, agents: [lead, news-analyst, document-analyst, bull-researcher, bear-researcher], tokens: 160}
-- {name: image_search, scope: all, agents: [], tokens: 630}
+- {name: web_search, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 184}
+- {name: web_fetch, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 160}
+- {name: image_search, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 630}
 - {name: ls, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 107}
 - {name: read_file, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 219}
 - {name: glob, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 202}
 - {name: grep, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 271}
 - {name: write_file, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 622}
 - {name: str_replace, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 254}
-- {name: list_uploaded_files, scope: all, agents: [lead, document-analyst], tokens: 661}
-- {name: inspect_run_status, scope: all, agents: [], tokens: 90}
-- {name: review_skill_package, scope: all, agents: [], tokens: 300}
+- {name: list_uploaded_files, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 661}
+- {name: inspect_run_status, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 90}
+- {name: review_skill_package, scope: all, agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager], tokens: 300}
 - {name: present_files, scope: lead, agents: [lead], tokens: 237}
 - {name: ask_clarification, scope: lead, agents: [lead], tokens: 1099}
 - {name: task, scope: lead, agents: [lead], tokens: 1595}
@@ -91,7 +91,7 @@ tools:
     tier: core
     purpose: 'Self-description: ops (cost, PIT policy, params), datasets/relations with coverage, error kinds, stamp vocabulary.'
     use_when: Before writing alpha_engine_sql, or when unsure which op fits a question.
-    agents: [lead, quant-analyst, technical-analyst, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_sql
     server: alpha_engine
     tier: core
@@ -104,44 +104,44 @@ tools:
     tier: research
     purpose: Search the S&P500 universe (ticker/name/sector).
     use_when: Ticker or sector lookup in the current index; never for past dates.
-    agents: [lead, quant-analyst, technical-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_get_price_history
     server: alpha_engine
     tier: core
     purpose: Daily OHLCV + adj_close for one symbol.
     use_when: 'Daily prices for one name: returns, drawdown, volatility. Raise limit for long windows.'
-    agents: [lead, quant-analyst, technical-analyst, news-analyst, bull-researcher, bear-researcher, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 80, keywords: [price history, drawdown, volatility, returns since, performance of]}
   - name: alpha_engine_get_latest_quotes
     server: alpha_engine
     tier: core
     purpose: Latest close/adj close/volume for a comma-separated list of symbols.
     use_when: Current (end-of-day) price for a list of tickers; never web_search for prices.
-    agents: [lead, quant-analyst, technical-analyst, news-analyst, bull-researcher, bear-researcher, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_get_lse_history
     server: alpha_engine
     tier: research
     purpose: Daily vendor (LSE) OHLCV candles for one symbol, full depth to 2003.
     use_when: Vendor price depth back to 2003 when get_price_history is too short.
-    agents: [lead, quant-analyst, technical-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_get_lse_yields
     server: alpha_engine
     tier: research
     purpose: Daily government-bond yield series (percent) by tenor code, e.g. US10Y,US2Y.
     use_when: Government bond yields by tenor (US2Y/5Y/10Y/30Y, DE/UK/JP 10Y).
-    agents: [lead, quant-analyst, news-analyst, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_get_lse_fundamentals
     server: alpha_engine
     tier: research
     purpose: Vendor financial-statement rows (long metric/val) for one symbol; income|balance|cashflow.
     use_when: Descriptive statement rows; never in backtests (no filing date, not PIT).
-    agents: [lead, quant-analyst, document-analyst, bull-researcher, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_get_factor_history
     server: alpha_engine
     tier: core
     purpose: Unified factor returns (ff_*, aqr_*, jkp_*, gq_*) by id + range.
     use_when: Benchmark factor return series (FF, AQR, JKP, global-q) for comparison or regression.
-    agents: [lead, quant-analyst, technical-analyst, bull-researcher, bear-researcher, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_universe_members_as_of
     server: alpha_engine
     tier: core
@@ -149,14 +149,14 @@ tools:
       snapshot for past dates. Result carries universe_basis/pit_covered plus pit_tail_provisional/pit_observed_end/pit_extended_to; a pit_tail_provisional true roster is the censored extension past pit_observed_end
       and must be disclosed as provisional. A snapshot-fallback result (universe_basis snapshot-fallback, pit_covered false, warning present) must be disclosed and never quoted as PIT.
     use_when: Index membership on a past date; any historical stock list.
-    agents: [lead, quant-analyst, bull-researcher, bear-researcher, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_cross_section_returns
     server: alpha_engine
     tier: core
     purpose: Cross-section returns for the WHOLE universe (any horizon, optional date/universe filter) with Gini concentration stat. Use for market-breadth/concentration questions instead of looping get_price_history.
       Result carries universe_basis prices-availability / pit_covered false — every name with local prices that day, NOT point-in-time index membership; never quote historical breadth as a PIT roster.
     use_when: 'Market breadth, dispersion, how many stocks rose, sector moves: one call, not a loop.'
-    agents: [lead, quant-analyst, technical-analyst, bull-researcher, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 85, keywords: [breadth, dispersion, how many stocks, sector returns, market-wide]}
   - name: alpha_engine_run_factor_analysis
     server: alpha_engine
@@ -164,7 +164,7 @@ tools:
     purpose: Factor tearsheet — IC stats + quantile baskets (builtin or DSL). PIT by default (universe_basis=pit) via alpha_engine, the single source of truth — never hand-assemble the ticker list; the engine
       resolves membership per rebalance date. Result carries universe_basis/pit_coverage/member_counts — check the stamps. snapshot only on explicit request; disclose it (survivorship-biased).
     use_when: 'Does factor or signal X work: IC, quantile spreads, long-short on PIT panels.'
-    agents: [lead, quant-analyst, bull-researcher, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 90, keywords: [factor, signal, anomaly, information coefficient, quintile, still work]}
   - name: alpha_engine_run_momentum_backtest
     server: alpha_engine
@@ -172,7 +172,7 @@ tools:
     purpose: Cross-sectional momentum backtest (lookback x top_n). PIT by default (universe_basis=pit) via alpha_engine, the single source of truth — never hand-assemble the ticker list; the engine resolves
       membership per rebalance date. Result carries universe_basis/pit_coverage/member_counts — check the stamps. snapshot only on explicit request; disclose it (survivorship-biased).
     use_when: Momentum or top-N strategy backtests with fees; prefer over pandas backtests.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 90, keywords: [momentum, backtest, trend following]}
   - name: alpha_engine_run_param_sweep
     server: alpha_engine
@@ -180,13 +180,13 @@ tools:
     purpose: Momentum (lookback x top_n) grid sweep; CUDA when available. PIT by default (universe_basis=pit) via alpha_engine, the single source of truth — never hand-assemble the ticker list; the engine
       resolves membership per rebalance date. Result carries universe_basis/pit_coverage/member_counts — check the stamps. snapshot only on explicit request; disclose it (survivorship-biased).
     use_when: Robustness grid over lookback x top_n; every cell counts as a trial, never quote the best cell alone.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_ml_signal_scores
     server: alpha_engine
     tier: core
     purpose: Walk-forward ML signal scores for a feature expression. PIT-masked by default via alpha_engine; result carries universe_basis/pit_coverage/member_counts — check the stamps.
     use_when: Rank candidate stocks with a walk-forward ML composite of features.
-    agents: [lead, quant-analyst, bull-researcher, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 75, keywords: [stock ideas, rank stocks, screen for, best stocks]}
   - name: alpha_engine_run_backtest
     server: alpha_engine
@@ -195,34 +195,34 @@ tools:
       every name against PIT membership on that single date (strict, fail-loud, never silently shrinks the list) and stamps universe_basis/pit_coverage/member_counts plus n_requested/n_validated/universe_excluded
       and universe_as_of_outside_window — check them; without @date the basis is caller-list-unvalidated. Single-date validation is not time-varying survivorship-freedom; disclose it as such.
     use_when: DSR-ready momentum/reversal backtest; once a hypothesis is registered, call it through spark_backtest_run.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_causal_test
     server: alpha_engine
     tier: research
     purpose: spark-mcp §15.2 pairwise Granger-causality F-tests over targets on real daily returns. Targets are caller-supplied, never PIT-validated; result carries universe_basis caller-list-unvalidated
       — disclose the basis, do not reject for lacking sp500-pit.
     use_when: Granger causality between return series outside a spark episode.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_optimize_portfolio
     server: alpha_engine
     tier: core
     purpose: Portfolio optimization (max_sharpe | hrp | equal_weight | black_litterman). Symbols are caller-supplied, never PIT-validated; result carries universe_basis caller-list-unvalidated — disclose
       the basis.
     use_when: Portfolio weights (max Sharpe, min vol, HRP, Black-Litterman); prefer over cvxpy in code.
-    agents: [lead, quant-analyst, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 85, keywords: [portfolio, allocation, weights, max sharpe, risk parity]}
   - name: alpha_engine_attribute_portfolio
     server: alpha_engine
     tier: core
     purpose: Factor attribution of a fixed-weight portfolio. Weights are caller-supplied, never PIT-validated; result carries universe_basis caller-list-unvalidated — disclose the basis.
     use_when: Factor betas, t-stats and contributions for fixed weights.
-    agents: [lead, quant-analyst, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_portfolio_risk_decomposition
     server: alpha_engine
     tier: core
     purpose: Factor risk decomposition (vol, factor vs idio, concentrations). Panels are PIT-masked by default via alpha_engine; result carries universe_basis/pit_coverage/member_counts — check the stamps.
     use_when: 'Where portfolio risk comes from: style and sector exposures, common vs specific vol.'
-    agents: [lead, quant-analyst, bear-researcher, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 80, keywords: [factor exposure, risk exposure, concentration, tracking error]}
   - name: alpha_engine_brinson_attribution
     server: alpha_engine
@@ -230,44 +230,44 @@ tools:
     purpose: Multi-period Brinson-Fachler attribution vs a benchmark (allocation/selection/interaction). Default benchmark is the current snapshot equal-weighted over priced names — result carries benchmark_basis
       snapshot-equal-weight / survivorship_biased true and is survivorship-biased on historical rebalances; pass benchmark_rows for a caller-supplied benchmark. Check benchmark_basis/portfolio_basis stamps.
     use_when: Allocation vs selection attribution against a benchmark; disclose benchmark_basis.
-    agents: [lead, quant-analyst, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_risk_decompose
     server: alpha_engine
     tier: research
     purpose: spark-mcp §15.2 factor-exposure decomposition of a book (holdings/returns spec, ff5+momentum default). Book is caller-supplied, never PIT-validated; result carries universe_basis caller-list-unvalidated
       — disclose the basis.
     use_when: FF-style book regression; inside a spark episode use spark_risk_decompose.
-    agents: [lead, quant-analyst, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_chart_price
     server: alpha_engine
     tier: research
     purpose: Light single-PNG price chart (line+volume+RSI or OHLC candles) for quick exhibits.
     use_when: Price chart PNG (line+volume+RSI or candles) for an exhibit.
-    agents: [lead, technical-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_chart_bars
     server: alpha_engine
     tier: research
     purpose: Themed sorted-bar PNG for agent-computed numbers (betas, levels, targets); never hand-roll matplotlib.
     use_when: Sorted bar PNG for numbers already computed (betas, attribution, targets).
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_chart_fan
     server: alpha_engine
     tier: research
     purpose: Themed bear/base/bull projection-fan PNG from labels + three path arrays.
     use_when: Bear/base/bull projection fan PNG.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_chart_fundamentals
     server: alpha_engine
     tier: research
     purpose: Themed statement-bar PNG for one symbol from LSE fundamentals (latest revenue/margins).
     use_when: Revenue and margin bars for one name (not PIT).
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_render_report
     server: alpha_engine
     tier: research
     purpose: Interactive HTML research report/tearsheet from a report dict. Pass theme quantflow-dark/light for flagship-matched styling and png_dir to also export every exhibit to PNG for print reports.
     use_when: Interactive HTML tearsheet from engine outputs; PDF/DOCX deliverables go through reportforge.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: alpha_engine_refresh_data
     server: alpha_engine
     tier: hidden
@@ -281,87 +281,87 @@ tools:
     tier: research
     purpose: Dependencies, VRAM, default models, allowed file roots and per-call caps.
     use_when: Once before file or bulk NLP work.
-    agents: [lead, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_fin_sentiment
     server: kizonlp
     tier: core
     purpose: Calibrated financial sentiment (positive/negative/neutral) per text.
     use_when: Score headlines, news paragraphs, filing or call excerpts instead of judging tone yourself.
-    agents: [lead, news-analyst, document-analyst, bull-researcher, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 85, keywords: [sentiment, news, headlines, tone, market reading]}
   - name: kizonlp_entity_sentiment
     server: kizonlp
     tier: core
     purpose: Per-entity/ticker aspect sentiment with SEC ticker linking.
     use_when: A text that names several companies; sentiment per ticker.
-    agents: [lead, news-analyst, document-analyst, bull-researcher, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_zero_shot_classify
     server: kizonlp
     tier: core
     purpose: Label texts against caller-supplied labels (catalyst type, risk category, segment).
     use_when: Tag catalysts, risks or relevance instead of keyword rules.
-    agents: [lead, news-analyst, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_forward_looking
     server: kizonlp
     tier: research
     purpose: Forward-looking-statement classifier for guidance language.
     use_when: Flag guidance sentences in filings or calls (segment first).
-    agents: [lead, news-analyst, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_rerank
     server: kizonlp
     tier: research
     purpose: Cross-encoder relevance ranking of passages against a question.
     use_when: Pick the passages of a long filing or many articles worth reading.
-    agents: [lead, news-analyst, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_entities
     server: kizonlp
     tier: research
     purpose: Zero-shot NER with offsets plus SEC ticker linking.
     use_when: Map an article to the companies and tickers it mentions.
-    agents: [lead, news-analyst, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_segment
     server: kizonlp
     tier: research
     purpose: Split text into sentences, paragraphs, speaker turns or LLM-sized chunks.
     use_when: Prep step before forward_looking, fin_sentiment or rerank on long text.
-    agents: [lead, news-analyst, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_parse_document
     server: kizonlp
     tier: core
     purpose: PDF, SEC htm/iXBRL, DOCX, PPTX, XLSX to Markdown with tables.
     use_when: Read a filing, deck or uploaded document; prefer over read_file for PDFs.
-    agents: [lead, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 75, keywords: [10-k, 10-q, filing, annual report, transcript, .pdf]}
   - name: kizonlp_check_faithfulness
     server: kizonlp
     tier: research
     purpose: Claim-by-claim support score of a summary against its source.
     use_when: Before quoting or publishing any summary of a document.
-    agents: [lead, news-analyst, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_summarize
     server: kizonlp
     tier: research
     purpose: Map-reduce summary with the local LLM, or headline summaries.
     use_when: Very long or batch documents only; summarize ordinary text yourself.
-    agents: [lead, news-analyst, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_extract
     server: kizonlp
     tier: research
     purpose: Schema JSON extraction (guidance, KPIs, risks) with verbatim quotes.
     use_when: Quote-verified KPI or guidance tables from a document.
-    agents: [lead, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_extract_keyphrases
     server: kizonlp
     tier: research
     purpose: KeyBERT keyphrases.
     use_when: Theme tagging; pass model=harrier-0.6b for bulk calls.
-    agents: [lead, document-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_fit_topics
     server: kizonlp
     tier: research
     purpose: BERTopic clustering over 5-5000 documents.
     use_when: Cluster many headlines into themes; pass embedding_model=harrier-0.6b.
-    agents: [lead, news-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: kizonlp_list_models
     server: kizonlp
     tier: operator
@@ -387,110 +387,110 @@ tools:
     tier: core
     purpose: PIT search over beliefs, tombstones and episodes in the research ledger.
     use_when: 'Before designing any new signal or screen: has it been tried or tombstoned?'
-    agents: [lead, quant-analyst, bull-researcher, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_memory_recall
     server: spark
     tier: research
     purpose: Beliefs ranked by confidence and decay.
     use_when: What does the desk already believe about X.
-    agents: [lead, quant-analyst, bull-researcher, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_check_novelty
     server: spark
     tier: core
     purpose: Novelty and surprise score of an idea against the archive.
     use_when: First step for any new strategy, signal or screen idea.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 85, keywords: [strategy idea, new signal, hypothesis, test this idea, would this work, alpha idea]}
   - name: spark_hypothesis_propose
     server: spark
     tier: core
     purpose: Register a falsifiable hypothesis (mechanism, direction, horizon, falsifier, scope, predicted IC).
     use_when: After check_novelty, before any backtest of a self-built signal.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_register_hypothesis
     server: spark
     tier: core
     purpose: Create the trial episode with a protocol hash.
     use_when: After hypothesis_propose and before the backtest.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_backtest_run
     server: spark
     tier: core
     purpose: 'Governed backtest: tombstone check, counted trial, then alpha_engine run_backtest.'
     use_when: Gated test of a registered momentum/reversal hypothesis; prefer over calling run_backtest directly.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_significance_gate
     server: spark
     tier: core
     purpose: Deflated Sharpe (DSR) against the family trial count.
     use_when: Before quoting any backtest Sharpe of a registered hypothesis as evidence.
-    agents: [lead, quant-analyst, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_log_outcome
     server: spark
     tier: core
     purpose: Close an episode with metrics and costs; tombstones failures.
     use_when: Required close-out for every registered hypothesis.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_causal_check
     server: spark
     tier: research
     purpose: Episode-scoped Granger probe (delegates to alpha_engine).
     use_when: Causal test inside a spark episode.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_risk_decompose
     server: spark
     tier: research
     purpose: Episode-scoped book factor exposures.
     use_when: Book exposures inside a spark episode.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_explore_methods
     server: spark
     tier: research
     purpose: Scored method candidates for a research problem.
     use_when: Stuck or brainstorming an approach.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_suggest_next
     server: spark
     tier: research
     purpose: Under-explored research regions (MAP-Elites).
     use_when: What should the desk test next.
-    agents: [lead, quant-analyst]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_find_analogies
     server: spark
     tier: research
     purpose: Structure-mapping analogies for idea generation.
     use_when: Idea generation from other domains.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_combine_methods
     server: spark
     tier: research
     purpose: Compose 2-3 method pipelines.
     use_when: Idea generation by combining methods.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_archive_status
     server: spark
     tier: research
     purpose: Coverage, elites, family trial counts and spend.
     use_when: Desk retrospective on research coverage.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_trace_hypothesis
     server: spark
     tier: research
     purpose: Ordered trace of one hypothesis.
     use_when: Audit trail for a report appendix or a bear review.
-    agents: [lead, quant-analyst, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_sota_status
     server: spark
     tier: research
     purpose: Best gated trial so far.
     use_when: Current best validated result.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_report_write
     server: spark
     tier: research
     purpose: Ledger report (md/html) for a hypothesis or episode.
     use_when: Appendix material from the ledger.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: spark_debate_evidence
     server: spark
     tier: operator
@@ -588,236 +588,236 @@ tools:
     tier: core
     purpose: Templates, formats, exec availability, tool list.
     use_when: First call in any report task.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 60, keywords: [pdf report, report, tearsheet, docx]}
   - name: reportforge_scaffold_from_brief
     server: reportforge
     tier: core
     purpose: New report project from one report_brief dict.
     use_when: Start a report; prefer over scaffold_report.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_compose_report
     server: reportforge
     tier: core
     purpose: Whole report from a report_spec (brief, facts, sections).
     use_when: Flagship report path; dry_run=true first.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_write_report_body
     server: reportforge
     tier: core
     purpose: Write the first full .qmd body.
     use_when: First draft of the body; use edit_report afterwards.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_read_report
     server: reportforge
     tier: core
     purpose: Read the report with a read_token.
     use_when: Before edit_report.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_edit_report
     server: reportforge
     tier: core
     purpose: Anchored atomic edits to the report body.
     use_when: All revisions after the first draft.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_append_section
     server: reportforge
     tier: core
     purpose: Additive section insert.
     use_when: Expand a thin section.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_run_code
     server: reportforge
     tier: core
     purpose: Host Python in the project dir.
     use_when: Maths on values a tool returned, figures, asset copies; never read alpha_engine data files.
-    agents: [lead, quant-analyst, technical-analyst, document-analyst, risk-manager]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_save_asset
     server: reportforge
     tier: core
     purpose: Write text or base64 assets under assets/, charts/, data/, tables/.
     use_when: Store matplotlib PNGs, CSVs, JSON or copied engine charts.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_save_table
     server: reportforge
     tier: core
     purpose: Formatted Markdown table with a tbl- anchor.
     use_when: Any table in a report; prefer over hand-typed tables.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_register_source
     server: reportforge
     tier: core
     purpose: Register a citation source.
     use_when: Every external source cited in the report.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_register_facts
     server: reportforge
     tier: core
     purpose: Register numeric facts bound into prose and cover.
     use_when: Every number on the cover and in prose.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_register_exhibit
     server: reportforge
     tier: core
     purpose: Register a figure exhibit (id fig-*).
     use_when: Every figure in the report.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_check_readiness
     server: reportforge
     tier: core
     purpose: Structure, evidence, numeric and editorial checks.
     use_when: Loop until ready_for_review before rendering.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_render_report
     server: reportforge
     tier: core
     purpose: Render qmd to HTML/PDF/DOCX.
     use_when: After check_readiness passes.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_render_preview
     server: reportforge
     tier: core
     purpose: Contact sheet and page PNGs.
     use_when: Look at rendered pages before delivery.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_publish_report
     server: reportforge
     tier: core
     purpose: Copy sealed deliverables into thread outputs; returns present_paths.
     use_when: Mandatory before present_files.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_project_status
     server: reportforge
     tier: core
     purpose: File tree and render logs.
     use_when: Diagnose a failed render or readiness loop.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_read_project_file
     server: reportforge
     tier: core
     purpose: Read back a project file.
     use_when: Inspect a generated file or log.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_create
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_read
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_create_cell
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_write_cell
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_move_cell
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_delete_cell
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_run_cell
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_run_all
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_to_qmd
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_from_qmd
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_notebook_from_ipynb
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_run_cell_persistent
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_interrupt_cell
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_restart_kernel
     server: reportforge
     tier: core
     purpose: Notebook/kernel authoring and execution (QuantFlow notebook feature).
     use_when: User asks for a notebook; kept visible pending the F15 answer.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_list_templates
     server: reportforge
     tier: research
     purpose: Templates and default formats.
     use_when: Choosing a template.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_scaffold_report
     server: reportforge
     tier: research
     purpose: Loose-argument scaffold (large schema).
     use_when: Only when scaffold_from_brief cannot express the layout; formats is a list.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_list_recipes
     server: reportforge
     tier: research
     purpose: Section recipes.
     use_when: Choosing section structure.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_describe_vocabulary
     server: reportforge
     tier: research
     purpose: rf-blocks component catalogue.
     use_when: Choosing report components.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_save_chart
     server: reportforge
     tier: research
     purpose: Plotly JSON to PNG + HTML in the house theme.
     use_when: Custom report figures; verify the render.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_output_qa
     server: reportforge
     tier: research
     purpose: PDF/HTML QA gate.
     use_when: Final QA of rendered outputs.
-    agents: [lead]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
   - name: reportforge_get_section
     server: reportforge
     tier: operator
@@ -993,11 +993,11 @@ tools:
     tier: core
     purpose: Exa web search with published-date bounds and category filters.
     use_when: Date-bounded news or point-in-time questions (what was known before X); papers and filings discovery.
-    agents: [lead, news-analyst, document-analyst, bull-researcher, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]
     routing: {priority: 65, keywords: [this week, last month, latest news, since earnings, published before]}
   - name: web_fetch_exa
     server: exa
     tier: core
     purpose: Full-length page text as Markdown (maxCharacters).
     use_when: Pages longer than about 4 KB (filings, long articles) where web_fetch truncates.
-    agents: [lead, news-analyst, document-analyst, bull-researcher, bear-researcher]
+    agents: [lead, quant-analyst, technical-analyst, news-analyst, document-analyst, bull-researcher, bear-researcher, risk-manager]

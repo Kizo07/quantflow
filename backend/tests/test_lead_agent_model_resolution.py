@@ -686,6 +686,26 @@ def test_make_lead_agent_disables_thinking_when_model_does_not_support_it(monkey
     assert result["model"] is not None
 
 
+def test_make_lead_agent_enables_subagents_by_default(monkeypatch):
+    """QuantFlow desk policy: delegation is on unless a run explicitly opts
+    out with subagent_enabled=False in its context (the NVDA outlook run of
+    2026-11-24 silently could not delegate because the flag defaulted off)."""
+    app_config = _make_app_config([_make_model("safe-model", supports_thinking=False)])
+
+    import deerflow.tools as tools_module
+
+    get_available_tools = MagicMock(return_value=[])
+    monkeypatch.setattr(lead_agent_module, "get_app_config", lambda: app_config)
+    monkeypatch.setattr(tools_module, "get_available_tools", get_available_tools)
+    monkeypatch.setattr(lead_agent_module, "build_middlewares", lambda config, model_name, agent_name=None, **kwargs: [])
+    monkeypatch.setattr(lead_agent_module, "create_chat_model", lambda **kwargs: object())
+    monkeypatch.setattr(lead_agent_module, "create_agent", lambda **kwargs: kwargs)
+
+    lead_agent_module.make_lead_agent({"configurable": {"model_name": "safe-model"}})
+
+    assert get_available_tools.call_args.kwargs["subagent_enabled"] is True
+
+
 def test_make_lead_agent_reads_runtime_options_from_context(monkeypatch):
     app_config = _make_app_config(
         [
